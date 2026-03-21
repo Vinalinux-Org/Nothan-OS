@@ -245,8 +245,15 @@ void edf_advance_deadline(struct task_struct *task)
 
     /*
      * Only advance deadline for periodic tasks that have a
-     * non-zero period.  Aperiodic tasks keep their original
-     * deadline until explicitly reset.
+     * non-zero period AND a non-zero deadline.
+     *
+     * A task with period > 0 but deadline == 0 is an invalid
+     * configuration — periodic tasks must have an initial
+     * deadline set (via scheduler_set_deadline) before being
+     * added to the scheduler.  We guard against this case
+     * defensively rather than advancing a zero deadline, which
+     * would silently produce a small non-zero deadline and
+     * give the task unexpectedly high priority.
      */
     if (task->period > 0 && task->deadline > 0) {
         task->deadline += task->period;

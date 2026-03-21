@@ -42,6 +42,13 @@
  *                              Optimal for single-processor
  *                              real-time scheduling.
  */
+
+/* Compile-time check: only ONE algorithm may be selected */
+#if defined(SCHED_ALGO_ROUND_ROBIN) && defined(SCHED_ALGO_EDF)
+#error "Only one scheduling algorithm can be selected. Check SCHED_ALGO in Makefile."
+#endif
+
+/* Default to round-robin if nothing is specified */
 #if !defined(SCHED_ALGO_ROUND_ROBIN) && !defined(SCHED_ALGO_EDF)
 #define SCHED_ALGO_ROUND_ROBIN   /* Default algorithm */
 #endif
