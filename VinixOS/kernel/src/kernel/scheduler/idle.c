@@ -69,6 +69,8 @@ struct task_struct *get_idle_task(void)
     idle_task_struct.name = "idle";
     idle_task_struct.state = TASK_STATE_READY;
     idle_task_struct.id = 0; /* Will be set by scheduler */
+    idle_task_struct.deadline = 0; /* Best-effort (no deadline) */
+    idle_task_struct.period = 0;   /* Not periodic */
 
     /* Initialize stack */
     task_stack_init(&idle_task_struct, idle_task, idle_stack, IDLE_STACK_SIZE);

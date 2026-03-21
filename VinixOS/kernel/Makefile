@@ -6,6 +6,16 @@ AS = $(CROSS_COMPILE)as
 LD = $(CROSS_COMPILE)ld
 OBJCOPY = $(CROSS_COMPILE)objcopy
 
+# ============================================================
+# Scheduler Algorithm Selection
+# ============================================================
+# Options: ROUND_ROBIN (default), EDF
+# Usage:
+#   make                          # builds with Round-Robin
+#   make SCHED_ALGO=EDF           # builds with EDF
+#   make SCHED_ALGO=ROUND_ROBIN   # builds with Round-Robin (explicit)
+SCHED_ALGO ?= ROUND_ROBIN
+
 # Directories
 SRC = src
 LINKER = linker
@@ -34,7 +44,7 @@ RAMFS_GENERATED_S = $(BUILD_DIR)/ramfs_payload.S
 ASM_OBJ = $(addprefix $(BUILD_DIR)/, vectors.o reset.o entry.o exception_entry.o context_switch.o mmu_enable.o)
 C_OBJ = $(addprefix $(BUILD_DIR)/, main.o exception_handlers.o irq_core.o uart.o watchdog.o intc.o timer.o \
                i2c.o lcdc.o tda19988.o fb.o boot_screen.o \
-               scheduler.o task.o idle.o svc_handler.o mmu.o payload.o vfs.o ramfs.o ramfs_generated.o string.o)
+               scheduler.o round_robin.o edf.o task.o idle.o svc_handler.o mmu.o payload.o vfs.o ramfs.o ramfs_generated.o string.o)
 OBJS = $(ASM_OBJ) $(C_OBJ)
 
 # Flags
@@ -44,6 +54,7 @@ CFLAGS = -Wall -nostdlib -nostartfiles -ffreestanding \
          -mno-unaligned-access \
          -fno-builtin \
          -fno-stack-protector \
+         -DSCHED_ALGO_$(SCHED_ALGO) \
          -Iinclude \
          -Ilibc/include \
          -I$(SRC)/arch/arm/include \
@@ -99,6 +110,12 @@ $(BUILD_DIR)/irq_core.o: $(SRC)/kernel/irq/irq_core.c | $(BUILD_DIR)
 
 
 $(BUILD_DIR)/scheduler.o: $(SRC)/kernel/scheduler/scheduler.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/round_robin.o: $(SRC)/kernel/scheduler/round_robin.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/edf.o: $(SRC)/kernel/scheduler/edf.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/task.o: $(SRC)/kernel/scheduler/task.c | $(BUILD_DIR)
