@@ -3,6 +3,17 @@
  * ------------------------------------------------------------
  * Task structure and task management for VinixOS
  * Target: BeagleBone Black (ARMv7-A)
+ *
+ * EDUCATIONAL NOTE:
+ *   The task_struct is the "Task Control Block" (TCB) — the
+ *   kernel's representation of a running (or runnable) task.
+ *   It stores everything the kernel needs to suspend and resume
+ *   a task: CPU registers, stack pointer, scheduling metadata.
+ *
+ *   Fields used only by specific algorithms (e.g., deadline
+ *   and period for EDF) are always present in the struct for
+ *   simplicity.  They are ignored when a different algorithm
+ *   is selected at compile time.
  * ============================================================ */
 
 #ifndef TASK_H
@@ -77,15 +88,46 @@ struct task_context {
 #define TASK_STATE_ZOMBIE   3   /* Task terminated/killed */
 
 /**
- * Task Control Block - complete task descriptor
+ * Task Control Block (TCB) — complete task descriptor
+ *
+ * LAYOUT WARNING:
+ *   The 'context' field MUST remain the first member of this
+ *   struct.  Assembly code (context_switch.S) accesses fields
+ *   at fixed byte offsets from the struct pointer:
+ *     context.sp      @ offset 52
+ *     context.sp_usr  @ offset 64
+ *   Adding fields AFTER 'id' is safe; inserting fields before
+ *   or inside 'context' will break the assembly contract.
  */
 struct task_struct {
-    struct task_context context;    /* Saved CPU state (64 bytes) */
+    struct task_context context;    /* Saved CPU state (72 bytes) */
     void *stack_base;               /* Pointer to stack bottom */
     uint32_t stack_size;            /* Stack size in bytes */
     uint32_t state;                 /* Task state (READY/RUNNING/BLOCKED) */
     const char *name;               /* Task name (for debugging) */
     uint32_t id;                    /* Task ID */
+
+    /* ----------------------------------------------------------
+     * EDF (Early Deadline First) scheduling parameters
+     * ----------------------------------------------------------
+     * These fields are used only when SCHED_ALGO_EDF is selected.
+     * When using round-robin, they are present but ignored.
+     *
+     *   deadline — Absolute deadline expressed in scheduler ticks.
+     *              The EDF algorithm always picks the READY task
+     *              with the smallest deadline value.
+     *              A value of 0 means "no deadline" (treated as
+     *              the largest possible deadline, i.e., lowest
+     *              priority in EDF terms).
+     *
+     *   period   — For periodic real-time tasks, the interval
+     *              (in ticks) between successive deadlines.
+     *              After the task yields, its deadline is advanced
+     *              by this amount.  0 means aperiodic (one-shot
+     *              or best-effort task).
+     * ---------------------------------------------------------- */
+    uint32_t deadline;              /* Absolute deadline (ticks) */
+    uint32_t period;                /* Period for periodic tasks  */
 };
 
 /* ============================================================

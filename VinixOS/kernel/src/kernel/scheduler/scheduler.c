@@ -1,10 +1,27 @@
 /* ============================================================
  * scheduler.c
  * ------------------------------------------------------------
- * Simple round-robin preemptive scheduler
+ * Core scheduler — task management and context switch dispatch
+ *
+ * EDUCATIONAL NOTE:
+ *   This file implements the scheduler *mechanism*: managing
+ *   the task array, handling the need_reschedule flag, checking
+ *   stack canaries, and calling context_switch().
+ *
+ *   The scheduling *policy* (which task to run next) is
+ *   delegated to a pluggable algorithm module via the
+ *   struct sched_algo interface (see scheduler_algo.h).
+ *
+ *   Algorithm selection is controlled at compile time by
+ *   defining SCHED_ALGO in the Makefile:
+ *     make SCHED_ALGO=ROUND_ROBIN   (default)
+ *     make SCHED_ALGO=EDF
+ *
+ * Architecture: ARM Cortex-A8 (BeagleBone Black)
  * ============================================================ */
 
 #include "scheduler.h"
+#include "scheduler_algo.h"
 #include "task.h"
 #include "uart.h"
 #include "cpu.h"
@@ -15,259 +32,306 @@
 #include "syscalls.h" /* For process_info_t */
 
 /* ============================================================
- * External Assembly Functions
- * ============================================================ */
+ * External Assembly Functions (context_switch.S)
+ * ============================================================
+ *
+ * These two functions are the lowest-level mechanism for
+ * switching CPU context between tasks.  They are written in
+ * assembly because they must manipulate banked ARM registers
+ * (SP_usr, LR_usr) that are not accessible from C.
+ *
+ * The scheduling algorithm NEVER calls these directly — only
+ * this file (scheduler.c) does.
+ */
 
-/* Defined in context_switch.S */
+/** Save current task registers, load next task registers */
 extern void context_switch(struct task_struct *current, struct task_struct *next);
+
+/** Load the very first task (no current task to save) */
 extern void start_first_task(struct task_struct *first);
+
+/* ============================================================
+ * Compile-Time Algorithm Selection
+ * ============================================================
+ *
+ * sched_algo_current() returns a pointer to the struct sched_algo
+ * selected by scheduler_config.h.  All policy calls go through
+ * this pointer.
+ */
+const struct sched_algo *sched_algo_current(void)
+{
+#if defined(SCHED_ALGO_EDF)
+    return sched_algo_edf();
+#else
+    return sched_algo_round_robin();
+#endif
+}
 
 /* ============================================================
  * Scheduler Data Structures
  * ============================================================ */
 
-/* Static task array */
+/** Task array — each slot holds a pointer to a task_struct */
 static struct task_struct *tasks[MAX_TASKS];
+
+/** Number of tasks currently registered */
 static uint32_t task_count = 0;
 
-/* Stack Canary Value (Must match task.c) */
+/** Magic value placed at the bottom of each task's stack.
+ *  If this value is overwritten, we have a stack overflow. */
 #define STACK_CANARY_VALUE  0xDEADBEEF
 
-/* Current running task */
+/** Pointer to the currently running task */
 static struct task_struct *current_task = NULL;
 
-/* Next task index for round-robin */
+/** Index of the current task in the tasks[] array */
 static uint32_t current_task_index = 0;
 
-/* Scheduler enabled flag */
+/** True after scheduler_start() has been called */
 static bool scheduler_started = false;
 
-/* ============================================================
- * Scheduler Implementation
- * ============================================================ */
+/** Active scheduling algorithm (set during scheduler_init) */
+static const struct sched_algo *algo = NULL;
 
-/**
- * Initialize scheduler
- * Must be called before any other scheduler functions
+/* ============================================================
+ * Global Reschedule Flag
+ * ============================================================
+ *
+ * Set by scheduler_tick() (in IRQ mode) when a time-slice
+ * expires.  Checked by tasks in their main loop or by
+ * scheduler_yield().  Cleared when a context switch completes.
+ *
+ * This two-phase approach (flag + deferred switch) avoids doing
+ * a context switch inside the IRQ handler, which would be
+ * unsafe because the IRQ stack is shared among all tasks.
  */
+volatile bool need_reschedule = false;
+
+/* ============================================================
+ * Forward declarations for EDF-specific helpers
+ * ============================================================ */
+#if defined(SCHED_ALGO_EDF)
+extern void edf_advance_deadline(struct task_struct *task);
+#endif
+
+/* ============================================================
+ * scheduler_init — Initialize the scheduler subsystem
+ * ============================================================ */
 void scheduler_init(void)
 {
     uart_printf("[SCHED] Initializing scheduler...\n");
-    
+
+    /* Select the scheduling algorithm */
+    algo = sched_algo_current();
+    uart_printf("[SCHED] Algorithm: %s\n", algo->name);
+
     /* Reset task array */
     for (int i = 0; i < MAX_TASKS; i++) {
         tasks[i] = NULL;
     }
-    
-    /* 
-     * Verify structure alignment for assembly access
-     * Offsets `context.sp` and `context.sp_usr` must match definition in `task_struct`.
+
+    /*
+     * Verify structure alignment for assembly access.
+     *
+     * context_switch.S accesses:
+     *   context.sp     at offset 52  (13 uint32_t fields × 4 bytes)
+     *   context.sp_usr at offset 64  (16 uint32_t fields × 4 bytes)
+     *
+     * If these offsets don't match, register save/restore will
+     * corrupt memory — a very hard-to-debug failure.
      */
     if (__builtin_offsetof(struct task_struct, context.sp) != 52 ||
         __builtin_offsetof(struct task_struct, context.sp_usr) != 64) {
         PANIC("Struct alignment mismatch with Assembly!");
     }
-    
+
     task_count = 0;
     current_task = NULL;
     current_task_index = 0;
     scheduler_started = false;
-    
+
+    /* Initialize algorithm-specific state */
+    algo->init();
+
     TRACE_SCHED("Scheduler initialized (MAX_TASKS: %d)", MAX_TASKS);
 }
 
-/**
- * Add a task to scheduler
- * 
- * @param task Pointer to initialized task structure
- * @return 0 on success, -1 if task table full
- */
+/* ============================================================
+ * scheduler_add_task — Register a task with the scheduler
+ * ============================================================ */
 int scheduler_add_task(struct task_struct *task)
 {
     if (task_count >= MAX_TASKS) {
-        uart_printf("[SCHED] ERROR: Task table full (%d/%d)\n", 
+        uart_printf("[SCHED] ERROR: Task table full (%d/%d)\n",
                     task_count, MAX_TASKS);
         return -1;
     }
-    
+
     /* Add task to array */
     tasks[task_count] = task;
     task->id = task_count;
     task->state = TASK_STATE_READY;
-    
-    uart_printf("[SCHED] Added task %d: '%s'\n", 
+
+    uart_printf("[SCHED] Added task %d: '%s'\n",
                 task->id, task->name ? task->name : "(unnamed)");
     uart_printf("  Stack: 0x%08x - 0x%08x (%u bytes)\n",
                 (uint32_t)task->stack_base,
                 (uint32_t)task->stack_base + task->stack_size,
                 task->stack_size);
-    
+
+    /* Notify the algorithm (for algorithm-specific bookkeeping) */
+    algo->on_task_added(task, task->id);
+
     task_count++;
-    
+
     return task->id;
 }
 
-/**
- * Start the scheduler
- * This function does NOT return
- * 
- * REQUIRES:
- * - At least one task added
- * - IRQ enabled in CPSR
- */
+/* ============================================================
+ * scheduler_start — Begin task execution (does NOT return)
+ * ============================================================ */
 void scheduler_start(void)
 {
     uart_printf("\n[SCHED] Starting scheduler...\n");
-    
+
     if (task_count == 0) {
         uart_printf("[SCHED] ERROR: No tasks to run!\n");
         while (1);  /* Halt */
     }
-    
+
     uart_printf("[SCHED] %d task(s) ready\n", task_count);
-    
+
     /* Mark first task as running */
     current_task = tasks[0];
     current_task_index = 0;
     current_task->state = TASK_STATE_RUNNING;
     scheduler_started = true;
-    
+
     uart_printf("[SCHED] Starting task 0: '%s'\n", current_task->name);
-    
+
     TRACE_SCHED("Jumping to first task (NO RETURN)...");
-    
-    /* Load first task context and jump to it
-     * This will:
-     * - Load task's stack pointer
-     * - Restore task's SPSR
-     * - Restore task's registers
-     * - Jump to task entry point via MOVS PC, LR
+
+    /*
+     * Load first task context and jump to it.
+     * This restores the task's stack pointer, registers, and
+     * jumps to its entry point via svc_exit_trampoline.
      */
     start_first_task(current_task);
-    
+
     /* Should never reach here */
     uart_printf("[SCHED] FATAL: Returned from start_first_task!\n");
     while (1);
 }
 
 /* ============================================================
- * Global Reschedule Flag
+ * scheduler_tick — Timer ISR callback
  * ============================================================
- * 
- * Set by IRQ handler (scheduler_tick) when time slice expires.
- * Checked by tasks in their main loop.
- * Cleared when context switch completes.
- */
-volatile bool need_reschedule = false;
-
-/* ============================================================
- * scheduler_tick - Called from Timer ISR
- * ============================================================
- * 
+ *
  * CRITICAL: This runs in IRQ mode!
  * We CANNOT safely call context_switch() here because:
  * - IRQ stack is shared
  * - Nested interrupts could corrupt stack
- * 
+ *
  * Solution: Just set a flag and let tasks yield voluntarily.
  */
 void scheduler_tick(void)
 {
     /* Ignore ticks before scheduler starts */
-    /* Ignore ticks before scheduler starts */
     if (!scheduler_started) {
         return;
     }
-    
-    /* 
-     * IRQ-safe operation: Just set flag
-     * Tasks will check this and call scheduler_yield()
+
+    /*
+     * IRQ-safe operation: Just set flag.
+     * Tasks will check this and call scheduler_yield().
      */
     need_reschedule = true;
+
+    /* Let the algorithm do per-tick processing (e.g., EDF tick counter) */
+    algo->on_tick();
 }
 
 /* ============================================================
- * scheduler_terminate_task - Kill a task
+ * scheduler_terminate_task — Kill a task
  * ============================================================
- * 
- * Called when a task crashes (Data/Prefetch Abort)
+ *
+ * Called when a task crashes (Data/Prefetch Abort) or exits.
  */
 void scheduler_terminate_task(uint32_t id)
 {
     if (id >= MAX_TASKS || tasks[id] == NULL) {
         return;
     }
-    
+
     struct task_struct *task = tasks[id];
-    
+
     uart_printf("[SCHED] TERMINATING Task %d: '%s'\n", task->id, task->name);
-    
+
     /* Mark as ZOMBIE */
     task->state = TASK_STATE_ZOMBIE;
-    
+
+    /* Notify the algorithm */
+    algo->on_task_terminated(task);
+
     /* If current task is killing itself, yield immediately */
     if (current_task == task) {
         uart_printf("[SCHED] Task %d IS SUICIDE - Yielding...\n", task->id);
-        
-        /* 
+
+        /*
          * CRITICAL: We are likely in ABT/UND Mode (Exception Context).
-         * We MUST switch to SVC Mode before calling scheduler_yield/context_switch.
-         * Otherwise, context_switch will use SP_abt/und which is wrong for the next task.
-         * 
-         * Logic:
-         * 1. Switch to SVC Mode (keeping IRQs disabled).
-         * 2. Call scheduler_yield().
-         * 
-         * Note: We don't care about saving the current ABT stack/regs because 
-         * this task is DEAD. We just need a safe environment to switch FROM.
+         * We MUST switch to SVC Mode before calling scheduler_yield.
+         * Otherwise, context_switch will use SP_abt/und which is wrong.
          */
-        
-        /* Switch to SVC Mode (0x13) | IRQ Disabled (0x80) | FIQ Disabled (0x40) */
         __asm__ volatile (
             "cps #0x13 \n\t"
         );
-        
+
         need_reschedule = true; /* Force yield */
         scheduler_yield();
     }
 }
 
 /* ============================================================
- * scheduler_yield - Voluntary Task Switch
+ * scheduler_yield — Voluntary task switch
  * ============================================================
- * 
- * Called by tasks when they detect need_reschedule flag.
+ *
+ * Called by tasks when they detect the need_reschedule flag.
  * Runs in SVC mode (task context), so safe to switch.
+ *
+ * Flow:
+ *   1. Check & clear need_reschedule flag
+ *   2. Stack canary check
+ *   3. Ask the algorithm to pick_next()
+ *   4. Handle fallback (deadlock prevention)
+ *   5. Update task states
+ *   6. Call context_switch()
  */
 void scheduler_yield(void)
 {
     struct task_struct *prev_task;
     struct task_struct *next_task;
     uint32_t next_index;
-    
-    // uart_printf("[SCHED] Yield called (current_task=%u)\n", 
-    //             current_task ? current_task->id : 999);
-    
+
     /* Check if reschedule is actually needed */
     if (!need_reschedule) {
         return;
     }
-    
+
     /* Clear flag atomically */
     need_reschedule = false;
-    
-    /* Stack integrity check (canary) */
+
+    /* ---- Stack integrity check (canary) ---- */
     if (current_task != NULL) {
         uint32_t *canary_ptr = (uint32_t *)current_task->stack_base;
         if (*canary_ptr != STACK_CANARY_VALUE) {
-            TRACE_SCHED("FATAL: Stack overflow detected in task %d ('%s')", 
+            TRACE_SCHED("FATAL: Stack overflow detected in task %d ('%s')",
                         current_task->id, current_task->name);
             uart_printf("[SCHED] Canary Addr: 0x%08x. Expected: 0x%08x. Actual: 0x%08x\n",
                         (uint32_t)canary_ptr, STACK_CANARY_VALUE, *canary_ptr);
             PANIC("Stack Canary Corrupted!");
         }
     }
-    
+
     /* Only one task? No need to switch */
     if (task_count == 1) {
         return;
@@ -275,40 +339,24 @@ void scheduler_yield(void)
 
     /* Save pointer to current task */
     prev_task = current_task;
-    
-    /* Find next ready task (simple round-robin) */
+
+    /* ---- Ask the algorithm to pick the next task ---- */
     next_index = current_task_index;
-    next_task = prev_task;
-    uint32_t search_count = 0;
-    
-    // uart_printf("[SCHED] Finding next task...\n");
-    
-    /* Loop to find a non-ZOMBIE, READY task */
-    while (search_count < MAX_TASKS) {
-        next_index = (next_index + 1) % MAX_TASKS;
-        search_count++;
-        
-        /* Debug log for search (can be noisy) */
-        
-        // uart_printf("[SCHED]   Task %u: %s (state=%u)\n",
-        //             next_index,
-        //             tasks[next_index] ? tasks[next_index]->name : "NULL",
-        //             tasks[next_index] ? tasks[next_index]->state : 99);
-        
+    next_task = algo->pick_next(current_task, current_task_index,
+                                tasks, task_count, MAX_TASKS,
+                                &next_index);
 
-        if (tasks[next_index] != NULL && 
-            tasks[next_index]->state == TASK_STATE_READY) {
-            // uart_printf("[SCHED]   → Selected task %u\n", next_index);
-            next_task = tasks[next_index];
-            break;
-        }
-    }
-
-    /* Sanity check + fallback */
-    if (next_task == prev_task) {
+    /*
+     * If pick_next returns NULL, no switch is needed.
+     * But we must handle the edge case where the current task
+     * is a ZOMBIE (it died but no other task was found).
+     */
+    if (next_task == NULL) {
         if (prev_task->state == TASK_STATE_ZOMBIE) {
+            /* Deadlock prevention: force idle task READY */
             if (tasks[0] != NULL && tasks[0]->state != TASK_STATE_ZOMBIE) {
-                uart_printf("[SCHED] Warning: No READY task found, forcing idle task READY to prevent deadlock\n");
+                uart_printf("[SCHED] Warning: No READY task found, "
+                            "forcing idle task READY to prevent deadlock\n");
                 tasks[0]->state = TASK_STATE_READY;
                 next_task = tasks[0];
                 next_index = 0;
@@ -316,14 +364,16 @@ void scheduler_yield(void)
                 PANIC("Scheduler Deadlock - No runnable tasks!");
             }
         } else {
+            /* Current task continues — no switch */
             return;
         }
     }
 
+    /* Sanity check: selected task must be READY */
     if (next_task->state != TASK_STATE_READY) {
         uart_printf("[SCHED] ERROR: Task %u not READY (state=%u)\n",
                     next_task->id, next_task->state);
-        
+
         /* Fallback: Force idle to READY if it exists */
         if (tasks[0] != NULL) {
             uart_printf("[SCHED] Warning: Forcing idle task READY to prevent deadlock\n");
@@ -334,8 +384,8 @@ void scheduler_yield(void)
             PANIC("Scheduler Deadlock - No READY tasks!");
         }
     }
-    
-    /* Update states */
+
+    /* ---- Update task states ---- */
     if (prev_task->state != TASK_STATE_ZOMBIE) {
         prev_task->state = TASK_STATE_READY;
     }
@@ -344,99 +394,81 @@ void scheduler_yield(void)
     /* Update global scheduler state */
     current_task_index = next_index;
     current_task = next_task;
-    
-    // uart_printf("[SCHED] Switching: %u (%s) -> %u (%s)\n",
-    //             prev_task->id, prev_task->name,
-    //             next_task->id, next_task->name);
-    
-    /* Debug: Check Stack Depth (DISABLED for reduced noise) */
-    // if (prev_task->id == 0) {
-    //     uint32_t current_sp;
-    //     __asm__ volatile("mov %0, sp" : "=r"(current_sp));
-    //     uart_printf("[SCHED] Idle SP before switch: 0x%08x (Base: 0x%08x, Limit: 0x%08x)\n", 
-    //                 current_sp, (uint32_t)prev_task->stack_base, (uint32_t)prev_task->stack_base - prev_task->stack_size);
-    // }
-    
-    /* CRITICAL DEBUG PROBE: Inspect Shell Stack (DISABLED for reduced noise) */
-    // if (next_task->id == 1) {
-    //     uint32_t *sp = (uint32_t *)next_task->context.sp;
-    //     uart_printf("[DEBUG] Probing Shell Stack before switch:\n");
-    //     uart_printf("  SP_svc = 0x%08x\n", (uint32_t)sp);
-    //     
-    //     /* 
-    //      * Logic:
-    //      * Kernel Frame (9 words) = 36 bytes. sp[0]..sp[8]
-    //      * SPSR, PAD (2 words) = 8 bytes. sp[9]..sp[10]
-    //      * User Frame (14 words) = 56 bytes. sp[11]..sp[24]
-    //      * PC should be at sp[24] (last popped val)
-    //      */
-    //     if (sp) {
-    //          uart_printf("  Frame[8] (LR_svc-Trampoline) = 0x%08x\n", sp[8]);
-    //          uart_printf("  Frame[9] (SPSR) = 0x%08x\n", sp[9]);
-    //          uart_printf("  Frame[24] (User Entry PC) = 0x%08x\n", sp[24]);
-    //          
-    //          /* DUMP FULL FRAME */
-    //          uart_printf("  Full Frame Dump:\n");
-    //          for(int i=0; i<=24; i++) {
-    //              uart_printf("    SP[%d] = 0x%08x\n", i, sp[i]);
-    //          }
-    //     }
-    // }
-    
-    /* Perform context switch */
+
+    /*
+     * EDF-specific: Advance the previous task's deadline if it
+     * is a periodic task.  This ensures the task's next activation
+     * has a deadline one period later.
+     */
+#if defined(SCHED_ALGO_EDF)
+    if (prev_task->state == TASK_STATE_READY) {
+        edf_advance_deadline(prev_task);
+    }
+#endif
+
+    /* ---- Perform context switch ---- */
     context_switch(prev_task, next_task);
-    
-    /* Resumed (DISABLED for reduced noise) */
-    // uart_printf("[SCHED] Resumed task %u (%s)\n", current_task->id, current_task->name);
 }
 
-/**
- * Get current running task
- * @return Pointer to current task, or NULL if scheduler not started
- */
-
-
+/* ============================================================
+ * scheduler_current_task — Get current running task
+ * ============================================================ */
 struct task_struct *scheduler_current_task(void)
 {
     return current_task;
 }
 
-/**
- * Get list of tasks
- * 
- * @param buf User buffer (array of process_info_t)
- * @param max_count Max number of entries
- * @return Number of tasks filled
+/* ============================================================
+ * scheduler_set_deadline — Set EDF parameters for a task
+ * ============================================================
+ *
+ * This function can be called regardless of the active algorithm.
+ * When round-robin is active, the fields are set but ignored
+ * by the pick_next logic.
  */
+void scheduler_set_deadline(struct task_struct *task,
+                            uint32_t deadline,
+                            uint32_t period)
+{
+    if (task == NULL) {
+        return;
+    }
+    task->deadline = deadline;
+    task->period = period;
+}
+
+/* ============================================================
+ * scheduler_get_tasks — Get list of tasks for user space
+ * ============================================================ */
 int scheduler_get_tasks(void *buf, uint32_t max_count)
 {
     process_info_t *info = (process_info_t *)buf;
     uint32_t count = 0;
-    
-    /* 
-     * NOTE: Buffer validation is handled by svc_handler.c's validate_user_pointer()
-     * before calling this function. No additional validation needed here.
+
+    /*
+     * NOTE: Buffer validation is handled by svc_handler.c's
+     * validate_user_pointer() before calling this function.
      */
-    
+
     for (int i = 0; i < MAX_TASKS && count < max_count; i++) {
         struct task_struct *t = tasks[i];
         if (t != NULL) {
             info[count].id = t->id;
-            
+
             /* Copy name using string library */
             const char *src = t->name ? t->name : "unknown";
             int copy_len = 0;
-            while(src[copy_len] && copy_len < 31) {
+            while (src[copy_len] && copy_len < 31) {
                 copy_len++;
             }
             memcpy(info[count].name, src, copy_len);
             info[count].name[copy_len] = '\0';
-            
+
             info[count].state = t->state;
-            
+
             count++;
         }
     }
-    
+
     return count;
 }
