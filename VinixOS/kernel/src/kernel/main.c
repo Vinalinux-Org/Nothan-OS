@@ -107,6 +107,8 @@ void kernel_main(void)
     shell_task.name = "User App (Shell)";
     shell_task.state = TASK_STATE_READY;
     shell_task.id = 0;
+    shell_task.deadline = 0;  /* Best-effort (no deadline) */
+    shell_task.period = 0;    /* Not periodic */
 
     task_stack_init(&shell_task, (void (*)(void))USER_SPACE_VA,
                     (void *)(USER_STACK_BASE - USER_STACK_SIZE),
