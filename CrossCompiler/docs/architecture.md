@@ -1,377 +1,320 @@
-# Kiến Trúc Phase 2 Compiler
+# Kiến Trúc Compiler (VinCC)
 
-## Tổng Quan
+> **Phạm vi:** Pipeline tổng thể từ source code đến ELF binary — 7 phases, module organization, và design decisions.
+> **Yêu cầu trước:** Không có — đây là tài liệu entry point cho CrossCompiler.
+> **Files liên quan:** `toolchain/main.py`, `toolchain/frontend/`, `toolchain/middleend/`, `toolchain/backend/`, `toolchain/runtime/`
 
-Phase 2 Compiler là một cross-compiler chuyển đổi mã nguồn Subset C thành binary ELF ARMv7-A. Compiler được implement bằng Python, chạy trên máy host Linux x86_64, và sinh ra code cho BeagleBone Black (Cortex-A8) chạy VinixOS.
+---
 
 ## Pipeline Tổng Thể
 
 ```
 Source Code (.c)
     ↓
-[Lexer] → Tokens
+[Lexer]              → Token stream
     ↓
-[Parser] → AST
+[Parser]             → Abstract Syntax Tree (AST)
     ↓
-[Semantic Analyzer] → Annotated AST + Symbol Table
+[Semantic Analyzer]  → Annotated AST + Symbol Table
     ↓
-[IR Generator] → Three-Address Code (IR)
+[IR Generator]       → Three-Address Code (IR)
     ↓
-[Code Generator] → ARM Assembly (.s)
+[Code Generator]     → ARM Assembly (.s)
     ↓
-[Assembler] → Object File (.o)
+[Assembler]          → Object File (.o)  — invokes arm-linux-gnueabihf-as
     ↓
-[Linker] → ELF Executable
+[Linker]             → ELF Executable   — invokes arm-linux-gnueabihf-ld
 ```
 
-## Các Compiler Phases
+### Quick Reference — Tất Cả Phases
+
+| Phase | Module | Input | Output | Ghi Chú |
+|-------|--------|-------|--------|---------|
+| Lexer | `frontend.lexer` | Source text | Token list | State machine, track line/col |
+| Parser | `frontend.parser` | Token list | AST | Recursive descent, operator precedence |
+| Semantic | `frontend.semantic` | AST | Annotated AST + Symbol Table | Type check, scope resolution |
+| IR Gen | `middleend.ir` | Annotated AST | IR instructions | Three-Address Code (3AC) |
+| Code Gen | `backend.armv7a` | IR instructions | ARM Assembly (.s) | Register allocation, AAPCS |
+| Assembler | `backend.armv7a.assembler` | .s file | .o file | Wraps `arm-linux-gnueabihf-as` |
+| Linker | `backend.armv7a.linker` | .o files | ELF binary | Wraps `arm-linux-gnueabihf-ld` |
+
+---
+
+## Các Compiler Phases Chi Tiết
 
 ### 1. Lexer (Phân Tích Từ Vựng)
 
-**Module**: `compiler.frontend.lexer`
+**Module:** `compiler.frontend.lexer` — `lexer.py`, `token.py`
 
-**Chức năng**: Chuyển đổi source code thành stream of tokens
+**Chức năng:** Chuyển source code text thành stream of tokens.
 
-**Input**: Source code text (string)
-
-**Output**: List of tokens với type, value, line, column
-
-**Xử lý**:
-- State machine để nhận diện keywords, identifiers, literals, operators
+**Xử lý:**
+- State machine nhận diện keywords, identifiers, literals, operators
 - Track line và column numbers cho error reporting
-- Bỏ qua whitespace và comments (// và /* */)
+- Bỏ qua whitespace và comments (`//` và `/* */`)
 - Detect lexical errors (invalid characters, unterminated literals)
 
-**Token Types**:
-- Keywords: int, char, if, else, while, for, return, void
-- Identifiers: variable và function names
-- Literals: integer (decimal), character ('x')
-- Operators: arithmetic, comparison, logical, bitwise, assignment
-- Delimiters: (, ), {, }, [, ], ;, ,
+**Token Types:**
+
+| Category | Examples |
+|----------|---------|
+| Keywords | `int char void if else while for return` |
+| Identifiers | `counter`, `_temp`, `myFunction` |
+| Literals | `42`, `'a'`, `'\n'` |
+| Operators | `+ - * / % == != < > && \|\| & \| ^ << >>` |
+| Delimiters | `( ) { } [ ] ; ,` |
 
 ### 2. Parser (Phân Tích Cú Pháp)
 
-**Module**: `compiler.frontend.parser`
+**Module:** `compiler.frontend.parser` — `parser.py`, `ast_nodes.py`
 
-**Chức năng**: Chuyển đổi tokens thành Abstract Syntax Tree (AST)
+**Chức năng:** Chuyển token stream thành Abstract Syntax Tree.
 
-**Input**: List of tokens
-
-**Output**: AST (Program node với list of declarations)
-
-**Xử lý**:
+**Xử lý:**
 - Recursive descent parsing với operator precedence climbing
 - Build AST nodes cho declarations, statements, expressions
 - Validate syntax theo Subset C grammar
-- Panic mode recovery để thu thập nhiều syntax errors
+- Panic mode recovery để collect nhiều syntax errors
 
-**AST Node Types**:
-- Program: root node
-- Declarations: FunctionDecl, VarDecl
-- Statements: CompoundStmt, IfStmt, WhileStmt, ForStmt, ReturnStmt, ExprStmt
-- Expressions: BinaryOp, UnaryOp, Assignment, FunctionCall, ArrayAccess, Identifier, Literals
+**AST Node Types:**
+
+| Category | Node Types |
+|----------|-----------|
+| Program | `Program` (root) |
+| Declarations | `FunctionDecl`, `VarDecl` |
+| Statements | `CompoundStmt`, `IfStmt`, `WhileStmt`, `ForStmt`, `ReturnStmt`, `ExprStmt` |
+| Expressions | `BinaryOp`, `UnaryOp`, `Assignment`, `FunctionCall`, `ArrayAccess`, `Identifier`, `IntLiteral`, `CharLiteral` |
 
 ### 3. Semantic Analyzer (Phân Tích Ngữ Nghĩa)
 
-**Module**: `compiler.frontend.semantic`
+**Module:** `compiler.frontend.semantic` — `semantic_analyzer.py`, `symbol_table.py`, `type_checker.py`
 
-**Chức năng**: Validate semantic correctness và build symbol table
+**Chức năng:** Validate semantic correctness và build symbol table.
 
-**Input**: AST
-
-**Output**: Annotated AST + Symbol Table
-
-**Xử lý**:
+**Xử lý:**
 - Traverse AST và build symbol table với scope management
-- Verify tất cả variables/functions được khai báo trước khi sử dụng
+- Verify tất cả variables/functions được declare trước khi dùng
 - Check type compatibility trong assignments, function calls, returns
-- Enforce lexical scoping rules
-- Detect duplicate declarations
+- Enforce lexical scoping — detect duplicate declarations
 
-**Symbol Table**:
-- Scope stack để track nested scopes
-- Symbol entries với name, type, scope level, offset
-- Function symbols với parameter types
+**Symbol Table:** Scope stack → Symbol entries với `{name, type, scope_level, offset}`
 
-**Type System**:
-- Base types: int (32-bit), char (8-bit), void
-- Pointer types: int*, char*
-- Array types: treated as pointers
-- Type compatibility rules với implicit conversions
+**Type System:**
+
+| Type | Size | Notes |
+|------|------|-------|
+| `int` | 32-bit | Default integer type |
+| `char` | 8-bit | Character type |
+| `void` | — | Return type only |
+| `int*`, `char*` | 32-bit | Pointer types |
+| `int[]`, `char[]` | — | Treated as pointer |
 
 ### 4. IR Generator (Sinh Intermediate Representation)
 
-**Module**: `compiler.middleend.ir`
+**Module:** `compiler.middleend.ir` — `ir_generator.py`, `ir_instructions.py`, `generators.py`
 
-**Chức năng**: Chuyển đổi AST thành three-address code (IR)
+**Chức năng:** Chuyển Annotated AST thành Three-Address Code (3AC).
 
-**Input**: Annotated AST + Symbol Table
-
-**Output**: List of IR instructions
-
-**Xử lý**:
-- Traverse AST và sinh IR instructions
-- Generate temporaries cho intermediate values
-- Generate labels cho control flow
-- Flatten expressions thành three-address code
+**Xử lý:**
+- Traverse AST → sinh IR instructions
+- Generate temporaries (`t0`, `t1`, ...) cho intermediate values
+- Generate labels (`L0`, `L1`, ...) cho control flow
+- Flatten expressions thành 3-operand format
 - Generate function entry/exit sequences
 
-**IR Instruction Types**:
-- Arithmetic: BinaryOpIR (add, sub, mul, div, mod)
-- Logical: BinaryOpIR (and, or, xor, shl, shr)
-- Comparison: BinaryOpIR (eq, ne, lt, gt, le, ge)
-- Unary: UnaryOpIR (neg, not, deref, addr)
-- Assignment: AssignIR
-- Memory: LoadIR, StoreIR
-- Control flow: LabelIR, GotoIR, CondGotoIR
-- Functions: ParamIR, CallIR, ReturnIR, FunctionEntryIR, FunctionExitIR
+**IR Instruction Categories:**
 
-**Three-Address Code Format**:
-```
-result = operand1 op operand2
-```
-
-Mỗi instruction có tối đa 3 operands.
+| Category | Types |
+|----------|-------|
+| Arithmetic | `add`, `sub`, `mul`, `div`, `mod` |
+| Logical/Bitwise | `and`, `or`, `xor`, `shl`, `shr` |
+| Comparison | `eq`, `ne`, `lt`, `gt`, `le`, `ge` |
+| Unary | `neg`, `not`, `deref`, `addr` |
+| Memory | `load`, `store`, `assign` |
+| Control Flow | `label`, `goto`, `if_goto` |
+| Function | `param`, `call`, `return`, `func_entry`, `func_exit` |
 
 ### 5. Code Generator (Sinh Mã ARMv7-A)
 
-**Module**: `compiler.backend.armv7a`
+**Module:** `compiler.backend.armv7a` — `code_generator.py`, `register_allocator.py`, `syscall_support.py`
 
-**Chức năng**: Chuyển đổi IR thành ARM assembly
+**Chức năng:** Chuyển IR thành ARM assembly text.
 
-**Input**: List of IR instructions
+**Register Layout:**
 
-**Output**: ARM assembly text (.s file)
+| Registers | Role | Save/Restore |
+|-----------|------|-------------|
+| `r0–r3` | Arguments + scratch | Caller-saved (không cần save) |
+| `r4–r11` | Temporaries + local vars | Callee-saved (prologue/epilogue) |
+| `r12` (ip) | Intra-procedure scratch | Caller-saved |
+| `r13` (sp) | Stack pointer | — |
+| `r14` (lr) | Link register (return address) | Saved trong prologue |
+| `r15` (pc) | Program counter | — |
 
-**Xử lý**:
-- Map IR instructions sang ARM instructions
-- Allocate registers cho temporaries và variables
-- Generate function prologues và epilogues theo AAPCS
-- Handle register spilling khi hết registers
-- Generate syscall invocations
+**Instruction Selection:**
 
-**Register Allocation**:
-- Available registers: r4-r11 (8 registers)
-- r0-r3: argument passing và scratch
-- r4-r11: callee-saved, used for temporaries
-- sp (r13): stack pointer
-- lr (r14): link register
-- pc (r15): program counter
+| Operation | ARM Instruction(s) |
+|-----------|-------------------|
+| Add/Sub/Mul | `add`, `sub`, `mul` |
+| Division | `bl __aeabi_idiv` (software — Cortex-A8 không có SDIV) |
+| Logical | `and`, `orr`, `eor` |
+| Shift | `lsl`, `asr` |
+| Compare + branch | `cmp` + `beq/bne/bgt/blt/bge/ble` |
+| Memory | `ldr`, `str` với offsets |
+| Syscall | `mov r7, #num` + `svc #0` |
 
-**AAPCS Calling Convention**:
-- Arguments: first 4 trong r0-r3, additional trên stack
-- Return value: r0
-- Callee-saved: r4-r11
-- Prologue: push {r4-r11, lr}, allocate stack frame
-- Epilogue: deallocate stack frame, pop {r4-r11, pc}
+**AAPCS Function Frame:**
 
-**Instruction Selection**:
-- Arithmetic: add, sub, mul, bl __aeabi_idiv (software division)
-- Logical: and, orr, eor
-- Shift: lsl, asr
-- Comparison: cmp + conditional moves
-- Memory: ldr, str với offsets
-- Control flow: b, beq, bne, bgt, blt, bge, ble
-
-**Syscall Generation**:
 ```asm
-mov r7, #syscall_number
-mov r0, arg1
-mov r1, arg2
-svc #0
+; Prologue
+push    {r4-r11, lr}      ; Save callee-saved regs + return addr
+sub     sp, sp, #N        ; Allocate local variable space
+
+; ... body ...
+
+; Epilogue
+add     sp, sp, #N        ; Deallocate locals
+pop     {r4-r11, pc}      ; Restore regs + return (pc = lr)
 ```
 
 ### 6. Assembler
 
-**Module**: `compiler.backend.armv7a.assembler`
+**Module:** `compiler.backend.armv7a.assembler`
 
-**Chức năng**: Chuyển đổi assembly thành object file
+**Chức năng:** Invoke `arm-linux-gnueabihf-as` để assemble `.s` → `.o`.
 
-**Input**: ARM assembly text (.s file)
-
-**Output**: Object file (.o)
-
-**Xử lý**:
-- Invoke arm-linux-gnueabihf-as với -mcpu=cortex-a8
-- Handle assembler errors và báo cáo
+```bash
+arm-linux-gnueabihf-as -mcpu=cortex-a8 -o output.o input.s
+```
 
 ### 7. Linker
 
-**Module**: `compiler.backend.armv7a.linker`
+**Module:** `compiler.backend.armv7a.linker`
 
-**Chức năng**: Link object files thành ELF executable
+**Chức năng:** Invoke `arm-linux-gnueabihf-ld` để link `.o` files → ELF binary.
 
-**Input**: Object files (.o)
+**Runtime Library được link tự động:**
 
-**Output**: ELF executable binary
+| File | Chức Năng |
+|------|----------|
+| `crt0.S` | C runtime startup — setup stack, call `main()`, `sys_exit()` |
+| `syscalls.S` | Syscall wrappers — `write`, `read`, `exit`, `yield` |
+| `divmod.S` | Software division — `__aeabi_idiv`, `__aeabi_idivmod` |
+| `app.ld` | Linker script — base `0x40000000`, user space layout |
 
-**Xử lý**:
-- Invoke arm-linux-gnueabihf-ld với linker script
-- Link với runtime library (crt0.o, syscalls.o, divmod.o)
-- Set entry point (_start) và memory layout
-- Generate ELF binary với base address 0x40000000
+**Memory Layout của output binary:**
 
-**Runtime Library**:
-- crt0.S: C runtime startup, calls main(), exits
-- syscalls.S: Syscall wrappers (write, read, exit, yield)
-- divmod.S: Software division/modulo (__aeabi_idiv, __aeabi_idivmod)
-- app.ld: Linker script với memory layout
-
-**Memory Layout**:
 ```
-0x40000000: .text (code)
-0x40000000 + text_size: .rodata (read-only data)
-0x40000000 + text_size + rodata_size: .data (initialized data)
-0x40000000 + text_size + rodata_size + data_size: .bss (uninitialized data)
+0x40000000   .text   (code)
+             .rodata (read-only data)
+             .data   (initialized globals)
+             .bss    (zero-initialized globals)
+0x40100000   Stack (16KB, grows down)
 ```
 
-## Error Handling
-
-**Error Reporting Format**:
-```
-<filename>:<line>:<column>: <phase> error: <message>
-```
-
-**Error Collection**:
-- ErrorCollector class thu thập errors từ tất cả phases
-- Continue compilation sau errors để thu thập nhiều errors
-- Report tất cả errors at the end
-
-**Exit Codes**:
-- 0: Compilation success
-- 1: Compilation errors
-
-## Compiler Configuration
-
-**CLI Options**:
-- `-o <file>`: Output file path
-- `-S`: Emit assembly only (no assemble/link)
-- `--dump-tokens`: Dump tokens after lexing
-- `--dump-ast`: Dump AST after parsing
-- `--dump-ir`: Dump IR after IR generation
-- `--help`: Display help information
-- `--version`: Display version information
-
-**CompilerConfig Dataclass**:
-```python
-@dataclass
-class CompilerConfig:
-    input_file: str
-    output_file: str = 'a.out'
-    emit_tokens: bool = False
-    emit_ast: bool = False
-    emit_ir: bool = False
-    emit_asm: bool = False
-```
+---
 
 ## Module Organization
 
 ```
 toolchain/
-├── main.py                 # Compiler driver
-├── common/                 # Common utilities
-│   ├── error.py           # Error reporting
-│   └── config.py          # Compiler configuration
-├── frontend/              # Frontend phases
-│   ├── lexer/            # Lexical analysis
-│   │   ├── token.py      # Token definitions
-│   │   └── lexer.py      # Lexer implementation
-│   ├── parser/           # Syntax analysis
-│   │   ├── ast_nodes.py  # AST node definitions
-│   │   └── parser.py     # Parser implementation
-│   └── semantic/         # Semantic analysis
-│       ├── symbol_table.py  # Symbol table
-│       ├── type_checker.py  # Type checking
-│       └── semantic_analyzer.py  # Semantic analysis
-├── middleend/            # Middle-end phases
-│   └── ir/              # Intermediate representation
-│       ├── ir_instructions.py  # IR instruction definitions
-│       ├── generators.py      # Temp/label generators
-│       └── ir_generator.py    # IR generation
-├── backend/              # Backend phases
-│   └── armv7a/          # ARMv7-A target
-│       ├── register_allocator.py  # Register allocation
-│       ├── code_generator.py      # Code generation
-│       ├── syscall_support.py     # Syscall generation
-│       ├── assembler.py          # Assembler wrapper
-│       └── linker.py             # Linker wrapper
-└── runtime/              # Runtime library
-    ├── crt0.S           # C runtime startup
-    ├── syscalls.S       # Syscall wrappers
-    ├── divmod.S         # Software division
-    └── app.ld           # Linker script
+├── main.py                         ← Compiler driver (entry point)
+├── common/
+│   ├── error.py                    ← ErrorCollector, error formatting
+│   └── config.py                   ← CompilerConfig dataclass
+├── frontend/
+│   ├── lexer/
+│   │   ├── token.py                ← Token types, Token class
+│   │   └── lexer.py                ← Lexer implementation
+│   ├── parser/
+│   │   ├── ast_nodes.py            ← AST node definitions
+│   │   └── parser.py               ← Recursive descent parser
+│   └── semantic/
+│       ├── symbol_table.py         ← Symbol table, scope management
+│       ├── type_checker.py         ← Type compatibility rules
+│       └── semantic_analyzer.py    ← AST traversal + validation
+├── middleend/
+│   └── ir/
+│       ├── ir_instructions.py      ← IR instruction class definitions
+│       ├── generators.py           ← Temp/label name generators
+│       └── ir_generator.py         ← AST → IR translation
+├── backend/
+│   └── armv7a/
+│       ├── register_allocator.py   ← Linear scan + spilling
+│       ├── code_generator.py       ← IR → ARM assembly
+│       ├── syscall_support.py      ← Syscall code generation
+│       ├── assembler.py            ← Wrapper for arm-linux-gnueabihf-as
+│       └── linker.py               ← Wrapper for arm-linux-gnueabihf-ld
+└── runtime/
+    ├── crt0.S
+    ├── syscalls.S
+    ├── divmod.S
+    └── app.ld
 ```
+
+---
+
+## Error Handling
+
+**Error format:**
+```
+<filename>:<line>:<column>: <phase> error: <message>
+```
+
+**Approach:** `ErrorCollector` thu thập errors từ tất cả phases — tiếp tục compilation để collect nhiều errors cùng lúc, report all errors at the end.
+
+**Exit codes:**
+
+| Code | Ý Nghĩa |
+|------|---------|
+| 0 | Compilation success |
+| 1 | One or more errors |
+
+---
 
 ## Design Decisions
 
-### 1. Python Implementation
-- Rapid development và prototyping
-- Rich standard library và tooling
-- Easy integration với testing frameworks
+| Decision | Rationale | Alternative Considered |
+|----------|-----------|----------------------|
+| Python implementation | Rapid development, rich stdlib, easy testing | C/C++ — rejected: slower to develop |
+| Three-Address Code IR | Simple, uniform, easy assembly mapping | SSA form — rejected: overkill for this scope |
+| Software division | Cortex-A8 không có hardware SDIV | `__aeabi_idiv` từ ARM EABI runtime |
+| Linear scan register allocation | Simple, predictable | Graph coloring — rejected: complex, unnecessary |
+| AAPCS calling convention | Compatible với C libs + ARM EABI | Custom ABI — rejected: interop issues |
+| Base address `0x40000000` | VinixOS user space layout | — |
 
-### 2. Three-Address Code IR
-- Simple và uniform representation
-- Easy to analyze và transform
-- Straightforward mapping to assembly
-
-### 3. Software Division
-- Cortex-A8 không có hardware division instruction
-- Use __aeabi_idiv và __aeabi_idivmod từ runtime library
-- Compatible với ARM EABI
-
-### 4. Register Allocation
-- Simple linear scan allocation
-- 8 available registers (r4-r11)
-- Stack spilling khi hết registers
-
-### 5. AAPCS Calling Convention
-- Standard ARM calling convention
-- Compatible với C libraries
-- Interoperable với other ARM code
-
-### 6. VinixOS Platform Integration
-- Base address 0x40000000 (user space)
-- Syscall interface cho I/O và OS services
-- ELF binary format cho loader compatibility
-
-## Testing Strategy
-
-### Unit Tests
-- Test individual components isolation
-- Test edge cases và error conditions
-- Fast execution, run frequently
-
-### Integration Tests
-- Test end-to-end compilation
-- Test compiler options và debug features
-- Test error detection và reporting
-
-### Property-Based Tests (Optional)
-- Test universal correctness properties
-- Generate random inputs với Hypothesis
-- Validate invariants across all inputs
-
-### Hardware Tests (Optional)
-- Deploy to BeagleBone Black
-- Execute trên VinixOS
-- Verify output qua UART
+---
 
 ## Performance Characteristics
 
-**Compilation Speed**:
-- Lexer: O(n) trong source code size
-- Parser: O(n) trong token count
-- Semantic: O(n) trong AST nodes
-- IR Generation: O(n) trong AST nodes
-- Code Generation: O(m) trong IR instructions
+| Phase | Complexity |
+|-------|-----------|
+| Lexer | O(n) — source length |
+| Parser | O(n) — token count |
+| Semantic | O(n) — AST nodes |
+| IR Generation | O(n) — AST nodes |
+| Code Generation | O(m) — IR instructions |
 
-**Memory Usage**:
-- AST: O(n) trong source code size
-- Symbol Table: O(s) trong number of symbols
-- IR: O(m) trong number of instructions
+**Generated code quality:** Equivalent to GCC `-O0` — no optimization, focus on correctness.
 
-**Generated Code Quality**:
-- No optimization (equivalent to GCC -O0)
-- Simple register allocation
-- Straightforward instruction selection
-- Focus on correctness over performance
+---
+
+## Tóm Tắt
+
+| Concept | Ý Nghĩa |
+|---------|---------|
+| 7-phase pipeline | Source → Tokens → AST → Annotated AST → IR → Assembly → .o → ELF |
+| Python implementation | Rapid development, không cần compile compiler |
+| Three-Address Code | Mỗi IR instruction ≤ 3 operands — dễ map sang assembly |
+| AAPCS compliance | Compatible với ARM toolchain và C libraries |
+| Software division | Cortex-A8 không có SDIV — dùng `__aeabi_idiv` |
+| Base `0x40000000` | Khớp với VinixOS user space VA |
+
+---
+
+## Xem Thêm
+
+- [usage_guide.md](usage_guide.md) — Cách install và sử dụng compiler
+- [subset_c_spec.md](subset_c_spec.md) — Ngôn ngữ Subset C được support
+- [ir_format.md](ir_format.md) — Chi tiết IR instruction format
+- [codegen_strategy.md](codegen_strategy.md) — Register allocation và instruction selection

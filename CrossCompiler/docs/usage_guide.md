@@ -1,95 +1,82 @@
-# Phase 2 Compiler - Usage Guide
+# VinCC Compiler — Usage Guide
+
+> **Phạm vi:** Hướng dẫn install, basic usage, compiler options, debug flags, example programs, và deploy lên VinixOS.
+> **Yêu cầu trước:** [architecture.md](architecture.md) — hiểu pipeline compiler.
+> **Files liên quan:** `toolchain/main.py`, `scripts/install_compiler.sh`
+
+---
+
+## Quick Start (3 bước)
+
+```bash
+# 1. Install toolchain
+sudo apt-get install gcc-arm-linux-gnueabihf binutils-arm-linux-gnueabihf
+
+# 2. Build runtime library
+cd CrossCompiler && make runtime
+
+# 3. Compile và chạy
+python3 -m toolchain.main -o hello hello.c
+```
+
+---
 
 ## Installation
 
 ### Prerequisites
 
-**System Requirements**:
-- Linux x86_64 (Ubuntu, Debian, hoặc similar)
-- Python 3.8 hoặc newer
-- ARM cross-compilation toolchain
+| Requirement | Version | Install |
+|-------------|---------|---------|
+| Linux x86_64 | Ubuntu/Debian | — |
+| Python | 3.8+ | `sudo apt install python3` |
+| ARM toolchain | any | `sudo apt install gcc-arm-linux-gnueabihf binutils-arm-linux-gnueabihf` |
 
-**Install ARM Toolchain**:
+**Verify ARM toolchain:**
 ```bash
-sudo apt-get update
-sudo apt-get install gcc-arm-linux-gnueabihf binutils-arm-linux-gnueabihf
-```
-
-**Verify Installation**:
-```bash
-arm-linux-gnueabihf-gcc --version
 arm-linux-gnueabihf-as --version
 arm-linux-gnueabihf-ld --version
 ```
 
-### Install Compiler
+### Setup
 
-**Clone Repository**:
 ```bash
+# Clone repo
 git clone <repository-url>
 cd VinixOS
-```
 
-**Install Python Dependencies**:
-```bash
+# Install Python dependencies
 cd CrossCompiler
 pip3 install -r requirements.txt
-```
 
-**Build Runtime Library**:
-```bash
+# Build runtime library (crt0.S, syscalls.S, divmod.S)
 make runtime
 ```
 
-This compiles crt0.S, syscalls.S, và divmod.S thành object files.
-
-## Basic Usage
-
-### Compile a Program
-
-**Basic compilation**:
-```bash
-python3 -m toolchain.main program.c
-```
-
-This generates executable `a.out` trong current directory.
-
-**Specify output file**:
-```bash
-python3 -m toolchain.main -o myprogram program.c
-```
-
-### Run on VinixOS Platform
-
-**Deploy to BeagleBone Black**:
-```bash
-./scripts/deploy_to_bbb.sh myprogram
-```
-
-**Manual deployment**:
-```bash
-scp myprogram debian@beaglebone.local:/home/debian/
-ssh debian@beaglebone.local
-./myprogram
-```
+---
 
 ## Compiler Options
 
-### Output Control
+| Option | Mô Tả | Example |
+|--------|-------|---------|
+| `-o <file>` | Output file path | `-o myprogram` |
+| `-S` | Emit assembly only, không assemble/link | `-S -o out.s` |
+| `--dump-tokens` | In token stream sau lexing | Debug lexer |
+| `--dump-ast` | In AST sau parsing | Debug parser |
+| `--dump-ir` | In IR sau IR generation | Debug codegen |
+| `--help` | Show help | — |
+| `--version` | Show version | — |
 
-**-o <file>**: Specify output file
+**Usage pattern:**
 ```bash
-python3 -m toolchain.main -o hello hello.c
+python3 -m toolchain.main [options] <source_file>
 ```
 
-**-S**: Generate assembly only (no assemble/link)
-```bash
-python3 -m toolchain.main -S -o hello.s hello.c
-```
+---
 
-### Debug Options
+## Debug Options
 
-**--dump-tokens**: Display tokens after lexing
+### `--dump-tokens`
+
 ```bash
 python3 -m toolchain.main --dump-tokens hello.c
 ```
@@ -97,12 +84,14 @@ python3 -m toolchain.main --dump-tokens hello.c
 Output:
 ```
 === TOKENS ===
-Token(type=INT, value='int', line=1, col=1)
+Token(type=INT,        value='int',  line=1, col=1)
 Token(type=IDENTIFIER, value='main', line=1, col=5)
+Token(type=LPAREN,     value='(',    line=1, col=9)
 ...
 ```
 
-**--dump-ast**: Display AST after parsing
+### `--dump-ast`
+
 ```bash
 python3 -m toolchain.main --dump-ast hello.c
 ```
@@ -112,12 +101,14 @@ Output:
 === AST ===
 Program(
   declarations=[
-    FunctionDecl(name='main', ...)
+    FunctionDecl(name='main', return_type='int',
+      body=CompoundStmt([...]))
   ]
 )
 ```
 
-**--dump-ir**: Display IR after IR generation
+### `--dump-ir`
+
 ```bash
 python3 -m toolchain.main --dump-ir hello.c
 ```
@@ -132,65 +123,58 @@ return 0
 function_exit main
 ```
 
-### Help và Version
+### Emit Assembly Only (`-S`)
 
-**--help**: Display help information
 ```bash
-python3 -m toolchain.main --help
+python3 -m toolchain.main -S -o hello.s hello.c
+cat hello.s   # Inspect generated ARM assembly
 ```
 
-**--version**: Display version information
-```bash
-python3 -m toolchain.main --version
-```
+---
 
 ## Example Programs
 
 ### Hello World
 
-**hello.c**:
 ```c
+/* hello.c */
 int write(int fd, char* buf, int count);
 void exit(int status);
 
 int main() {
     char msg[] = "Hello, VinixOS!\n";
-    write(1, msg, 15);
+    write(1, msg, 16);
     exit(0);
 }
 ```
 
-**Compile**:
 ```bash
 python3 -m toolchain.main -o hello hello.c
 ```
 
-### Factorial
+### Factorial (Recursion)
 
-**factorial.c**:
 ```c
+/* factorial.c */
 int factorial(int n) {
-    if (n <= 1) {
-        return 1;
-    }
+    if (n <= 1) return 1;
     return n * factorial(n - 1);
 }
 
 int main() {
-    int result = factorial(5);
+    int result = factorial(5);  /* result = 120 */
     return 0;
 }
 ```
 
-**Compile**:
 ```bash
 python3 -m toolchain.main -o factorial factorial.c
 ```
 
 ### Array Operations
 
-**array.c**:
 ```c
+/* array.c */
 int sum_array(int* arr, int size) {
     int sum = 0;
     int i;
@@ -201,306 +185,144 @@ int sum_array(int* arr, int size) {
 }
 
 int main() {
-    int numbers[5];
-    numbers[0] = 1;
-    numbers[1] = 2;
-    numbers[2] = 3;
-    numbers[3] = 4;
-    numbers[4] = 5;
-    int total = sum_array(numbers, 5);
+    int data[5];
+    data[0] = 1; data[1] = 2; data[2] = 3;
+    data[3] = 4; data[4] = 5;
+    int total = sum_array(data, 5);  /* total = 15 */
+    return total;
+}
+```
+
+### String Output via UART
+
+```c
+/* shell_hello.c — chạy trên VinixOS */
+int write(int fd, char* buf, int count);
+void yield(void);
+void exit(int status);
+
+int strlen(char* s) {
+    int n = 0;
+    while (s[n] != '\0') n = n + 1;
+    return n;
+}
+
+int main() {
+    char* msg = "Hello from VinCC!\n";
+    write(1, msg, strlen(msg));
+    exit(0);
     return 0;
 }
 ```
 
-**Compile**:
+---
+
+## Deploy lên VinixOS
+
+### Automatic (via kernel embed)
+
 ```bash
-python3 -m toolchain.main -o array array.c
+# 1. Compile chương trình
+python3 -m toolchain.main -o myapp myapp.c
+
+# 2. Copy binary vào initfs (sẽ có trong RAMFS)
+cp myapp VinixOS/initfs/myapp
+
+# 3. Build lại kernel (embed file mới)
+make -C VinixOS kernel
+
+# 4. Flash lên SD card
+bash scripts/flash_sdcard.sh /dev/sdX
 ```
+
+### Manual Deploy
+
+```bash
+# Deploy qua serial/SSH nếu VinixOS đang chạy
+scp myapp user@beaglebone:/
+```
+
+---
 
 ## Error Messages
 
-### Lexical Errors
+### Lexer Errors
 
-**Invalid character**:
 ```
-program.c:5:10: lexical error: Invalid character '@'
-```
-
-**Unterminated character literal**:
-```
-program.c:3:15: lexical error: Unterminated character literal
+hello.c:5:3: lexer error: invalid character '@'
 ```
 
-### Syntax Errors
+### Parser Errors
 
-**Missing semicolon**:
 ```
-program.c:7:5: syntax error: Expected ';', got 'return'
-```
-
-**Unmatched brace**:
-```
-program.c:10:1: syntax error: Expected '}', got EOF
+hello.c:10:1: parser error: expected '}' before end of file
+hello.c:7:5: parser error: unexpected token 'else' (expected expression)
 ```
 
 ### Semantic Errors
 
-**Undeclared variable**:
 ```
-program.c:5:5: semantic error: Undeclared variable 'x'
-```
-
-**Type mismatch**:
-```
-program.c:8:7: semantic error: Type mismatch in assignment: cannot assign 'char*' to 'int'
+hello.c:3:5: semantic error: undefined variable 'x'
+hello.c:8:3: semantic error: type mismatch: expected int, got char*
+hello.c:2:1: semantic error: duplicate declaration of 'foo'
 ```
 
-**Duplicate declaration**:
-```
-program.c:6:9: semantic error: Duplicate declaration of 'x' in same scope
-```
+---
 
 ## Build System Integration
 
-### Makefile Integration
+### Makefile
 
-**Example Makefile**:
 ```makefile
-CC = python3 -m toolchain.main
-CFLAGS = 
-PROGRAMS = hello factorial array
+VINCC = python3 -m toolchain.main
+CFLAGS =
 
-all: $(PROGRAMS)
+SRCS = main.c utils.c
+TARGET = myapp
 
-%: %.c
-	$(CC) -o $@ $<
+$(TARGET): $(SRCS)
+	$(VINCC) $(CFLAGS) -o $@ $<
+
+debug:
+	$(VINCC) --dump-ir --dump-ast -o $(TARGET) $(SRCS)
 
 clean:
-	rm -f $(PROGRAMS) *.o *.s
-
-.PHONY: all clean
-```
-
-**Build all programs**:
-```bash
-make
-```
-
-**Clean build artifacts**:
-```bash
-make clean
-```
-
-### Separate Compilation (Not Yet Supported)
-
-Phase 2 Compiler hiện tại chỉ support single-file compilation. Multi-file compilation sẽ được added trong future versions.
-
-## Testing
-
-### Run Test Suite
-
-**All tests**:
-```bash
-make test
-```
-
-**Integration tests only**:
-```bash
-make test-integration
-```
-
-**Unit tests only** (if available):
-```bash
-make test-unit
-```
-
-**Property tests only** (if available):
-```bash
-make test-property
-```
-
-### Test Coverage
-
-**Generate coverage report**:
-```bash
-pytest --cov=toolchain --cov-report=html tests/
-```
-
-**View coverage**:
-```bash
-open htmlcov/index.html
-```
-
-## Debugging
-
-### View Compilation Stages
-
-**1. View tokens**:
-```bash
-python3 -m toolchain.main --dump-tokens program.c
-```
-
-**2. View AST**:
-```bash
-python3 -m toolchain.main --dump-ast program.c
-```
-
-**3. View IR**:
-```bash
-python3 -m toolchain.main --dump-ir program.c
-```
-
-**4. View assembly**:
-```bash
-python3 -m toolchain.main -S -o program.s program.c
-cat program.s
-```
-
-### Common Issues
-
-**Issue**: Compilation fails với "arm-linux-gnueabihf-as: command not found"
-
-**Solution**: Install ARM toolchain:
-```bash
-sudo apt-get install binutils-arm-linux-gnueabihf
+	rm -f $(TARGET) *.s *.o
 ```
 
 ---
 
-**Issue**: Runtime error "undefined reference to __aeabi_idiv"
+## Limitations Cần Biết
 
-**Solution**: Build runtime library:
-```bash
-cd CrossCompiler
-make runtime
-```
-
----
-
-**Issue**: Program crashes on VinixOS Platform
-
-**Solution**: 
-- Verify binary format: `file myprogram` (should be ELF32 ARM)
-- Verify entry point: `readelf -h myprogram` (should be 0x40000000)
-- Check syscall usage (only write, read, exit, yield supported)
+| Feature | Status | Ghi Chú |
+|---------|--------|---------|
+| `++`/`--` operators | Không hỗ trợ | Dùng `i = i + 1` |
+| `struct`/`union` | Không hỗ trợ | Chỉ basic types |
+| Multi-dimensional arrays | Không hỗ trợ | Dùng 1D + manual indexing |
+| `typedef` | Không hỗ trợ | — |
+| Hex/octal literals | Không hỗ trợ | Chỉ decimal |
+| `printf` | Không có | Dùng `write()` syscall |
+| Standard library | Không có | Dùng VinixOS syscalls |
+| Function pointers | Không hỗ trợ | — |
+| Variadic functions | Không hỗ trợ | — |
 
 ---
 
-**Issue**: Semantic error "Undeclared function"
+## Tóm Tắt
 
-**Solution**: Add function prototype before use:
-```c
-int foo(int x);  // forward declaration
+| Concept | Ý Nghĩa |
+|---------|---------|
+| `python3 -m toolchain.main` | Entry point — không cần install, chạy trực tiếp |
+| Runtime library | Link tự động — `crt0.S`, `syscalls.S`, `divmod.S` |
+| Base address `0x40000000` | Output ELF khớp với VinixOS user space |
+| Software division | Mọi `/` và `%` đều dùng `__aeabi_idiv` |
+| `write(1, buf, len)` | Standard output qua UART syscall |
+| No stdlib | Phải implement hoặc dùng VinixOS syscalls |
 
-int main() {
-    foo(5);
-    return 0;
-}
+---
 
-int foo(int x) {
-    return x * 2;
-}
-```
+## Xem Thêm
 
-## Performance Tips
-
-### Compilation Speed
-
-- Compiler speed is O(n) trong source code size
-- Typical compilation time: < 1 second cho small programs
-
-### Generated Code Performance
-
-- No optimization implemented
-- Code quality equivalent to GCC -O0
-- Focus on correctness, not performance
-
-### Improving Performance
-
-Nếu cần faster execution:
-1. Use GCC với optimization flags (-O2, -O3)
-2. Rewrite performance-critical code trong assembly
-3. Profile và optimize hot paths
-
-## Troubleshooting
-
-### Compiler Crashes
-
-**Check Python version**:
-```bash
-python3 --version  # should be 3.8+
-```
-
-**Check dependencies**:
-```bash
-pip3 list | grep -E "pytest|hypothesis"
-```
-
-### Compilation Errors
-
-**Enable verbose output**: Add print statements trong compiler code
-
-**Check intermediate outputs**: Use --dump-tokens, --dump-ast, --dump-ir
-
-**Simplify program**: Remove code until compilation succeeds, then add back incrementally
-
-### Runtime Errors
-
-**Check binary format**:
-```bash
-file myprogram
-readelf -h myprogram
-```
-
-**Check syscalls**: Ensure only supported syscalls used (write, read, exit, yield)
-
-**Check memory layout**: Verify base address 0x40000000
-
-## Advanced Usage
-
-### Custom Linker Script
-
-Modify `toolchain/runtime/app.ld` để customize memory layout:
-
-```ld
-ENTRY(_start)
-
-SECTIONS
-{
-    . = 0x40000000;  /* change base address */
-    
-    .text : { *(.text) }
-    .rodata : { *(.rodata) }
-    .data : { *(.data) }
-    .bss : { *(.bss) }
-}
-```
-
-### Custom Runtime
-
-Modify `toolchain/runtime/crt0.S` để customize startup code:
-
-```asm
-.global _start
-_start:
-    ; custom initialization
-    bl main
-    mov r0, r0
-    bl exit
-```
-
-### Adding Syscalls
-
-1. Add syscall number trong `syscall_support.py`
-2. Add syscall wrapper trong `runtime/syscalls.S`
-3. Rebuild runtime library: `make runtime`
-
-## Resources
-
-- **Architecture Documentation**: `docs/architecture.md`
-- **Subset C Specification**: `docs/subset_c_spec.md`
-- **IR Format**: `docs/ir_format.md`
-- **Code Generation Strategy**: `docs/codegen_strategy.md`
-- **Test Programs**: `tests/integration/programs/`
-- **ARM Architecture Reference**: ARMv7-A ARM
-- **AAPCS Specification**: ARM Procedure Call Standard
+- [architecture.md](architecture.md) — Pipeline chi tiết
+- [subset_c_spec.md](subset_c_spec.md) — Ngôn ngữ được support
+- [VinixOS/docs/06-syscall-mechanism.md](../../VinixOS/docs/06-syscall-mechanism.md) — Syscall ABI

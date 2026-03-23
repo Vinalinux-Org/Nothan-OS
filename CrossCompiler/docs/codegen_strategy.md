@@ -1,47 +1,51 @@
 # Code Generation Strategy
 
-## Tổng Quan
+> **Phạm vi:** IR → ARM assembly — register allocation, AAPCS calling convention, instruction selection, stack frame layout, và syscall generation.
+> **Yêu cầu trước:** [ir_format.md](ir_format.md) — hiểu IR input; [architecture.md](architecture.md) — codegen là backend phase.
+> **Files liên quan:** `toolchain/backend/armv7a/code_generator.py`, `toolchain/backend/armv7a/register_allocator.py`, `toolchain/backend/armv7a/syscall_support.py`
 
-Code generation phase chuyển đổi IR (three-address code) thành ARM assembly code cho ARMv7-A architecture. Phase này implement register allocation, instruction selection, và AAPCS calling convention.
+---
+
+## Register Layout
+
+### ARM Register Roles
+
+| Register | ABI Name | Role | Save/Restore |
+|----------|----------|------|-------------|
+| `r0` | `a1` | Argument 1 / Return value | Caller-saved |
+| `r1` | `a2` | Argument 2 | Caller-saved |
+| `r2` | `a3` | Argument 3 | Caller-saved |
+| `r3` | `a4` | Argument 4 | Caller-saved |
+| `r4` | `v1` | Local / temporary | **Callee-saved** |
+| `r5` | `v2` | Local / temporary | **Callee-saved** |
+| `r6` | `v3` | Local / temporary | **Callee-saved** |
+| `r7` | `v4` | Local / temporary / **syscall#** | **Callee-saved** |
+| `r8` | `v5` | Local / temporary | **Callee-saved** |
+| `r9` | `v6` | Local / temporary | **Callee-saved** |
+| `r10` | `v7` | Local / temporary | **Callee-saved** |
+| `r11` | `fp` | Frame pointer (optional) | **Callee-saved** |
+| `r12` | `ip` | Intra-procedure scratch | Caller-saved |
+| `r13` | `sp` | Stack pointer | — |
+| `r14` | `lr` | Link register (return address) | Saved in prologue |
+| `r15` | `pc` | Program counter | — |
+
+> **Temporaries pool:** `r4–r11` (8 registers). Khi IR generates nhiều temporaries hơn 8, chúng bị spill xuống stack.
+
+---
 
 ## Register Allocation
 
-### Available Registers
+### Strategy: Linear Scan
 
-**Callee-Saved Registers** (r4-r11): 8 registers
-- Used cho temporaries và local variables
-- Must be saved/restored trong function prologue/epilogue
+1. **Allocate on-demand:** Mỗi IR temporary được assign một register từ `r4–r11` theo thứ tự.
+2. **Track mapping:** `{temp_name → register}` và `{var_name → stack_offset}`.
+3. **Spilling:** Khi hết registers, spill least recently used (LRU) temporary xuống stack.
+4. **Reload on use:** Load spilled temporary từ stack khi cần dùng lại.
 
-**Argument Registers** (r0-r3): 4 registers
-- Used cho function arguments (first 4 parameters)
-- Used cho return values (r0)
-- Scratch registers (không cần save/restore)
+### Ví Dụ Allocation
 
-**Special Registers**:
-- sp (r13): Stack pointer
-- lr (r14): Link register (return address)
-- pc (r15): Program counter
+**IR:**
 
-### Allocation Strategy
-
-1. **Linear Scan Allocation**:
-   - Allocate registers on-demand cho temporaries
-   - Use r4-r11 trong sequential order
-   - Track allocation mapping: temp/var name → register
-
-2. **Register Spilling**:
-   - Khi hết available registers, spill least recently used register to stack
-   - Store spilled value to stack slot
-   - Track spilled variables: name → stack offset
-   - Reload từ stack khi needed
-
-3. **Register Freeing**:
-   - Free registers sau khi temporary không còn needed
-   - Reuse freed registers cho new temporaries
-
-### Example
-
-**IR**:
 ```
 t0 = x add y
 t1 = t0 mul 2
@@ -49,714 +53,253 @@ t2 = t1 sub z
 result = t2
 ```
 
-**Register Allocation**:
-```
-t0 → r4
-t1 → r5
-t2 → r6
-result → r7
+**Allocation:**
+
+| Temporary | Register |
+|-----------|---------|
+| `t0` | `r4` |
+| `t1` | `r5` |
+| `t2` | `r6` |
+| `result` | `r7` |
+
+**Generated Assembly:**
+
+```asm
+ldr r0, [fp, #-8]    @ load x
+ldr r1, [fp, #-12]   @ load y
+add r4, r0, r1       @ t0 = x + y
+mov r0, #2
+mul r5, r4, r0       @ t1 = t0 * 2
+ldr r0, [fp, #-16]   @ load z
+sub r6, r5, r0       @ t2 = t1 - z
+str r6, [fp, #-20]   @ store result
 ```
 
-**Assembly**:
+### Spilling Example
+
+Khi tất cả `r4–r11` đều occupied và cần thêm temporary:
+
 ```asm
-ldr r0, [fp, #-8]    ; load x
-ldr r1, [fp, #-12]   ; load y
-add r4, r0, r1       ; t0 = x + y
-mov r0, #2
-mul r5, r4, r0       ; t1 = t0 * 2
-ldr r0, [fp, #-16]   ; load z
-sub r6, r5, r0       ; t2 = t1 - z
-str r6, [fp, #-20]   ; store result
+@ Spill r4 (oldest) to stack
+str r4, [sp, #-4]!   @ push r4 onto stack
+                     @ r4 now available for new temporary
 ```
+
+Khi cần dùng lại value đã spill:
+
+```asm
+ldr r4, [sp], #4     @ pop r4 from stack
+```
+
+---
 
 ## AAPCS Calling Convention
 
 ### Function Prologue
 
-**Purpose**: Setup stack frame và save callee-saved registers
-
-**Steps**:
-1. Push callee-saved registers và link register: `push {r4-r11, lr}`
-2. Setup frame pointer: `mov fp, sp` (optional)
-3. Allocate stack space cho local variables: `sub sp, sp, #frame_size`
-
-**Example**:
 ```asm
-foo:
-    push {r4-r11, lr}
-    sub sp, sp, #16      ; allocate 16 bytes for locals
+; function_entry foo
+push    {r4-r11, lr}     @ Save callee-saved registers + return addr (36 bytes)
+sub     sp, sp, #N       @ Allocate N bytes for local variables
+                         @ N = (num_locals * 4) rounded up to 8-byte alignment
 ```
 
 ### Function Epilogue
 
-**Purpose**: Cleanup stack frame và restore registers
-
-**Steps**:
-1. Deallocate stack space: `add sp, sp, #frame_size`
-2. Pop callee-saved registers và return: `pop {r4-r11, pc}`
-
-**Example**:
 ```asm
-    add sp, sp, #16      ; deallocate locals
-    pop {r4-r11, pc}     ; restore and return
+; function_exit foo
+add     sp, sp, #N       @ Deallocate local variables
+pop     {r4-r11, pc}     @ Restore regs; pc = lr → return to caller
 ```
 
-### Argument Passing
+> **`pop {r4-r11, pc}`:** Pop lr (saved as pc) → return trực tiếp, không cần `bx lr`.
 
-**Rules**:
-- First 4 arguments: r0, r1, r2, r3
-- Additional arguments: push to stack (right-to-left order)
+### Stack Frame Layout
 
-**Example** (3 arguments):
-```asm
-mov r0, #5           ; arg1
-mov r1, #10          ; arg2
-mov r2, #15          ; arg3
-bl foo
+```
+[higher address]
+    LR (return address)     ← saved by push {r4-r11, lr}
+    r11 (fp)
+    r10
+    ...
+    r4
+    local_var_n             ← sp + 4*(n-1)  [allocated by sub sp, sp, #N]
+    ...
+    local_var_1             ← sp + 4
+    local_var_0             ← sp            ← current SP
+[lower address]
 ```
 
-**Example** (5 arguments):
-```asm
-mov r0, #1           ; arg1
-mov r1, #2           ; arg2
-mov r2, #3           ; arg3
-mov r3, #4           ; arg4
-mov r4, #5
-push {r4}            ; arg5 on stack
-bl foo
-add sp, sp, #4       ; cleanup stack
-```
+### Argument Passing (AAPCS)
 
-### Return Value
+| Position | Register | Notes |
+|----------|---------|-------|
+| Arg 1 | `r0` | Also return value |
+| Arg 2 | `r1` | |
+| Arg 3 | `r2` | |
+| Arg 4 | `r3` | |
+| Arg 5+ | Stack | Push in reverse order (không implement) |
 
-- Return value placed trong r0
-- Caller reads return value từ r0 sau function call
+> VinixOS Subset C hỗ trợ tối đa 4 parameters — stack arguments không cần thiết.
 
-**Example**:
-```asm
-; in callee
-mov r0, #42
-pop {r4-r11, pc}
-
-; in caller
-bl foo
-mov r4, r0           ; save return value
-```
+---
 
 ## Instruction Selection
 
-### Arithmetic Operations
+### IR → ARM Mapping
 
-**Addition**: `add dest, left, right`
-```
-IR:  t0 = x add y
-ASM: ldr r0, [fp, #x_offset]
-     ldr r1, [fp, #y_offset]
-     add r4, r0, r1
-```
+| IR Operation | ARM Instructions | Notes |
+|-------------|-----------------|-------|
+| `t = a add b` | `add rd, ra, rb` | |
+| `t = a sub b` | `sub rd, ra, rb` | |
+| `t = a mul b` | `mul rd, ra, rb` | |
+| `t = a div b` | `bl __aeabi_idiv` | Software division |
+| `t = a mod b` | `bl __aeabi_idivmod` | r1 = remainder |
+| `t = a and b` | `and rd, ra, rb` | |
+| `t = a or b` | `orr rd, ra, rb` | |
+| `t = a xor b` | `eor rd, ra, rb` | |
+| `t = a shl b` | `lsl rd, ra, rb` | |
+| `t = a shr b` | `asr rd, ra, rb` | Arithmetic shift right |
+| `t = a eq b` | `cmp ra, rb` + `moveq` | |
+| `t = a ne b` | `cmp ra, rb` + `movne` | |
+| `t = a lt b` | `cmp ra, rb` + `movlt` | |
+| `t = a gt b` | `cmp ra, rb` + `movgt` | |
+| `t = neg a` | `neg rd, ra` | or `rsb rd, ra, #0` |
+| `t = not a` | `cmp ra, #0` + `moveq r, #1` | Logical NOT |
+| `t = deref p` | `ldr rd, [rp]` | |
+| `t = addr x` | `add rd, fp, #offset` | |
+| `t = load base off` | `ldr rd, [rb, #off]` | |
+| `store base off val` | `str rv, [rb, #off]` | |
+| `goto L` | `b L` | |
+| `if t goto L` | `cmp rt, #0` + `bne L` | |
+| `param a` | `mov r0, ra` (r1, r2, r3) | Sequential fill |
+| `call f nargs` | `bl f` | Result in r0 |
 
-**Subtraction**: `sub dest, left, right`
-```
-IR:  t0 = x sub y
-ASM: ldr r0, [fp, #x_offset]
-     ldr r1, [fp, #y_offset]
-     sub r4, r0, r1
-```
+### Comparison Pattern
 
-**Multiplication**: `mul dest, left, right`
-```
-IR:  t0 = x mul y
-ASM: ldr r0, [fp, #x_offset]
-     ldr r1, [fp, #y_offset]
-     mul r4, r0, r1
-```
-
-**Division**: `bl __aeabi_idiv` (software division)
-```
-IR:  t0 = x div y
-ASM: ldr r0, [fp, #x_offset]    ; dividend
-     ldr r1, [fp, #y_offset]    ; divisor
-     bl __aeabi_idiv
-     mov r4, r0                 ; result in r0
-```
-
-**Modulo**: `bl __aeabi_idivmod` (software division + modulo)
-```
-IR:  t0 = x mod y
-ASM: ldr r0, [fp, #x_offset]    ; dividend
-     ldr r1, [fp, #y_offset]    ; divisor
-     bl __aeabi_idivmod
-     mov r4, r1                 ; remainder in r1
+```asm
+@ t = x lt y  →  t = (x < y) ? 1 : 0
+cmp     r0, r1      @ compare x, y
+movlt   r4, #1      @ if less-than: r4 = 1
+movge   r4, #0      @ else: r4 = 0
 ```
 
-### Logical Operations
+### Software Division
 
-**AND**: `and dest, left, right`
-```
-IR:  t0 = x and y
-ASM: ldr r0, [fp, #x_offset]
-     ldr r1, [fp, #y_offset]
-     and r4, r0, r1
-```
+Cortex-A8 không có hardware division instruction:
 
-**OR**: `orr dest, left, right`
-```
-IR:  t0 = x or y
-ASM: ldr r0, [fp, #x_offset]
-     ldr r1, [fp, #y_offset]
-     orr r4, r0, r1
+```asm
+@ t = a div b
+mov     r0, ra      @ dividend in r0
+mov     r1, rb      @ divisor in r1
+bl      __aeabi_idiv @ result in r0
+mov     r4, r0      @ move result to assigned temp register
 ```
 
-**XOR**: `eor dest, left, right`
-```
-IR:  t0 = x xor y
-ASM: ldr r0, [fp, #x_offset]
-     ldr r1, [fp, #y_offset]
-     eor r4, r0, r1
-```
+> `__aeabi_idiv` và `__aeabi_idivmod` được provide bởi `toolchain/runtime/divmod.S`.
 
-**Shift Left**: `lsl dest, left, right`
-```
-IR:  t0 = x shl y
-ASM: ldr r0, [fp, #x_offset]
-     ldr r1, [fp, #y_offset]
-     lsl r4, r0, r1
-```
-
-**Shift Right**: `asr dest, left, right` (arithmetic shift)
-```
-IR:  t0 = x shr y
-ASM: ldr r0, [fp, #x_offset]
-     ldr r1, [fp, #y_offset]
-     asr r4, r0, r1
-```
-
-### Comparison Operations
-
-**Strategy**: Use cmp + conditional moves
-
-**Equal**: `cmp + moveq`
-```
-IR:  t0 = x eq y
-ASM: ldr r0, [fp, #x_offset]
-     ldr r1, [fp, #y_offset]
-     cmp r0, r1
-     moveq r4, #1
-     movne r4, #0
-```
-
-**Not Equal**: `cmp + movne`
-```
-IR:  t0 = x ne y
-ASM: cmp r0, r1
-     movne r4, #1
-     moveq r4, #0
-```
-
-**Less Than**: `cmp + movlt`
-```
-IR:  t0 = x lt y
-ASM: cmp r0, r1
-     movlt r4, #1
-     movge r4, #0
-```
-
-**Greater Than**: `cmp + movgt`
-```
-IR:  t0 = x gt y
-ASM: cmp r0, r1
-     movgt r4, #1
-     movle r4, #0
-```
-
-### Unary Operations
-
-**Negation**: `rsb dest, operand, #0`
-```
-IR:  t0 = neg x
-ASM: ldr r0, [fp, #x_offset]
-     rsb r4, r0, #0
-```
-
-**Logical NOT**: `cmp + conditional moves`
-```
-IR:  t0 = not x
-ASM: ldr r0, [fp, #x_offset]
-     cmp r0, #0
-     moveq r4, #1
-     movne r4, #0
-```
-
-**Dereference**: `ldr dest, [operand]`
-```
-IR:  t0 = deref p
-ASM: ldr r0, [fp, #p_offset]
-     ldr r4, [r0]
-```
-
-**Address-of**: `add dest, fp, #offset`
-```
-IR:  t0 = addr x
-ASM: add r4, fp, #x_offset
-```
-
-### Memory Operations
-
-**Load**: `ldr dest, [base, #offset]`
-```
-IR:  t0 = load arr 4
-ASM: ldr r0, [fp, #arr_offset]
-     ldr r4, [r0, #4]
-```
-
-**Store**: `str value, [base, #offset]`
-```
-IR:  store arr 0 5
-ASM: ldr r0, [fp, #arr_offset]
-     mov r1, #5
-     str r1, [r0]
-```
-
-### Control Flow
-
-**Unconditional Branch**: `b label`
-```
-IR:  goto L0
-ASM: b L0
-```
-
-**Conditional Branch**: `cmp + conditional branch`
-```
-IR:  if_false t0 goto L1
-ASM: ldr r0, [fp, #t0_offset]
-     cmp r0, #0
-     beq L1
-```
-
-### Function Operations
-
-**Function Call**:
-```
-IR:  param 5
-     param 10
-     t0 = call add 2
-ASM: mov r0, #5
-     mov r1, #10
-     bl add
-     mov r4, r0
-```
-
-**Return**:
-```
-IR:  return t0
-ASM: ldr r0, [fp, #t0_offset]
-     add sp, sp, #frame_size
-     pop {r4-r11, pc}
-```
-
-## Stack Frame Layout
-
-### Structure
-
-```
-High Address
-+------------------+
-| Saved lr         |  <- [fp, #36]
-| Saved r11        |  <- [fp, #32]
-| Saved r10        |  <- [fp, #28]
-| ...              |
-| Saved r4         |  <- [fp, #0]
-+------------------+  <- fp (frame pointer)
-| Local var 1      |  <- [fp, #-4]
-| Local var 2      |  <- [fp, #-8]
-| ...              |
-| Spilled temp     |  <- [fp, #-N]
-+------------------+  <- sp (stack pointer)
-Low Address
-```
-
-### Offset Calculation
-
-- Local variables: negative offsets từ fp
-- First local: [fp, #-4]
-- Second local: [fp, #-8]
-- Nth local: [fp, #-(N*4)]
-
-### Frame Size
-
-```
-frame_size = num_locals * 4 + num_spilled * 4
-```
+---
 
 ## Syscall Generation
 
-### Syscall Interface
-
-**ARM Linux Syscall Convention**:
-- Syscall number trong r7
-- Arguments trong r0-r3
-- Invoke với `svc #0`
-- Return value trong r0
-
-### Syscall Numbers
-
-```
-SYS_exit  = 1
-SYS_read  = 3
-SYS_write = 4
-SYS_yield = 158
-```
-
-### Example: write(fd, buf, count)
+Syscalls được trigger bởi `call` IR với syscall name được nhận ra:
 
 ```asm
-mov r7, #4           ; SYS_write
-mov r0, #1           ; fd = stdout
-ldr r1, [fp, #buf]   ; buf address
-mov r2, #15          ; count
-svc #0               ; invoke syscall
+@ write(1, msg, len) → syscall #0
+mov     r0, #1          @ fd = 1 (stdout)
+mov     r1, r_msg       @ buf
+mov     r2, r_len       @ len
+mov     r7, #0          @ SYS_WRITE = 0
+svc     #0              @ trigger SVC exception
+@ return value in r0
 ```
 
-### Syscall Wrappers
+**Syscall numbers (VinixOS):**
 
-Runtime library cung cấp syscall wrappers trong syscalls.S:
+| # | Syscall | r0 | r1 | r2 |
+|---|---------|----|----|-----|
+| 0 | `write` | fd | buf | count |
+| 1 | `exit` | status | — | — |
+| 2 | `yield` | — | — | — |
+| 3 | `read` | fd | buf | count |
+| 6 | `open` | path | flags | — |
+| 7 | `read_file` | fd | buf | count |
+| 8 | `close` | fd | — | — |
 
-```asm
-.global write
-write:
-    mov r7, #4
-    svc #0
-    bx lr
+---
 
-.global read
-read:
-    mov r7, #3
-    svc #0
-    bx lr
+## End-to-End Example
 
-.global exit
-exit:
-    mov r7, #1
-    svc #0
-    ; never returns
-
-.global yield
-yield:
-    mov r7, #158
-    svc #0
-    bx lr
-```
-
-## Assembly Output Format
-
-### Sections
-
-**.text**: Code section
-```asm
-.text
-.global main
-main:
-    ; function code
-```
-
-**.data**: Initialized data (not used trong current implementation)
-
-**.rodata**: Read-only data (not used trong current implementation)
-
-**.bss**: Uninitialized data (not used trong current implementation)
-
-### GNU Assembler Syntax
-
-- Comments: `; comment` hoặc `@ comment`
-- Labels: `label_name:`
-- Directives: `.text`, `.global`, `.word`
-- Instructions: `mnemonic operands`
-
-### Example Output
-
-```asm
-.text
-.global main
-
-main:
-    push {r4-r11, lr}
-    sub sp, sp, #8
-    
-    mov r0, #5
-    str r0, [fp, #-4]
-    
-    ldr r0, [fp, #-4]
-    mov r1, #3
-    add r4, r0, r1
-    str r4, [fp, #-8]
-    
-    mov r0, #0
-    add sp, sp, #8
-    pop {r4-r11, pc}
-```
-
-## Memory Layout và Linking
-
-### Linker Script (app.ld)
-
-```ld
-ENTRY(_start)
-
-SECTIONS
-{
-    . = 0x40000000;
-    
-    .text : {
-        *(.text)
-        *(.text.*)
-    }
-    
-    .rodata : {
-        *(.rodata)
-        *(.rodata.*)
-    }
-    
-    .data : {
-        *(.data)
-        *(.data.*)
-    }
-    
-    .bss : {
-        *(.bss)
-        *(.bss.*)
-        *(COMMON)
-    }
-}
-```
-
-### Memory Map
-
-```
-0x40000000: _start (entry point)
-0x40000000 + offset: main
-0x40000000 + offset: other functions
-...
-```
-
-### Runtime Library
-
-**crt0.S**: C runtime startup
-```asm
-.global _start
-_start:
-    bl main          ; call main()
-    mov r0, r0       ; main's return value already in r0
-    bl exit          ; exit with return value
-```
-
-**divmod.S**: Software division
-```asm
-.global __aeabi_idiv
-__aeabi_idiv:
-    ; division implementation
-    bx lr
-
-.global __aeabi_idivmod
-__aeabi_idivmod:
-    ; division + modulo implementation
-    bx lr
-```
-
-## Code Generation Algorithm
-
-### Main Loop
-
-```python
-for instruction in ir_instructions:
-    if isinstance(instruction, BinaryOpIR):
-        generate_binary_op(instruction)
-    elif isinstance(instruction, UnaryOpIR):
-        generate_unary_op(instruction)
-    elif isinstance(instruction, AssignIR):
-        generate_assign(instruction)
-    elif isinstance(instruction, LoadIR):
-        generate_load(instruction)
-    elif isinstance(instruction, StoreIR):
-        generate_store(instruction)
-    elif isinstance(instruction, LabelIR):
-        emit_label(instruction.label)
-    elif isinstance(instruction, GotoIR):
-        emit(f"b {instruction.label}")
-    elif isinstance(instruction, CondGotoIR):
-        generate_cond_goto(instruction)
-    elif isinstance(instruction, ParamIR):
-        generate_param(instruction)
-    elif isinstance(instruction, CallIR):
-        generate_call(instruction)
-    elif isinstance(instruction, ReturnIR):
-        generate_return(instruction)
-    elif isinstance(instruction, FunctionEntryIR):
-        generate_function_entry(instruction)
-    elif isinstance(instruction, FunctionExitIR):
-        generate_function_exit(instruction)
-```
-
-### Binary Operation Generation
-
-```python
-def generate_binary_op(instr):
-    # Load operands into registers
-    left_reg = load_operand(instr.left)
-    right_reg = load_operand(instr.right)
-    
-    # Allocate register for result
-    dest_reg = allocate_register(instr.dest)
-    
-    # Emit instruction
-    if instr.op == 'add':
-        emit(f"add {dest_reg}, {left_reg}, {right_reg}")
-    elif instr.op == 'sub':
-        emit(f"sub {dest_reg}, {left_reg}, {right_reg}")
-    elif instr.op == 'mul':
-        emit(f"mul {dest_reg}, {left_reg}, {right_reg}")
-    elif instr.op == 'div':
-        emit(f"mov r0, {left_reg}")
-        emit(f"mov r1, {right_reg}")
-        emit(f"bl __aeabi_idiv")
-        emit(f"mov {dest_reg}, r0")
-    # ... other operators
-    
-    # Free operand registers
-    free_register(left_reg)
-    free_register(right_reg)
-```
-
-### Function Entry Generation
-
-```python
-def generate_function_entry(instr):
-    emit(f".global {instr.name}")
-    emit(f"{instr.name}:")
-    emit("push {r4-r11, lr}")
-    
-    # Calculate frame size
-    frame_size = calculate_frame_size()
-    if frame_size > 0:
-        emit(f"sub sp, sp, #{frame_size}")
-```
-
-### Function Exit Generation
-
-```python
-def generate_function_exit(instr):
-    # Deallocate frame
-    frame_size = calculate_frame_size()
-    if frame_size > 0:
-        emit(f"add sp, sp, #{frame_size}")
-    
-    emit("pop {r4-r11, pc}")
-```
-
-## Optimization Opportunities (Not Implemented)
-
-Phase 2 Compiler không implement optimizations. Possible optimizations:
-
-### Register Allocation
-- Graph coloring allocation
-- Live range analysis
-- Better spilling heuristics
-
-### Instruction Selection
-- Peephole optimization
-- Instruction combining
-- Constant folding
-
-### Code Layout
-- Basic block reordering
-- Branch prediction hints
-- Function inlining
-
-### Memory Access
-- Load/store optimization
-- Address calculation strength reduction
-- Common subexpression elimination
-
-## Target-Specific Considerations
-
-### Cortex-A8 (BeagleBone Black)
-
-**No Hardware Division**:
-- Use software division routines
-- __aeabi_idiv cho division
-- __aeabi_idivmod cho modulo
-
-**Instruction Set**:
-- ARMv7-A instruction set
-- Thumb-2 not used (ARM mode only)
-- NEON not used
-
-**Cache**:
-- No cache management trong generated code
-- Assume VinixOS handles cache coherency
-
-**Alignment**:
-- 4-byte alignment cho instructions
-- 4-byte alignment cho word accesses
-- No unaligned access support
-
-## Assembly Generation Example
-
-### Source Code
+**Source:**
 
 ```c
 int add(int a, int b) {
-    return a + b;
-}
-
-int main() {
-    int result = add(5, 3);
-    return 0;
+    int result = a + b;
+    return result;
 }
 ```
 
-### Generated Assembly
+**IR:**
+
+```
+function_entry add
+t0 = a add b
+result = t0
+return result
+function_exit add
+```
+
+**Generated Assembly:**
 
 ```asm
-.text
-
-.global add
 add:
-    push {r4-r11, lr}
-    add r0, r0, r1
-    pop {r4-r11, pc}
+    push    {r4-r11, lr}     @ prologue: save regs
+    sub     sp, sp, #8       @ allocate 2 local vars (result, t0)
 
-.global main
-main:
-    push {r4-r11, lr}
-    sub sp, sp, #4
-    
-    mov r0, #5
-    mov r1, #3
-    bl add
-    str r0, [sp, #0]
-    
-    mov r0, #0
-    add sp, sp, #4
-    pop {r4-r11, pc}
+    @ t0 = a add b
+    @ a in r0, b in r1 (AAPCS arguments)
+    add     r4, r0, r1       @ r4 = t0 = a + b
+
+    @ result = t0
+    str     r4, [sp, #0]     @ store result on stack
+
+    @ return result
+    ldr     r0, [sp, #0]     @ load result into r0 (return value)
+
+    add     sp, sp, #8       @ epilogue: deallocate
+    pop     {r4-r11, pc}     @ restore regs + return
 ```
 
-## Code Quality
+---
 
-### Correctness Focus
+## Key Design Decisions
 
-- Prioritize correctness over performance
-- Generate straightforward, readable assembly
-- Avoid complex optimizations
+| Decision | Rationale | Trade-off |
+|----------|-----------|-----------|
+| Linear scan allocation | Simple, no need for interference graph | Không optimal như graph coloring |
+| Software division | Cortex-A8 không có SDIV | Slower but correct |
+| Save/restore all r4-r11 | Simple — không cần track which regs used | Slight overhead cho simple functions |
+| Base address `0x40000000` | Match VinixOS user space | Fixed — không support PIE |
+| No optimization | Focus on correctness | Output equivalent to `-O0` |
 
-### Code Size
+---
 
-- No optimization → larger code size
-- Equivalent to GCC -O0
-- Acceptable cho educational purposes
+## Tóm Tắt
 
-### Performance
+| Concept | Ý Nghĩa |
+|---------|---------|
+| r4-r11 = temporaries pool | 8 callee-saved registers cho IR temporaries |
+| Linear scan allocation | Assign r4, r5, ... sequentially; spill to stack khi hết |
+| AAPCS function frame | `push {r4-r11, lr}` prologue; `pop {r4-r11, pc}` epilogue |
+| Arguments in r0-r3 | First 4 params; return value in r0 |
+| Software division | `__aeabi_idiv` từ `runtime/divmod.S` |
+| Syscall via r7+svc | `mov r7, #num; svc #0` — matches VinixOS ABI |
+| No optimization | Correctness over performance — equivalent to GCC -O0 |
 
-- No optimization → slower execution
-- Simple register allocation
-- Straightforward instruction selection
-- Focus on correctness, not speed
+---
+
+## Xem Thêm
+
+- [ir_format.md](ir_format.md) — IR instructions được map ở đây
+- [architecture.md](architecture.md) — Codegen trong compiler pipeline
+- [VinixOS/docs/06-syscall-mechanism.md](../../VinixOS/docs/06-syscall-mechanism.md) — Kernel-side syscall handling

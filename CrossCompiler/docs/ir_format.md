@@ -1,152 +1,224 @@
-# IR Format Documentation
+# IR Format — Three-Address Code
 
-## Tổng Quan
+> **Phạm vi:** Định nghĩa đầy đủ format IR (Three-Address Code), tất cả instruction types, ví dụ generation, và các properties quan trọng.
+> **Yêu cầu trước:** [architecture.md](architecture.md) — IR là middle-end của pipeline; [subset_c_spec.md](subset_c_spec.md) — biết ngôn ngữ input.
+> **Files liên quan:** `toolchain/middleend/ir/ir_instructions.py`, `toolchain/middleend/ir/ir_generator.py`, `toolchain/middleend/ir/generators.py`
 
-Phase 2 Compiler sử dụng Three-Address Code (3AC) làm Intermediate Representation (IR). IR này là một low-level representation nằm giữa AST và assembly code, giúp đơn giản hóa code generation.
+---
 
-## Three-Address Code
+## Three-Address Code (3AC)
 
-### Định Nghĩa
-
-Three-Address Code là một IR format trong đó mỗi instruction có tối đa 3 operands:
+Mỗi IR instruction có tối đa **3 operands**:
 
 ```
-result = operand1 op operand2
+result = operand1  op  operand2
 ```
 
-### Ưu Điểm
-
-- Simple và uniform representation
-- Easy to analyze và transform
-- Straightforward mapping to assembly
+**Tại sao 3AC:**
+- Simple và uniform — dễ analyze, transform, và map sang assembly
 - Explicit temporaries cho intermediate values
 - Explicit control flow với labels và jumps
+- Không phụ thuộc vào AST structure sau khi generate
+
+---
 
 ## IR Instruction Types
 
-### 1. Binary Operations
+### Quick Reference Table
 
-**Format**: `result = operand1 op operand2`
+| Category | Type | Format | Mô Tả |
+|----------|------|--------|-------|
+| Binary op | `BinaryOpIR` | `result = a op b` | Arithmetic, logical, comparison |
+| Unary op | `UnaryOpIR` | `result = op a` | Neg, not, deref, addr |
+| Assign | `AssignIR` | `dest = src` | Simple assignment |
+| Load | `LoadIR` | `result = load base offset` | Load từ memory |
+| Store | `StoreIR` | `store base offset value` | Write vào memory |
+| Label | `LabelIR` | `label L0` | Jump target |
+| Goto | `GotoIR` | `goto L0` | Unconditional jump |
+| Cond goto | `CondGotoIR` | `if cond goto L0` | Conditional jump |
+| Param | `ParamIR` | `param arg` | Setup function argument |
+| Call | `CallIR` | `result = call func nargs` | Function call |
+| Return | `ReturnIR` | `return [value]` | Return từ function |
+| Func entry | `FunctionEntryIR` | `function_entry name` | Function begin marker |
+| Func exit | `FunctionExitIR` | `function_exit name` | Function end marker |
 
-**Operators**:
-- Arithmetic: add, sub, mul, div, mod
-- Logical: and, or, xor, shl, shr
-- Comparison: eq, ne, lt, gt, le, ge
+---
 
-**Examples**:
+## Binary Operations (`BinaryOpIR`)
+
+**Format:** `result = operand1 op operand2`
+
+**Operators:**
+
+| Category | Operators |
+|----------|---------|
+| Arithmetic | `add`, `sub`, `mul`, `div`, `mod` |
+| Logical/Bitwise | `and`, `or`, `xor`, `shl`, `shr` |
+| Comparison | `eq`, `ne`, `lt`, `gt`, `le`, `ge` |
+
+**Examples:**
+
+```
+t0 = x add y        /* t0 = x + y        */
+t1 = t0 mul 2       /* t1 = t0 * 2       */
+t2 = a lt b         /* t2 = (a < b)      */
+t3 = x shl 3        /* t3 = x << 3       */
+t4 = p and 0xFF     /* t4 = p & 0xFF     */
+```
+
+**C source → IR:**
+
+```c
+int z = (x + y) * 2;
+```
+
 ```
 t0 = x add y
 t1 = t0 mul 2
-t2 = a lt b
+z  = t1
 ```
 
-### 2. Unary Operations
+---
 
-**Format**: `result = op operand`
+## Unary Operations (`UnaryOpIR`)
 
-**Operators**:
-- neg: negation (-x)
-- not: logical not (!x)
-- deref: pointer dereference (*p)
-- addr: address-of (&x)
+**Format:** `result = op operand`
 
-**Examples**:
+| Operator | Meaning | C equivalent |
+|----------|---------|-------------|
+| `neg` | Arithmetic negation | `-x` |
+| `not` | Logical NOT | `!x` |
+| `deref` | Pointer dereference | `*p` |
+| `addr` | Address-of | `&x` |
+
+**Examples:**
+
 ```
-t0 = neg x
-t1 = not t0
-t2 = deref p
-t3 = addr x
-```
-
-### 3. Assignment
-
-**Format**: `dest = source`
-
-**Examples**:
-```
-x = 5
-y = t0
+t0 = neg x         /* t0 = -x    */
+t1 = not t0        /* t1 = !t0   */
+t2 = deref p       /* t2 = *p    */
+t3 = addr x        /* t3 = &x    */
 ```
 
-### 4. Memory Operations
+---
 
-**Load**: `result = load base offset`
-```
-t0 = load arr 4    // arr[1] (offset 4 bytes)
-```
+## Assignment (`AssignIR`)
 
-**Store**: `store base offset value`
-```
-store arr 0 5      // arr[0] = 5
-```
+**Format:** `dest = source`
 
-### 5. Control Flow
-
-**Label**: `label L0`
 ```
-label L0
+x = 5              /* Constant assignment  */
+y = t0             /* Temp to variable     */
+arr = t1           /* Array/pointer assign */
 ```
 
-**Unconditional Jump**: `goto L0`
+---
+
+## Memory Operations
+
+### Load (`LoadIR`)
+
+**Format:** `result = load base offset`
+
 ```
-goto L0
+t0 = load arr 0    /* t0 = arr[0]  (byte offset 0)  */
+t1 = load arr 4    /* t1 = arr[1]  (byte offset 4)  */
+t2 = load p 0      /* t2 = *p      (deref pointer)  */
 ```
 
-**Conditional Jump**: `if_false condition goto L0`
+### Store (`StoreIR`)
+
+**Format:** `store base offset value`
+
 ```
-if_false t0 goto L1
+store arr 0 5      /* arr[0] = 5   */
+store arr 8 t0     /* arr[2] = t0  */
+store p 0 x        /* *p = x       */
 ```
 
-### 6. Function Operations
+> **Byte offsets:** Mỗi `int` = 4 bytes. `arr[i]` → offset = `i * 4`.
 
-**Function Entry**: `function_entry name`
+---
+
+## Control Flow
+
+### Label (`LabelIR`)
+
+**Format:** `label L<n>`
+
 ```
-function_entry main
+label L0           /* Jump target */
+label L_end
 ```
 
-**Function Exit**: `function_exit name`
+### Goto (`GotoIR`)
+
+**Format:** `goto L<n>`
+
 ```
-function_exit main
+goto L0            /* Unconditional jump */
+goto L_end
 ```
 
-**Parameter**: `param value`
+### Conditional Goto (`CondGotoIR`)
+
+**Format:** `if condition goto L<n>`
+
+```
+if t2 goto L0      /* if t2 != 0, jump to L0 */
+if t3 goto L_true
+```
+
+---
+
+## Function Operations
+
+### Function Entry/Exit
+
+```
+function_entry factorial    /* Begin function */
+    ...
+function_exit factorial     /* End function   */
+```
+
+### Parameters (`ParamIR`)
+
+**Format:** `param argument`
+
+Push arguments trước khi call. Thứ tự: left-to-right.
+
 ```
 param x
 param y
+t0 = call add 2    /* add(x, y) — 2 arguments */
 ```
 
-**Call**: `result = call function num_args`
-```
-t0 = call add 2
-call print 1
-```
+### Call (`CallIR`)
 
-**Return**: `return value?`
+**Format:** `result = call function_name nargs`
+
 ```
-return 0
-return t0
-return
+t0 = call factorial 1    /* result = factorial(n) */
+t1 = call write 2        /* write(buf, len)       */
+     call exit 1         /* exit(0) — no result   */
 ```
 
-## IR Generation Examples
+### Return (`ReturnIR`)
 
-### Example 1: Simple Expression
+**Format:** `return [value]`
 
-**Source**:
-```c
-int x = 5 + 3 * 2;
+```
+return 0           /* return 0;         */
+return t1          /* return t1;        */
+return             /* void function     */
 ```
 
-**IR**:
-```
-t0 = 3 mul 2
-t1 = 5 add t0
-x = t1
-```
+---
 
-### Example 2: If Statement
+## Control Flow Generation
 
-**Source**:
+### `if-else`
+
 ```c
 if (x > 0) {
     y = 1;
@@ -155,259 +227,134 @@ if (x > 0) {
 }
 ```
 
-**IR**:
 ```
 t0 = x gt 0
-if_false t0 goto L1
-y = 1
-goto L2
+if t0 goto L0       /* if (x > 0) jump to then */
+y = -1              /* else branch              */
+goto L1
+label L0
+y = 1               /* then branch              */
 label L1
-y = -1
+```
+
+### `while` Loop
+
+```c
+while (i < 10) {
+    i = i + 1;
+}
+```
+
+```
+label L0            /* loop condition check */
+t0 = i lt 10
+if t0 goto L1       /* if condition true, enter body */
+goto L2             /* exit loop */
+label L1
+t1 = i add 1
+i = t1
+goto L0             /* back to condition */
 label L2
 ```
 
-### Example 3: While Loop
+### `for` Loop
 
-**Source**:
 ```c
-while (x > 0) {
-    x = x - 1;
+for (i = 0; i < n; i = i + 1) {
+    sum = sum + arr[i];
 }
 ```
 
-**IR**:
 ```
+i = 0               /* init */
 label L0
-t0 = x gt 0
-if_false t0 goto L1
-t1 = x sub 1
-x = t1
-goto L0
+t0 = i lt n         /* condition */
+if t0 goto L1
+goto L2             /* exit */
 label L1
+t1 = i mul 4        /* arr[i]: byte offset */
+t2 = load arr t1    /* arr[i] value */
+t3 = sum add t2
+sum = t3
+t4 = i add 1        /* update */
+i = t4
+goto L0
+label L2
 ```
 
-### Example 4: For Loop
+### Recursive Function
 
-**Source**:
 ```c
-for (i = 0; i < 10; i = i + 1) {
-    sum = sum + i;
+int factorial(int n) {
+    if (n <= 1) return 1;
+    return n * factorial(n - 1);
 }
 ```
 
-**IR**:
 ```
-i = 0
+function_entry factorial
+t0 = n le 1
+if t0 goto L0
+t1 = n sub 1
+param t1
+t2 = call factorial 1
+t3 = n mul t2
+return t3
 label L0
-t0 = i lt 10
-if_false t0 goto L1
-t1 = sum add i
-sum = t1
-t2 = i add 1
-i = t2
-goto L0
-label L1
+return 1
+function_exit factorial
 ```
 
-### Example 5: Function Call
+---
 
-**Source**:
-```c
-int add(int a, int b) {
-    return a + b;
-}
+## Temporary và Label Naming
 
-int main() {
-    int result = add(5, 3);
-    return 0;
-}
-```
+**Temporaries:** `t0`, `t1`, `t2`, ... — auto-generated, sequential
 
-**IR**:
-```
-function_entry add
-t0 = a add b
-return t0
-function_exit add
+**Labels:** `L0`, `L1`, `L2`, ... — auto-generated, sequential
 
-function_entry main
-param 5
-param 3
-t1 = call add 2
-result = t1
-return 0
-function_exit main
-```
-
-### Example 6: Array Access
-
-**Source**:
-```c
-int arr[10];
-arr[0] = 5;
-int x = arr[1];
-```
-
-**IR**:
-```
-store arr 0 5
-t0 = load arr 4
-x = t0
-```
-
-### Example 7: Pointer Operations
-
-**Source**:
-```c
-int x = 5;
-int* p = &x;
-*p = 10;
-```
-
-**IR**:
-```
-x = 5
-t0 = addr x
-p = t0
-t1 = deref p
-t1 = 10
-```
-
-## Temporaries và Labels
-
-### Temporary Variables
-
-- Generated bởi TempGenerator class
-- Naming: t0, t1, t2, ...
-- Used cho intermediate values trong expressions
-- Allocated registers hoặc stack slots trong code generation
-
-### Labels
-
-- Generated bởi LabelGenerator class
-- Naming: L0, L1, L2, ...
-- Used cho control flow targets (branches, loops)
-- Mapped to assembly labels trong code generation
-
-## IR Instruction Representation
-
-### Python Classes
-
-Mỗi IR instruction type được represent bởi một Python class:
+Cả hai đều là **module từ `generators.py`:**
 
 ```python
-@dataclass
-class BinaryOpIR:
-    op: str          # add, sub, mul, div, mod, and, or, xor, shl, shr, eq, ne, lt, gt, le, ge
-    dest: str        # result variable
-    left: str        # left operand
-    right: str       # right operand
+class TempGenerator:
+    def __init__(self): self._counter = 0
+    def next(self): name = f"t{self._counter}"; self._counter += 1; return name
 
-@dataclass
-class UnaryOpIR:
-    op: str          # neg, not, deref, addr
-    dest: str        # result variable
-    operand: str     # operand
-
-@dataclass
-class AssignIR:
-    dest: str        # destination variable
-    source: str      # source variable or constant
-
-@dataclass
-class LoadIR:
-    dest: str        # result variable
-    base: str        # base address
-    offset: int      # byte offset
-
-@dataclass
-class StoreIR:
-    base: str        # base address
-    offset: int      # byte offset
-    value: str       # value to store
-
-@dataclass
-class LabelIR:
-    label: str       # label name
-
-@dataclass
-class GotoIR:
-    label: str       # target label
-
-@dataclass
-class CondGotoIR:
-    condition: str   # condition variable
-    label: str       # target label
-    is_false: bool   # jump if false (True) or true (False)
-
-@dataclass
-class ParamIR:
-    value: str       # parameter value
-
-@dataclass
-class CallIR:
-    dest: str        # result variable (None for void)
-    function: str    # function name
-    num_args: int    # number of arguments
-
-@dataclass
-class ReturnIR:
-    value: str       # return value (None for void)
-
-@dataclass
-class FunctionEntryIR:
-    name: str        # function name
-
-@dataclass
-class FunctionExitIR:
-    name: str        # function name
+class LabelGenerator:
+    def __init__(self): self._counter = 0
+    def next(self): name = f"L{self._counter}"; self._counter += 1; return name
 ```
 
-## IR Dump Format
-
-Khi sử dụng `--dump-ir` option, compiler outputs IR trong human-readable format:
-
-```
-=== IR ===
-function_entry main
-t0 = 5 add 3
-x = t0
-return 0
-function_exit main
-```
+---
 
 ## IR Properties
 
-### Correctness Properties
+| Property | Value |
+|----------|-------|
+| Representation | In-memory list of IR instruction objects |
+| Max operands | 3 per instruction |
+| Temporaries | Unlimited (spill to stack if needed) |
+| Control flow | Explicit labels + goto (no structured loops) |
+| Function scope | `function_entry` ... `function_exit` markers |
+| Type information | Implicit — all values are 32-bit (int/pointer) |
 
-**Property 15: Three-Address Code Format**
-- Mỗi instruction có tối đa 3 operands
-- Binary operations: result = left op right
-- Unary operations: result = op operand
+---
 
-**Property 16: Control Flow Label Generation**
-- Mỗi label là unique
-- Mỗi goto/conditional goto references một valid label
-- Labels được defined trước khi referenced
+## Tóm Tắt
 
-**Property 17: Function Call IR Structure**
-- Param instructions trước call instruction
-- Number of params matches num_args trong call
-- Call result assigned to temporary hoặc variable
+| Concept | Ý Nghĩa |
+|---------|---------|
+| 3AC format | `result = op1 op op2` — tối đa 3 operands, uniform và simple |
+| Explicit temporaries | `t0`, `t1`, ... — intermediate values không cần name |
+| Explicit control flow | `label` + `goto` + `if goto` — không có structured loops |
+| Load/Store | Memory access qua byte offsets — array indexing được flatten |
+| function_entry/exit | Marker cho code generator biết function boundaries |
+| Sequential labels | `L0`, `L1`, ... — unique across entire compilation unit |
 
-**Property 18: Function Entry/Exit Sequences**
-- Mỗi function bắt đầu với function_entry
-- Mỗi function kết thúc với function_exit
-- Return instructions chỉ xuất hiện trong functions
+---
 
-## IR Optimization (Not Implemented)
+## Xem Thêm
 
-Phase 2 Compiler không implement IR optimization. Possible optimizations include:
-
-- Constant folding
-- Dead code elimination
-- Common subexpression elimination
-- Copy propagation
-- Register allocation optimization
-
-These optimizations có thể được added trong future phases.
+- [codegen_strategy.md](codegen_strategy.md) — IR → ARM assembly mapping
+- [architecture.md](architecture.md) — IR vị trí trong pipeline
+- [subset_c_spec.md](subset_c_spec.md) — Nguồn gốc của IR từ Subset C

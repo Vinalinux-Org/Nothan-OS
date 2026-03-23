@@ -1,532 +1,396 @@
-# Subset C Language Specification
+# Subset C — Language Specification
+
+> **Phạm vi:** Định nghĩa đầy đủ ngôn ngữ Subset C được VinCC compiler hỗ trợ — lexical elements, types, declarations, statements, expressions, và limitations.
+> **Yêu cầu trước:** [architecture.md](architecture.md) — hiểu compiler pipeline.
+> **Files liên quan:** `toolchain/frontend/lexer/token.py`, `toolchain/frontend/parser/ast_nodes.py`, `toolchain/frontend/semantic/type_checker.py`
+
+---
 
 ## Tổng Quan
 
-Subset C là một subset của C language được hỗ trợ bởi Phase 2 Compiler. Nó bao gồm các features cơ bản nhất của C, đủ để viết các programs đơn giản chạy trên VinixOS Platform.
+Subset C là một proper subset của C99, bao gồm:
+- Basic types: `int`, `char`, `void`
+- Pointers và 1D arrays
+- Control flow: `if/else`, `while`, `for`, `return`
+- Functions với tối đa 4 parameters
+- VinixOS syscall interface
+
+> **Không support:** `struct`, `union`, `typedef`, `enum`, `switch`, `goto`, `do-while`, `++/--`, `+=/-=`, hex literals, multi-dimensional arrays, function pointers, variadic functions.
+
+---
 
 ## Lexical Elements
 
 ### Keywords
 
 ```
-int char void if else while for return
+int   char   void   if   else   while   for   return
 ```
 
 ### Identifiers
 
-- Bắt đầu bằng letter hoặc underscore
-- Theo sau bởi letters, digits, hoặc underscores
+- Bắt đầu bằng letter (`a-z`, `A-Z`) hoặc underscore `_`
+- Theo sau bởi letters, digits (`0-9`), hoặc underscores
 - Case-sensitive
 
 ```c
-x
-counter
-_temp
-myVariable
+x          counter       _temp        myVariable
+MAX_SIZE   i             result123
 ```
 
-### Integer Literals
+### Literals
 
-- Decimal integers only (no hex, octal, binary)
-- Signed 32-bit range: -2147483648 to 2147483647
+**Integer literals** — decimal only:
 
-```c
-0
-42
--100
-2147483647
-```
+| Type | Range | Examples |
+|------|-------|---------|
+| Decimal int | -2147483648 to 2147483647 | `0`, `42`, `1000` |
 
-### Character Literals
+> Không support: hex (`0xFF`), octal (`0777`), binary (`0b101`).
 
-- Single character trong single quotes
-- Escape sequences: \n, \t, \r, \\, \', \"
+**Character literals:**
 
-```c
-'a'
-'Z'
-'0'
-'\n'
-'\''
-```
+| Escape | Value |
+|--------|-------|
+| `'a'` – `'z'`, `'A'` – `'Z'`, `'0'` – `'9'` | ASCII value |
+| `'\n'` | Newline (10) |
+| `'\t'` | Tab (9) |
+| `'\r'` | Carriage return (13) |
+| `'\\'` | Backslash (92) |
+| `'\''` | Single quote (39) |
+| `'\"'` | Double quote (34) |
 
 ### Operators
 
-**Arithmetic**: `+` `-` `*` `/` `%`
+**Arithmetic:**
 
-**Comparison**: `==` `!=` `<` `>` `<=` `>=`
+| Op | Operation | Precedence |
+|----|-----------|-----------|
+| `*` | Multiply | 5 |
+| `/` | Divide (software) | 5 |
+| `%` | Modulo (software) | 5 |
+| `+` | Add | 4 |
+| `-` | Subtract | 4 |
 
-**Logical**: `&&` `||` `!`
+**Comparison:**
 
-**Bitwise**: `&` `|` `^` `<<` `>>`
+| Op | Meaning |
+|----|---------|
+| `==` | Equal |
+| `!=` | Not equal |
+| `<` | Less than |
+| `>` | Greater than |
+| `<=` | Less or equal |
+| `>=` | Greater or equal |
 
-**Assignment**: `=`
+**Logical:**
 
-**Pointer**: `*` (dereference) `&` (address-of)
+| Op | Meaning |
+|----|---------|
+| `&&` | Logical AND (short-circuit) |
+| `\|\|` | Logical OR (short-circuit) |
+| `!` | Logical NOT |
 
-**Array subscript**: `[]`
+**Bitwise:**
 
-### Delimiters
+| Op | Meaning |
+|----|---------|
+| `&` | Bitwise AND |
+| `\|` | Bitwise OR |
+| `^` | Bitwise XOR |
+| `<<` | Left shift |
+| `>>` | Right shift (arithmetic) |
 
-```
-( ) { } [ ] ; ,
-```
+**Other:**
+
+| Op | Meaning |
+|----|---------|
+| `=` | Assignment |
+| `*` | Dereference (unary) |
+| `&` | Address-of (unary) |
+| `-` | Negation (unary) |
+| `!` | Logical NOT (unary) |
+| `[]` | Array subscript |
 
 ### Comments
 
-**Single-line**: `// comment`
+```c
+// Single-line comment
 
-**Multi-line**: `/* comment */`
+/* Multi-line
+   comment */
+```
+
+---
 
 ## Data Types
 
-### int
+| Type | Size | Range / Notes |
+|------|------|--------------|
+| `int` | 32-bit signed | -2,147,483,648 to 2,147,483,647 |
+| `char` | 8-bit | Character; used for strings |
+| `void` | — | Return type only; không declare variable |
+| `int*` | 32-bit pointer | Pointer to int |
+| `char*` | 32-bit pointer | Pointer to char (string) |
+| `int[N]` | N × 4 bytes | 1D array; decays to `int*` |
+| `char[N]` | N × 1 byte | 1D array; decays to `char*` |
 
-- 32-bit signed integer
-- Range: -2147483648 to 2147483647
-- Default type cho integer literals
-
-```c
-int x;
-int y = 42;
-```
-
-### char
-
-- 8-bit character
-- Used cho single characters và strings (char arrays)
-
-```c
-char c;
-char ch = 'a';
-```
-
-### void
-
-- Used cho functions không return value
-- Không thể declare variables với type void
-
-```c
-void foo() {
-    // no return value
-}
-```
-
-### Pointers
-
-- Pointer to int: `int*`
-- Pointer to char: `char*`
-- Support pointer arithmetic
-
-```c
-int* p;
-char* str;
-int x = 5;
-p = &x;
-*p = 10;
-```
-
-### Arrays
-
-- One-dimensional arrays only
-- Fixed size, declared với size
-- Array name treated as pointer to first element
-
-```c
-int arr[10];
-char str[20];
-arr[0] = 5;
-str[0] = 'H';
-```
+---
 
 ## Declarations
 
-### Variable Declarations
+### Variables
 
 ```c
-int x;
-int y = 5;
+int x;              /* uninitialized */
+int y = 5;          /* initialized   */
 char c = 'a';
-int* p;
-int arr[10];
+int* p;             /* pointer       */
+int arr[10];        /* array of 10   */
+char str[64];
 ```
 
-### Function Declarations
+### Functions
 
 ```c
+/* Definition */
 int add(int a, int b) {
     return a + b;
 }
 
-void print_number(int n) {
-    // implementation
+void print_n(int n) {
+    /* no return value */
 }
 
-int main() {
-    return 0;
-}
+/* Forward declaration (prototype) */
+int multiply(int x, int y);
 ```
 
-**Function Prototypes** (declarations without body):
-```c
-int add(int a, int b);  // forward declaration
-```
+**Function constraints:**
 
-**Constraints**:
-- Up to 4 parameters
-- Parameters passed theo AAPCS (first 4 trong r0-r3)
-- Return value trong r0
+| Constraint | Value |
+|-----------|-------|
+| Max parameters | 4 |
+| Argument passing | AAPCS: r0-r3 (first 4) |
+| Return value | r0 (int/char/pointer) |
+| Recursion | Supported |
+| Nested functions | Not supported |
+
+---
 
 ## Statements
 
-### Compound Statement
+### `if` / `if-else`
+
+```c
+if (condition) {
+    /* then branch */
+}
+
+if (x > 0) {
+    positive();
+} else {
+    non_positive();
+}
+```
+
+### `while`
+
+```c
+while (condition) {
+    /* body */
+}
+
+int i = 0;
+while (i < 10) {
+    i = i + 1;    /* Note: i++ not supported */
+}
+```
+
+### `for`
+
+```c
+for (init; condition; update) {
+    /* body */
+}
+
+int i;
+for (i = 0; i < 10; i = i + 1) {
+    arr[i] = i * 2;
+}
+```
+
+### `return`
+
+```c
+return;           /* void function  */
+return 0;         /* int function   */
+return x + y;     /* expression     */
+```
+
+### Compound Statement (Block)
 
 ```c
 {
-    int x = 5;
-    int y = 10;
-    x = x + y;
+    int local_var = 5;  /* Block-scoped */
+    local_var = local_var + 1;
 }
+/* local_var không tồn tại ở đây */
 ```
 
-### Expression Statement
-
-```c
-x = 5;
-foo();
-x++;
-```
-
-### If Statement
-
-```c
-if (x > 0) {
-    y = 1;
-}
-
-if (x > 0) {
-    y = 1;
-} else {
-    y = -1;
-}
-```
-
-### While Loop
-
-```c
-while (x > 0) {
-    x = x - 1;
-}
-```
-
-### For Loop
-
-```c
-for (i = 0; i < 10; i = i + 1) {
-    sum = sum + i;
-}
-```
-
-**Note**: Init, condition, và increment phải là expressions (không support declarations trong init).
-
-### Return Statement
-
-```c
-return 0;
-return x + y;
-```
+---
 
 ## Expressions
 
-### Operator Precedence (highest to lowest)
+### Operator Precedence (cao → thấp)
 
-1. Primary: `()` `[]` function call
-2. Unary: `!` `-` `*` (deref) `&` (address-of)
-3. Multiplicative: `*` `/` `%`
-4. Additive: `+` `-`
-5. Shift: `<<` `>>`
-6. Relational: `<` `>` `<=` `>=`
-7. Equality: `==` `!=`
-8. Bitwise AND: `&`
-9. Bitwise XOR: `^`
-10. Bitwise OR: `|`
-11. Logical AND: `&&`
-12. Logical OR: `||`
-13. Assignment: `=`
+| Level | Operators | Associativity |
+|-------|-----------|--------------|
+| 7 | `!` `-` `*` `&` (unary) | Right |
+| 6 | `[]` (subscript) | Left |
+| 5 | `*` `/` `%` | Left |
+| 4 | `+` `-` | Left |
+| 3 | `<<` `>>` | Left |
+| 2 | `<` `>` `<=` `>=` `==` `!=` | Left |
+| 1 | `&` `^` `\|` `&&` `\|\|` | Left |
+| 0 | `=` | Right |
 
-### Operator Associativity
-
-- Left-to-right: binary operators (except assignment)
-- Right-to-left: unary operators, assignment
-
-### Examples
+### Pointer Operations
 
 ```c
-// Arithmetic
-x = a + b * c;
-y = (a + b) * c;
-
-// Comparison
-if (x == 5 && y > 10) { }
-
-// Logical
-if (x > 0 || y < 0) { }
-
-// Bitwise
-z = x & 0xFF;
-w = y << 2;
-
-// Pointer
-*p = 10;
-q = &x;
-
-// Array
-arr[i] = 5;
-x = arr[i + 1];
-
-// Function call
-result = add(x, y);
+int x = 5;
+int* p = &x;     /* address-of: p points to x */
+*p = 10;         /* dereference: x is now 10  */
+int y = *p;      /* y = 10                    */
 ```
+
+### Array Operations
+
+```c
+int arr[5];
+arr[0] = 42;         /* indexed write    */
+int val = arr[2];    /* indexed read     */
+
+int* ptr = arr;      /* array decays to pointer */
+ptr[1] = 99;         /* pointer indexing        */
+```
+
+### Function Calls
+
+```c
+int result = add(3, 4);
+print_msg("hello");
+factorial(n - 1);    /* Recursive call */
+```
+
+---
 
 ## Type System
 
-### Type Compatibility
+### Implicit Conversions
 
-**Compatible assignments**:
-- int = int
-- char = char
-- int* = int*
-- char* = char*
+| From | To | Notes |
+|------|----|-------|
+| `char` | `int` | Zero-extended |
+| `int` | `char` | Truncated to 8-bit |
+| `int[N]` | `int*` | Array decay |
+| `char[N]` | `char*` | Array decay |
 
-**Implicit conversions**:
-- char → int (zero-extension)
-- int → char (truncation)
+### Type Compatibility Rules
 
-**Incompatible** (compile error):
-- int = int*
-- int* = char*
-- void = anything
+- Assignment: both sides must be compatible
+- Comparison: both operands must be same base type
+- Arithmetic: both operands must be `int` or `char`
+- Function call: argument types phải match parameter types
 
-### Type Checking Rules
-
-**Assignment**: Left và right sides phải compatible
-
-**Function call**: Argument types phải match parameter types
-
-**Return**: Return value type phải match function return type
-
-**Array index**: Index phải là integer type
-
-**Pointer arithmetic**: Operands phải là pointer và integer
+---
 
 ## Scoping Rules
 
-### Lexical Scoping
-
-- Variables visible từ declaration point đến end of scope
-- Inner scopes có thể shadow outer scope variables
-- Function parameters trong function scope
-
-### Scope Levels
-
-- Global scope: function declarations
-- Function scope: parameters và local variables
-- Block scope: variables trong compound statements
+- **File scope:** Function declarations và global variables
+- **Block scope:** Variables declared trong `{ }` — local to that block
+- **Nested scopes:** Inner scope có thể shadow outer scope variable
+- **No implicit globals:** Phải declare trước khi dùng
 
 ```c
-int x = 1;  // global
+int global_x = 10;    /* File scope */
 
-int foo(int x) {  // parameter x shadows global x
-    int y = 2;    // local variable
+int foo(int a) {
+    int local_y = a;  /* Block scope — foo only */
     {
-        int z = 3;  // block-local variable
-        int x = 4;  // shadows parameter x
+        int z = 5;    /* Nested block scope */
     }
-    // z not visible here
-    return x + y;
+    /* z không accessible ở đây */
+    return local_y;
 }
 ```
 
-## Syscall Interface
+---
 
-### Supported Syscalls
+## VinixOS Syscall Interface
 
-**write(fd, buf, count)**:
-- Write data to file descriptor
-- Returns: number of bytes written
-
-**read(fd, buf, count)**:
-- Read data from file descriptor
-- Returns: number of bytes read
-
-**exit(status)**:
-- Terminate program với exit code
-- Does not return
-
-**yield()**:
-- Yield CPU to other processes
-- Returns: 0
-
-### Syscall Numbers
+Syscalls được gọi qua function declarations — compiler biết là syscall:
 
 ```c
-#define SYS_write 4
-#define SYS_read  3
-#define SYS_exit  1
-#define SYS_yield 158
-```
+/* Declare syscalls như function prototypes */
+int write(int fd, char* buf, int count);
+int read(int fd, char* buf, int count);
+void exit(int status);
+void yield(void);
+int open(char* path, int flags);
+int read_file(int fd, char* buf, int count);
+int close(int fd);
 
-### Example Usage
-
-```c
+/* Usage */
 int main() {
-    char msg[] = "Hello, VinixOS!\n";
-    write(1, msg, 15);  // write to stdout
+    char msg[] = "Hello!\n";
+    write(1, msg, 7);   /* fd=1: stdout (UART) */
     exit(0);
 }
 ```
+
+**File descriptor conventions:**
+
+| FD | Meaning |
+|----|---------|
+| 0 | stdin (UART RX) |
+| 1 | stdout (UART TX) |
+| 2 | stderr (UART TX) |
+| 3+ | File handles từ `open()` |
+
+---
 
 ## Limitations
 
-### Not Supported
+| Category | Limitation |
+|----------|-----------|
+| Operators | Không có `++`, `--`, `+=`, `-=`, `*=`, `/=`, `?:` |
+| Types | Không có `struct`, `union`, `enum`, `typedef` |
+| Arrays | Chỉ 1D; không có multi-dimensional |
+| Literals | Chỉ decimal; không có hex/octal/float |
+| Functions | Tối đa 4 parameters; không có variadic |
+| Pointers | Không có function pointers; không có `void*` |
+| Standard Library | Không có `printf`, `malloc`, `free`, `string.h` |
+| Preprocessor | Không có `#include`, `#define`, `#ifdef` |
 
-- Floating-point types (float, double)
-- Structs và unions
-- Enums
-- Typedefs
-- Preprocessor directives (#include, #define, #ifdef)
-- Multi-dimensional arrays
-- String literals (use char arrays)
-- Global variable initialization
-- Static variables
-- Const qualifier
-- Function pointers
-- Variadic functions
-- Switch statements
-- Do-while loops
-- Break và continue statements
-- Goto statements
-- Ternary operator (?:)
-- Compound assignment operators (+=, -=, etc.)
-- Increment/decrement operators (++, --)
+---
 
-### Constraints
+## Tóm Tắt
 
-- Maximum 4 function parameters
-- Arrays must have fixed size at declaration
-- No nested function definitions
-- No forward references (declare before use)
+| Concept | Ý Nghĩa |
+|---------|---------|
+| 8 keywords | `int char void if else while for return` — minimal but sufficient |
+| 3 base types | `int` (32-bit), `char` (8-bit), `void` |
+| Max 4 params | AAPCS r0-r3 cho arguments |
+| No stdlib | Dùng VinixOS syscalls cho I/O |
+| Decimal only | Không có hex/octal literals |
+| Software div | `/` và `%` → `__aeabi_idiv` (chậm hơn native) |
+| Array decay | `arr[]` → `arr*` khi pass đến function |
 
-## Grammar (Simplified BNF)
+---
 
-```
-program ::= declaration*
+## Xem Thêm
 
-declaration ::= function_decl | var_decl
-
-function_decl ::= type identifier '(' param_list? ')' (compound_stmt | ';')
-
-param_list ::= param (',' param)*
-
-param ::= type identifier
-
-var_decl ::= type identifier ('[' integer ']')? ('=' expression)? ';'
-
-type ::= 'int' | 'char' | 'void' | type '*'
-
-compound_stmt ::= '{' (var_decl | statement)* '}'
-
-statement ::= compound_stmt
-            | 'if' '(' expression ')' statement ('else' statement)?
-            | 'while' '(' expression ')' statement
-            | 'for' '(' expression? ';' expression? ';' expression? ')' statement
-            | 'return' expression? ';'
-            | expression ';'
-
-expression ::= assignment
-
-assignment ::= logical_or ('=' assignment)?
-
-logical_or ::= logical_and ('||' logical_and)*
-
-logical_and ::= bitwise_or ('&&' bitwise_or)*
-
-bitwise_or ::= bitwise_xor ('|' bitwise_xor)*
-
-bitwise_xor ::= bitwise_and ('^' bitwise_and)*
-
-bitwise_and ::= equality ('&' equality)*
-
-equality ::= relational (('==' | '!=') relational)*
-
-relational ::= shift (('<' | '>' | '<=' | '>=') shift)*
-
-shift ::= additive (('<<' | '>>') additive)*
-
-additive ::= multiplicative (('+' | '-') multiplicative)*
-
-multiplicative ::= unary (('*' | '/' | '%') unary)*
-
-unary ::= ('!' | '-' | '*' | '&') unary | postfix
-
-postfix ::= primary ('[' expression ']' | '(' arg_list? ')')*
-
-primary ::= identifier | integer | character | '(' expression ')'
-
-arg_list ::= expression (',' expression)*
-```
-
-## Example Programs
-
-### Hello World
-
-```c
-int write(int fd, char* buf, int count);
-void exit(int status);
-
-int main() {
-    char msg[] = "Hello, VinixOS!\n";
-    write(1, msg, 15);
-    exit(0);
-}
-```
-
-### Factorial
-
-```c
-int factorial(int n) {
-    if (n <= 1) {
-        return 1;
-    }
-    return n * factorial(n - 1);
-}
-
-int main() {
-    int result = factorial(5);
-    return 0;
-}
-```
-
-### Array Sum
-
-```c
-int sum_array(int* arr, int size) {
-    int sum = 0;
-    int i;
-    for (i = 0; i < size; i = i + 1) {
-        sum = sum + arr[i];
-    }
-    return sum;
-}
-
-int main() {
-    int numbers[5];
-    numbers[0] = 1;
-    numbers[1] = 2;
-    numbers[2] = 3;
-    numbers[3] = 4;
-    numbers[4] = 5;
-    int total = sum_array(numbers, 5);
-    return 0;
-}
-```
+- [usage_guide.md](usage_guide.md) — Cách compile và ví dụ cụ thể
+- [architecture.md](architecture.md) — Compiler handles types/scopes như thế nào
+- [ir_format.md](ir_format.md) — Subset C được lowered xuống IR như thế nào

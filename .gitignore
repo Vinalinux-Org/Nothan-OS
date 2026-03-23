@@ -52,7 +52,7 @@ temp/
 # Documentation
 tech_docs/
 .agent/
-docs_trainingAI/
+doc_trainingAI/
 AGENT_RULES.md
 
 # Python virtual environment
