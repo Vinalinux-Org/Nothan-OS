@@ -54,7 +54,7 @@ static bool scheduler_started = false;
  */
 void scheduler_init(void)
 {
-    uart_printf("[SCHED] Initializing scheduler...\n");
+    pr_info("[SCHED] Initializing scheduler...\n");
     
     /* Reset task array */
     for (int i = 0; i < MAX_TASKS; i++) {
@@ -82,7 +82,7 @@ void scheduler_init(void)
 int scheduler_add_task(struct task_struct *task)
 {
     if (task_count >= MAX_TASKS) {
-        uart_printf("[SCHED] ERROR: Task table full (%d/%d)\n", 
+        pr_err("[SCHED] ERROR: Task table full (%d/%d)\n", 
                     task_count, MAX_TASKS);
         return -1;
     }
@@ -101,7 +101,7 @@ int scheduler_add_task(struct task_struct *task)
         task->pgd_pa = mmu_kernel_pgd_pa();
     }
     
-    uart_printf("[SCHED] added task %d: '%s'\n",
+    pr_info("[SCHED] added task %d: '%s'\n",
                 task->id, task->name ? task->name : "(unnamed)");
 
     task_count++;
@@ -120,7 +120,7 @@ int scheduler_add_task(struct task_struct *task)
 void scheduler_start(void)
 {
     if (task_count == 0) {
-        uart_printf("[SCHED] ERROR: no tasks to run\n");
+        pr_err("[SCHED] ERROR: no tasks to run\n");
         while (1);
     }
 
@@ -129,7 +129,7 @@ void scheduler_start(void)
     current_task->state = TASK_RUNNING;
     scheduler_started = true;
 
-    uart_printf("[SCHED] starting with %d task(s), first='%s'\n",
+    pr_info("[SCHED] starting with %d task(s), first='%s'\n",
                 task_count, current_task->name);
     
     /* Load first task context and jump to it
@@ -142,7 +142,7 @@ void scheduler_start(void)
     start_first_task(current_task);
     
     /* Should never reach here */
-    uart_printf("[SCHED] FATAL: Returned from start_first_task!\n");
+    pr_info("[SCHED] FATAL: Returned from start_first_task!\n");
     while (1);
 }
 
@@ -187,14 +187,14 @@ void scheduler_terminate_task(uint32_t id)
     
     struct task_struct *task = tasks[id];
     
-    uart_printf("[SCHED] TERMINATING Task %d: '%s'\n", task->id, task->name);
+    pr_info("[SCHED] TERMINATING Task %d: '%s'\n", task->id, task->name);
     
     /* Mark as ZOMBIE */
     task->state = TASK_ZOMBIE;
     
     /* If current task is killing itself, yield immediately */
     if (current_task == task) {
-        uart_printf("[SCHED] Task %d IS SUICIDE - Yielding...\n", task->id);
+        pr_info("[SCHED] Task %d IS SUICIDE - Yielding...\n", task->id);
         
         /* 
          * CRITICAL: We are likely in ABT/UND Mode (Exception Context).
@@ -243,7 +243,7 @@ void schedule(void)
         if (*canary_ptr != STACK_CANARY_VALUE) {
             TRACE_SCHED("FATAL: Stack overflow detected in task %d ('%s')",
                         current_task->id, current_task->name);
-            uart_printf("[SCHED] Canary Addr: 0x%08x. Expected: 0x%08x. Actual: 0x%08x\n",
+            pr_info("[SCHED] Canary Addr: 0x%08x. Expected: 0x%08x. Actual: 0x%08x\n",
                         (uint32_t)canary_ptr, STACK_CANARY_VALUE, *canary_ptr);
             PANIC("Stack Canary Corrupted!");
         }
@@ -274,7 +274,7 @@ void schedule(void)
     if (next_task == prev_task) {
         if (prev_task->state == TASK_ZOMBIE) {
             if (tasks[0] != NULL && tasks[0]->state != TASK_ZOMBIE) {
-                uart_printf("[SCHED] Warning: No READY task found, forcing idle task READY to prevent deadlock\n");
+                pr_info("[SCHED] Warning: No READY task found, forcing idle task READY to prevent deadlock\n");
                 tasks[0]->state = TASK_RUNNING;
                 next_task = tasks[0];
                 next_index = 0;
@@ -287,12 +287,12 @@ void schedule(void)
     }
 
     if (next_task->state != TASK_RUNNING) {
-        uart_printf("[SCHED] ERROR: Task %u not READY (state=%u)\n",
+        pr_err("[SCHED] ERROR: Task %u not READY (state=%u)\n",
                     next_task->id, next_task->state);
         
         /* Fallback: Force idle to READY if it exists */
         if (tasks[0] != NULL) {
-            uart_printf("[SCHED] Warning: Forcing idle task READY to prevent deadlock\n");
+            pr_info("[SCHED] Warning: Forcing idle task READY to prevent deadlock\n");
             tasks[0]->state = TASK_RUNNING;
             next_task = tasks[0];
             next_index = 0;

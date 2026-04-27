@@ -121,7 +121,7 @@ static int i2c_wait_bus_free(void)
     }
 
     if (!timeout) {
-        uart_printf("[I2C] ERROR: Bus busy timeout\n");
+        pr_err("[I2C] ERROR: Bus busy timeout\n");
         return -1;
     }
     return 0;
@@ -185,12 +185,12 @@ void i2c_init(void)
     uint32_t val;
     uint32_t timeout;
 
-    uart_printf("[I2C] Initializing I2C0...\n");
+    pr_info("[I2C] Initializing I2C0...\n");
 
     /* Re-assert pins — ROM had them muxed for PMIC access. */
     mmio_write32(CONF_I2C0_SCL, PAD_I2C0_MODE);
     mmio_write32(CONF_I2C0_SDA, PAD_I2C0_MODE);
-    uart_printf("[I2C] Pinmux configured (SCL=0x%x, SDA=0x%x)\n",
+    pr_info("[I2C] Pinmux configured (SCL=0x%x, SDA=0x%x)\n",
                 mmio_read32(CONF_I2C0_SCL), mmio_read32(CONF_I2C0_SDA));
 
     /* I2C0 lives in Wakeup domain; FCLK = 48 MHz (PER_CLKOUTM2 / 4). */
@@ -204,10 +204,10 @@ void i2c_init(void)
         }
     }
     if (!timeout) {
-        uart_printf("[I2C] ERROR: Clock enable timeout\n");
+        pr_err("[I2C] ERROR: Clock enable timeout\n");
         return;
     }
-    uart_printf("[I2C] Clock enabled\n");
+    pr_info("[I2C] Clock enabled\n");
 
     /* HW spec: module must be disabled before reconfiguring. */
     mmio_write32(I2C0_BASE + I2C_CON, 0);
@@ -218,10 +218,10 @@ void i2c_init(void)
     while (!(mmio_read32(I2C0_BASE + I2C_SYSS) & I2C_SYSS_RDONE) && timeout--) {
     }
     if (!timeout) {
-        uart_printf("[I2C] ERROR: Soft reset timeout\n");
+        pr_err("[I2C] ERROR: Soft reset timeout\n");
         return;
     }
-    uart_printf("[I2C] Soft reset complete\n");
+    pr_info("[I2C] Soft reset complete\n");
 
     /* Prescaler: ICLK = 48 MHz / (PSC+1). PSC=3 → ICLK=12 MHz. */
     mmio_write32(I2C0_BASE + I2C_PSC, 3);
@@ -245,15 +245,15 @@ void i2c_init(void)
     for (volatile int i = 0; i < 1000; i++);
 
     val = mmio_read32(I2C0_BASE + I2C_REVNB_LO);
-    uart_printf("[I2C] Module revision = 0x%x\n", val);
+    pr_info("[I2C] Module revision = 0x%x\n", val);
 
     /* Idle bus must read SCL_I_FUNC=bit8, SDA_I_FUNC=bit6 high.
      * 0 = stuck low → pinmux or HW problem. */
     val = mmio_read32(I2C0_BASE + I2C_SYSTEST);
-    uart_printf("[I2C] SYSTEST=0x%x  SCL_I=%d  SDA_I=%d  (1=high=OK)\n",
+    pr_info("[I2C] SYSTEST=0x%x  SCL_I=%d  SDA_I=%d  (1=high=OK)\n",
                 val, (val >> 8) & 1, (val >> 6) & 1);
 
-    uart_printf("[I2C] I2C0 initialized (100kHz standard mode)\n");
+    pr_info("[I2C] I2C0 initialized (100kHz standard mode)\n");
 }
 
 /* ============================================================
@@ -289,7 +289,7 @@ int i2c_write_reg(uint8_t slave_addr, uint8_t reg, uint8_t val)
     /* Send register address */
     stat = i2c_wait_status(I2C_STAT_XRDY);
     if (!stat || (stat & I2C_STAT_NACK)) {
-        uart_printf("[I2C] NACK on write addr 0x%x reg 0x%x\n", slave_addr, reg);
+        pr_info("[I2C] NACK on write addr 0x%x reg 0x%x\n", slave_addr, reg);
         i2c_flush();
         return -1;
     }
@@ -299,7 +299,7 @@ int i2c_write_reg(uint8_t slave_addr, uint8_t reg, uint8_t val)
     /* Send value */
     stat = i2c_wait_status(I2C_STAT_XRDY);
     if (!stat || (stat & I2C_STAT_NACK)) {
-        uart_printf("[I2C] NACK on write data 0x%x reg 0x%x\n", slave_addr, reg);
+        pr_info("[I2C] NACK on write data 0x%x reg 0x%x\n", slave_addr, reg);
         i2c_flush();
         return -1;
     }
@@ -310,7 +310,7 @@ int i2c_write_reg(uint8_t slave_addr, uint8_t reg, uint8_t val)
     stat = i2c_wait_status(I2C_STAT_ARDY);
     if (!stat) {
         uint32_t raw = mmio_read32(I2C0_BASE + I2C_IRQSTATUS_RAW);
-        uart_printf("[I2C] ARDY timeout write sa=0x%x reg=0x%x raw=0x%x\n",
+        pr_info("[I2C] ARDY timeout write sa=0x%x reg=0x%x raw=0x%x\n",
                     slave_addr, reg, raw);
         i2c_flush();
         return -1;
@@ -353,7 +353,7 @@ int i2c_read_reg(uint8_t slave_addr, uint8_t reg, uint8_t *val)
     /* Wait for XRDY and send register address */
     stat = i2c_wait_status(I2C_STAT_XRDY);
     if (!stat || (stat & I2C_STAT_NACK)) {
-        uart_printf("[I2C] NACK on read phase1 addr 0x%x reg 0x%x\n", slave_addr, reg);
+        pr_info("[I2C] NACK on read phase1 addr 0x%x reg 0x%x\n", slave_addr, reg);
         i2c_flush();
         return -1;
     }
@@ -363,7 +363,7 @@ int i2c_read_reg(uint8_t slave_addr, uint8_t reg, uint8_t *val)
     /* Wait for ARDY (register address sent) */
     stat = i2c_wait_status(I2C_STAT_ARDY);
     if (!stat) {
-        uart_printf("[I2C] Timeout on read phase1 ARDY\n");
+        pr_info("[I2C] Timeout on read phase1 ARDY\n");
         i2c_flush();
         return -1;
     }
@@ -381,7 +381,7 @@ int i2c_read_reg(uint8_t slave_addr, uint8_t reg, uint8_t *val)
     /* Wait for RRDY */
     stat = i2c_wait_status(I2C_STAT_RRDY);
     if (!stat || (stat & I2C_STAT_NACK)) {
-        uart_printf("[I2C] NACK on read phase2 addr 0x%x reg 0x%x\n", slave_addr, reg);
+        pr_info("[I2C] NACK on read phase2 addr 0x%x reg 0x%x\n", slave_addr, reg);
         i2c_flush();
         return -1;
     }
@@ -454,7 +454,7 @@ int i2c_read_block(uint8_t slave_addr, uint8_t reg, uint8_t *buf, int len)
     for (i = 0; i < len; i++) {
         stat = i2c_wait_status(I2C_STAT_RRDY);
         if (!stat || (stat & I2C_STAT_NACK)) {
-            uart_printf("[I2C] Block read error at byte %d\n", i);
+            pr_info("[I2C] Block read error at byte %d\n", i);
             i2c_flush();
             return -1;
         }
@@ -485,7 +485,7 @@ void i2c_scan(void)
     uint8_t addr;
     int found = 0;
 
-    uart_printf("[I2C] Bus scan starting (0x08-0x77)...\n");
+    pr_info("[I2C] Bus scan starting (0x08-0x77)...\n");
 
     for (addr = 0x08; addr <= 0x77; addr++) {
         uint32_t stat;
@@ -515,7 +515,7 @@ void i2c_scan(void)
 
         stat = i2c_wait_status(I2C_STAT_ARDY);
         if (stat && !(stat & I2C_STAT_NACK)) {
-            uart_printf("[I2C] FOUND device at 0x%x\n", addr);
+            pr_info("[I2C] FOUND device at 0x%x\n", addr);
             found++;
         }
         mmio_write32(I2C0_BASE + I2C_IRQSTATUS, stat);
@@ -523,9 +523,9 @@ void i2c_scan(void)
     }
 
     if (!found)
-        uart_printf("[I2C] Bus scan: no devices found\n");
+        pr_info("[I2C] Bus scan: no devices found\n");
     else
-        uart_printf("[I2C] Bus scan complete: %d device(s)\n", found);
+        pr_info("[I2C] Bus scan complete: %d device(s)\n", found);
 }
 
 /* ============================================================

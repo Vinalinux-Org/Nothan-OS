@@ -44,7 +44,7 @@ void page_alloc_init(void)
     }
     free_count = POOL_PAGES;
 
-    uart_printf("[PAGE] Pool: %d MB @ PA 0x%x (%d pages, bitmap %dB)\n",
+    pr_info("[PAGE] Pool: %d MB @ PA 0x%x (%d pages, bitmap %dB)\n",
                 POOL_SIZE / (1024u * 1024u), POOL_PA_BASE,
                 POOL_PAGES, BITMAP_WORDS * 4u);
 }
@@ -125,18 +125,18 @@ void page_alloc_selftest(void)
         pages[i] = alloc_pages(GFP_KERNEL, 0);
         if (pages[i] == 0)
         {
-            uart_printf("[PAGE] FAIL: alloc #%d returned 0\n", i);
+            pr_info("[PAGE] FAIL: alloc #%d returned 0\n", i);
             return;
         }
         if ((pages[i] & (PAGE_SIZE - 1u)) != 0)
         {
-            uart_printf("[PAGE] FAIL: alloc #%d PA 0x%x not page-aligned\n",
+            pr_info("[PAGE] FAIL: alloc #%d PA 0x%x not page-aligned\n",
                         i, pages[i]);
             return;
         }
         if (pages[i] < POOL_PA_BASE || pages[i] >= POOL_PA_END)
         {
-            uart_printf("[PAGE] FAIL: alloc #%d PA 0x%x out of pool\n",
+            pr_info("[PAGE] FAIL: alloc #%d PA 0x%x out of pool\n",
                         i, pages[i]);
             return;
         }
@@ -144,7 +144,7 @@ void page_alloc_selftest(void)
         {
             if (pages[i] == pages[j])
             {
-                uart_printf("[PAGE] FAIL: alloc #%d duplicate of #%d (PA 0x%x)\n",
+                pr_info("[PAGE] FAIL: alloc #%d duplicate of #%d (PA 0x%x)\n",
                             i, j, pages[i]);
                 return;
             }
@@ -157,7 +157,7 @@ void page_alloc_selftest(void)
     }
     if (free_count != snapshot)
     {
-        uart_printf("[PAGE] FAIL: free_count %d != snapshot %d after order-0 free\n",
+        pr_info("[PAGE] FAIL: free_count %d != snapshot %d after order-0 free\n",
                     free_count, snapshot);
         return;
     }
@@ -165,19 +165,19 @@ void page_alloc_selftest(void)
     uint32_t big = alloc_pages(GFP_KERNEL, PAGE_MAX_ORDER);
     if (big == 0)
     {
-        uart_printf("[PAGE] FAIL: alloc order-%d returned 0\n", PAGE_MAX_ORDER);
+        pr_info("[PAGE] FAIL: alloc order-%d returned 0\n", PAGE_MAX_ORDER);
         return;
     }
     if ((big & SELFTEST_ORDER3_MASK) != 0)
     {
-        uart_printf("[PAGE] FAIL: order-%d PA 0x%x not %d-byte aligned\n",
+        pr_info("[PAGE] FAIL: order-%d PA 0x%x not %d-byte aligned\n",
                     PAGE_MAX_ORDER, big, SELFTEST_ORDER3_MASK + 1u);
         return;
     }
     free_pages(big, PAGE_MAX_ORDER);
     if (free_count != snapshot)
     {
-        uart_printf("[PAGE] FAIL: free_count mismatch after order-%d free\n",
+        pr_info("[PAGE] FAIL: free_count mismatch after order-%d free\n",
                     PAGE_MAX_ORDER);
         return;
     }

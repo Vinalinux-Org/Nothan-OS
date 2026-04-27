@@ -271,7 +271,7 @@ struct vfs_operations *procfs_init(void)
 {
     static bool announced = false;
     if (!announced) {
-        uart_printf("[PROCFS] registered /proc\n");
+        pr_info("[PROCFS] registered /proc\n");
         announced = true;
     }
     return &procfs_ops;

@@ -135,7 +135,7 @@ static uint32_t fat_next_cluster(uint32_t cur)
 
     struct buffer_head *bh = bread(fs_bdev, abs_sector);
     if (!bh) {
-        uart_printf("[FAT32] ERROR: FAT read failed at sector %u\n", abs_sector);
+        pr_err("[FAT32] ERROR: FAT read failed at sector %u\n", abs_sector);
         return FAT32_EOC;
     }
     uint32_t entry = rd32(&bh->data[sector_off]);
@@ -228,14 +228,14 @@ static bool raw_name_eq(const uint8_t a[11], const uint8_t b[11])
 static int parse_bpb(void)
 {
     if (fat_read_sector(fs.part_lba, sector_buf) != E_OK) {
-        uart_printf("[FAT32] ERROR: Failed to read BPB\n");
+        pr_err("[FAT32] ERROR: Failed to read BPB\n");
         return E_FAIL;
     }
 
     /* BPB signature 0xAA55 is at offset 510, same value as MBR signature
      * but a separate occurrence at the partition boot sector. */
     if (rd16(&sector_buf[BPB_Signature]) != 0xAA55) {
-        uart_printf("[FAT32] ERROR: Invalid BPB signature\n");
+        pr_err("[FAT32] ERROR: Invalid BPB signature\n");
         return E_FAIL;
     }
 
@@ -249,7 +249,7 @@ static int parse_bpb(void)
     uint32_t fsinfo   = rd16(&sector_buf[BPB_FSInfo]);
 
     if (fs.bytes_per_sector != FAT32_SECTOR_SZ) {
-        uart_printf("[FAT32] ERROR: Unsupported sector size %u\n", fs.bytes_per_sector);
+        pr_err("[FAT32] ERROR: Unsupported sector size %u\n", fs.bytes_per_sector);
         return E_FAIL;
     }
 
@@ -258,10 +258,10 @@ static int parse_bpb(void)
     fs.data_lba          = fs.fat_lba + fs.num_fats * fs.fat_sectors;
     fs.fsinfo_lba        = fs.part_lba + fsinfo;
 
-    uart_printf("[FAT32] BPB: bps=%u spc=%u nfats=%u fat_sz=%u root=%u\n",
+    pr_info("[FAT32] BPB: bps=%u spc=%u nfats=%u fat_sz=%u root=%u\n",
                 fs.bytes_per_sector, fs.sectors_per_cluster,
                 fs.num_fats, fs.fat_sectors, fs.root_cluster);
-    uart_printf("[FAT32] Layout: fat_lba=%u data_lba=%u fsinfo_lba=%u\n",
+    pr_info("[FAT32] Layout: fat_lba=%u data_lba=%u fsinfo_lba=%u\n",
                 fs.fat_lba, fs.data_lba, fs.fsinfo_lba);
 
     return E_OK;
@@ -282,7 +282,7 @@ static int scan_root_dir(void)
             uint32_t abs_sector = base_sector + s;
 
             if (fat_read_sector(abs_sector, sector_buf) != E_OK) {
-                uart_printf("[FAT32] ERROR: Failed to read dir sector %u\n", abs_sector);
+                pr_err("[FAT32] ERROR: Failed to read dir sector %u\n", abs_sector);
                 return E_FAIL;
             }
 
@@ -307,7 +307,7 @@ static int scan_root_dir(void)
                 }
 
                 if (file_count >= FAT32_MAX_FILES) {
-                    uart_printf("[FAT32] WARNING: file_table full, truncating\n");
+                    pr_info("[FAT32] WARNING: file_table full, truncating\n");
                     done = 1;
                     break;
                 }
@@ -329,7 +329,7 @@ static int scan_root_dir(void)
                 f->dir_entry_lba    = abs_sector;
                 f->dir_entry_offset = off;
 
-                uart_printf("[FAT32]   %s: %u bytes, cluster=%u\n",
+                pr_info("[FAT32]   %s: %u bytes, cluster=%u\n",
                             f->name, f->size, f->first_cluster);
                 file_count++;
             }
@@ -340,7 +340,7 @@ static int scan_root_dir(void)
         cluster = fat_next_cluster(cluster);
     }
 
-    uart_printf("[FAT32] Root directory scan complete: %d file(s)\n", file_count);
+    pr_info("[FAT32] Root directory scan complete: %d file(s)\n", file_count);
     return E_OK;
 }
 
@@ -348,11 +348,11 @@ int fat32_init(uint32_t partition_lba)
 {
     int i;
 
-    uart_printf("[FAT32] Initializing at partition LBA %u...\n", partition_lba);
+    pr_info("[FAT32] Initializing at partition LBA %u...\n", partition_lba);
 
     fs_bdev = get_gendisk("mmc0");
     if (!fs_bdev) {
-        uart_printf("[FAT32] ERROR: mmc0 block device not registered\n");
+        pr_err("[FAT32] ERROR: mmc0 block device not registered\n");
         return E_FAIL;
     }
 
@@ -503,7 +503,7 @@ static int cache_file(const struct fat32_resolve *r)
     }
 
     if (file_count >= FAT32_MAX_FILES) {
-        uart_printf("[FAT32] WARNING: file_table full\n");
+        pr_info("[FAT32] WARNING: file_table full\n");
         return E_MFILE;
     }
 
@@ -778,7 +778,7 @@ static int fat32_write(int file_index, uint32_t offset, const void *buf, uint32_
     if (f->first_cluster == 0) {
         uint32_t new_c = fat_alloc_cluster();
         if (new_c == 0) {
-            uart_printf("[FAT32] ERROR: out of space (alloc first cluster)\n");
+            pr_err("[FAT32] ERROR: out of space (alloc first cluster)\n");
             return E_FAIL;
         }
         f->first_cluster = new_c;
@@ -845,7 +845,7 @@ static int fat32_write(int file_index, uint32_t offset, const void *buf, uint32_
     }
 
     if (update_dir_entry(f) != E_OK) {
-        uart_printf("[FAT32] WARNING: failed to update dir entry for %s\n", f->name);
+        pr_info("[FAT32] WARNING: failed to update dir entry for %s\n", f->name);
     }
 
     return (int)written;
@@ -880,7 +880,7 @@ static uint8_t detect_nt_res(const char *name)
 static int fat32_create(const char *name)
 {
     if (file_count >= FAT32_MAX_FILES) {
-        uart_printf("[FAT32] ERROR: file_table full\n");
+        pr_err("[FAT32] ERROR: file_table full\n");
         return E_FAIL;
     }
 
@@ -936,7 +936,7 @@ static int fat32_create(const char *name)
 
                 int new_idx = file_count;
                 file_count++;
-                uart_printf("[FAT32] Created file: %s (idx=%d)\n", f->name, new_idx);
+                pr_info("[FAT32] Created file: %s (idx=%d)\n", f->name, new_idx);
                 return new_idx;
             }
             brelse(bh);
@@ -946,7 +946,7 @@ static int fat32_create(const char *name)
     }
 
     /* Root directory cluster chain exhausted — growing root dir not supported */
-    uart_printf("[FAT32] ERROR: root directory full\n");
+    pr_err("[FAT32] ERROR: root directory full\n");
     return E_FAIL;
 }
 

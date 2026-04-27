@@ -78,7 +78,7 @@ void selftest_run_all(void)
     for (int i = 0; i < NTESTS; i++) {
         int rc = tests[i].run();
         if (rc != 0) {
-            uart_printf("[TEST] FAIL %s (rc=%d)\n", tests[i].name, rc);
+            pr_info("[TEST] FAIL %s (rc=%d)\n", tests[i].name, rc);
             PANIC("selftest failure");
         }
     }

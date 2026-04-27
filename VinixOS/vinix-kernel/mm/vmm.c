@@ -22,7 +22,7 @@ void vmm_init(void)
     ASSERT(mm_cache  != NULL);
     ASSERT(vma_cache != NULL);
 
-    uart_printf("[VMM] caches ready (mm_struct=%dB, vm_area=%dB)\n",
+    pr_info("[VMM] caches ready (mm_struct=%dB, vm_area=%dB)\n",
                 sizeof(struct mm_struct), sizeof(struct vm_area_struct));
 }
 
@@ -114,17 +114,17 @@ void vmm_selftest(void)
         struct mm_struct *mm = mm_alloc();
         if (mm == NULL)
         {
-            uart_printf("[VMM] FAIL: mm_alloc #%d returned NULL\n", i);
+            pr_info("[VMM] FAIL: mm_alloc #%d returned NULL\n", i);
             return;
         }
         if (mm->pgd_pa == 0)
         {
-            uart_printf("[VMM] FAIL: mm_alloc #%d pgd_pa=0\n", i);
+            pr_info("[VMM] FAIL: mm_alloc #%d pgd_pa=0\n", i);
             return;
         }
         if ((mm->pgd_pa & 0x3FFFu) != 0)
         {
-            uart_printf("[VMM] FAIL: pgd_pa 0x%x not 16KB aligned\n", mm->pgd_pa);
+            pr_info("[VMM] FAIL: pgd_pa 0x%x not 16KB aligned\n", mm->pgd_pa);
             return;
         }
         vma_create(mm, 0x40000000 + i * 0x1000, 0x40001000 + i * 0x1000,
@@ -134,7 +134,7 @@ void vmm_selftest(void)
 
     if (page_alloc_free_pages() != pages_before)
     {
-        uart_printf("[VMM] FAIL: page leak — before=%d after=%d\n",
+        pr_info("[VMM] FAIL: page leak — before=%d after=%d\n",
                     pages_before, page_alloc_free_pages());
         return;
     }
@@ -151,7 +151,7 @@ void vmm_selftest(void)
     {
         if (v->vm_start < prev)
         {
-            uart_printf("[VMM] FAIL: VMAs not sorted (%x < %x)\n",
+            pr_info("[VMM] FAIL: VMAs not sorted (%x < %x)\n",
                         v->vm_start, prev);
             mm_free(mm);
             return;
@@ -162,7 +162,7 @@ void vmm_selftest(void)
     }
     if (count != 3)
     {
-        uart_printf("[VMM] FAIL: VMA count %d != 3\n", count);
+        pr_info("[VMM] FAIL: VMA count %d != 3\n", count);
         mm_free(mm);
         return;
     }

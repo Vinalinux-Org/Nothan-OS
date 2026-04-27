@@ -75,7 +75,7 @@ int do_fork(struct svc_context *parent_ctx)
     }
     if (slot < 0)
     {
-        uart_printf("[FORK] no free task slot\n");
+        pr_info("[FORK] no free task slot\n");
         return -1;
     }
 
@@ -162,7 +162,7 @@ int do_fork(struct svc_context *parent_ctx)
     }
 
     scheduler_add_forked(child);
-    uart_printf("[FORK] parent pid=%d -> child pid=%d (user_pa=0x%x pgd=0x%x)\n",
+    pr_info("[FORK] parent pid=%d -> child pid=%d (user_pa=0x%x pgd=0x%x)\n",
                 parent->pid, child->pid, user_pa, pgd_pa);
 
     return slot;

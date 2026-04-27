@@ -26,7 +26,7 @@ void bcache_init(void)
     tick_counter = 0;
     stat_hits = 0;
     stat_misses = 0;
-    uart_printf("[BCACHE] %d buffers x %d B (%d KB total)\n",
+    pr_info("[BCACHE] %d buffers x %d B (%d KB total)\n",
                 BCACHE_BUFFERS, BCACHE_BLOCK_SIZE,
                 (BCACHE_BUFFERS * BCACHE_BLOCK_SIZE) / 1024);
 }
@@ -73,7 +73,7 @@ struct buffer_head *bread(struct gendisk *bdev, uint32_t lba)
     bh = pick_victim();
     if (bh->valid && bh->dirty) {
         if (flush_buffer(bh) != E_OK) {
-            uart_printf("[BCACHE] flush failed for lba %u\n", bh->lba);
+            pr_info("[BCACHE] flush failed for lba %u\n", bh->lba);
             return 0;
         }
     }

@@ -82,7 +82,7 @@ static int32_t sys_write(struct svc_context *ctx)
     }
     else
     {
-        uart_printf("[SVC] Security Violation: Invalid Ptr 0x%08x\n", (uint32_t)ctx->r0);
+        pr_info("[SVC] Security Violation: Invalid Ptr 0x%08x\n", (uint32_t)ctx->r0);
         return E_PTR;
     }
 
@@ -118,7 +118,7 @@ static int32_t sys_exit(struct svc_context *ctx)
 {
     int32_t status = (int32_t)ctx->r0;
 
-    uart_printf("[SVC] Task %d exiting with status %d\n", current->id, status);
+    pr_info("[SVC] Task %d exiting with status %d\n", current->id, status);
 
     /* PID 1 must never leave the scheduler — if init decides to
      * exit, restart it from the embedded payload so the system
@@ -138,7 +138,7 @@ static int32_t sys_exit(struct svc_context *ctx)
         ctx->r3 = 0;
         ctx->lr = USER_SPACE_VA;
 
-        uart_printf("[SVC] init (pid 1) restarted from payload\n");
+        pr_info("[SVC] init (pid 1) restarted from payload\n");
         return E_OK;
     }
 
@@ -207,7 +207,7 @@ static int32_t sys_read(struct svc_context *ctx)
     int val_result = validate_user_pointer(buf, len);
     if (val_result != E_OK)
     {
-        uart_printf("[SYS_READ] Validation FAILED: buf=0x%08x, len=%u, err=%d\n",
+        pr_info("[SYS_READ] Validation FAILED: buf=0x%08x, len=%u, err=%d\n",
                     (uint32_t)buf, len, val_result);
         return E_PTR;
     }
@@ -525,7 +525,7 @@ void svc_handler(struct svc_context *ctx)
     }
 
     default:
-        uart_printf("[SVC] ERROR: Unknown Syscall %d\n", syscall_num);
+        pr_err("[SVC] ERROR: Unknown Syscall %d\n", syscall_num);
         result = E_INVAL;
         break;
     }

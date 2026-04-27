@@ -170,6 +170,6 @@ struct vfs_operations *devfs_init(void)
 {
     cdev_register(&tty_cdev);
     cdev_register(&null_cdev);
-    uart_printf("[DEVFS] registered /dev/tty, /dev/null\n");
+    pr_info("[DEVFS] registered /dev/tty, /dev/null\n");
     return &devfs_ops;
 }

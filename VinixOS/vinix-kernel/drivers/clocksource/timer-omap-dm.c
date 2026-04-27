@@ -92,7 +92,7 @@ static void timer2_clock_enable(void)
         mmio_write32(CM_PER_L4LS_CLKSTCTRL, CLKTRCTRL_SW_WKUP);
         uint32_t timeout = 10000;
         while (((mmio_read32(CM_PER_L4LS_CLKSTCTRL) & CLKTRCTRL_MASK) != CLKTRCTRL_SW_WKUP) && timeout--);
-        if (!timeout) { uart_printf("[TIMER] L4LS wakeup timeout\n"); while (1); }
+        if (!timeout) { pr_err("[TIMER] L4LS wakeup timeout\n"); while (1); }
     }
 
     mmio_write32(CM_PER_TIMER2_CLKCTRL, MODULEMODE_ENABLE);
@@ -105,7 +105,7 @@ static void timer2_clock_enable(void)
         if (idlest == IDLEST_FUNC && modulemode == MODULEMODE_ENABLE) return;
     }
 
-    uart_printf("[TIMER] clock enable timeout (TIMER2_CLKCTRL=0x%08x)\n",
+    pr_err("[TIMER] clock enable timeout (TIMER2_CLKCTRL=0x%08x)\n",
                 mmio_read32(CM_PER_TIMER2_CLKCTRL));
     while (1);
 }
@@ -142,7 +142,7 @@ void timer_init(void)
     mmio_write32(DMTIMER2_BASE + TIOCP_CFG, TIOCP_SOFTRESET);
     uint32_t timeout = 10000;
     while ((mmio_read32(DMTIMER2_BASE + TIOCP_CFG) & TIOCP_SOFTRESET) && timeout--);
-    if (!timeout) { uart_printf("[TIMER] soft reset timeout\n"); while (1); }
+    if (!timeout) { pr_err("[TIMER] soft reset timeout\n"); while (1); }
 
     mmio_write32(DMTIMER2_BASE + TSICR, TSICR_POSTED);
     mmio_write32(DMTIMER2_BASE + TCLR, 0);
@@ -164,7 +164,7 @@ void timer_init(void)
 
     mmio_write32(DMTIMER2_BASE + IRQENABLE_SET, IRQ_OVF_IT_FLAG);
     if (request_irq(TIMER2_IRQ, timer_irq_handler, 0, "omap-dmtimer", NULL) != 0) {
-        uart_printf("[TIMER] request_irq failed\n");
+        pr_err("[TIMER] request_irq failed\n");
         return;
     }
     enable_irq(TIMER2_IRQ);
@@ -182,7 +182,7 @@ void timer_init(void)
     omap_dmtimer_clkevt.set_state_periodic  = omap_dmtimer_set_periodic;
     clockevents_register_device(&omap_dmtimer_clkevt);
 
-    uart_printf("[TIMER] DMTimer2 running (%u ms tick, irq %u)\n", period_ms, TIMER2_IRQ);
+    pr_info("[TIMER] DMTimer2 running (%u ms tick, irq %u)\n", period_ms, TIMER2_IRQ);
 }
 
 uint32_t timer_get_ticks(void)
@@ -237,7 +237,7 @@ static int omap_dmtimer_probe(struct platform_device *pdev)
 {
     struct resource *mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
     int irq = platform_get_irq(pdev, 0);
-    uart_printf("[TIMER] probing %s @ 0x%08x irq %d\n",
+    pr_info("[TIMER] probing %s @ 0x%08x irq %d\n",
                 pdev->name, mem ? mem->start : 0, irq);
     timer_init();
     return 0;

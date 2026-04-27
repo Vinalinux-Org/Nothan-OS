@@ -173,7 +173,7 @@ void slab_init(void)
         kmalloc_caches[i] = kmem_cache_create("kmalloc", kmalloc_sizes[i]);
         ASSERT(kmalloc_caches[i] != NULL);
     }
-    uart_printf("[SLAB] kmalloc classes 32..2048 ready\n");
+    pr_info("[SLAB] kmalloc classes 32..2048 ready\n");
 }
 
 /* ============================================================
@@ -185,7 +185,7 @@ void slab_selftest(void)
     struct kmem_cache *c = kmem_cache_create("test64", 64);
     if (c == NULL)
     {
-        uart_printf("[SLAB] FAIL: kmem_cache_create returned NULL\n");
+        pr_info("[SLAB] FAIL: kmem_cache_create returned NULL\n");
         return;
     }
 
@@ -195,14 +195,14 @@ void slab_selftest(void)
         objs[i] = kmem_cache_alloc(c, GFP_KERNEL);
         if (objs[i] == NULL)
         {
-            uart_printf("[SLAB] FAIL: cache_alloc #%d NULL\n", i);
+            pr_info("[SLAB] FAIL: cache_alloc #%d NULL\n", i);
             return;
         }
         for (int j = 0; j < i; j++)
         {
             if (objs[i] == objs[j])
             {
-                uart_printf("[SLAB] FAIL: obj #%d dup of #%d (ptr 0x%x)\n",
+                pr_info("[SLAB] FAIL: obj #%d dup of #%d (ptr 0x%x)\n",
                             i, j, (uint32_t)objs[i]);
                 return;
             }
@@ -226,7 +226,7 @@ void slab_selftest(void)
     }
     if (!matched)
     {
-        uart_printf("[SLAB] FAIL: realloc did not reuse freed object\n");
+        pr_info("[SLAB] FAIL: realloc did not reuse freed object\n");
         return;
     }
     kmem_cache_free(c, reuse);
@@ -238,12 +238,12 @@ void slab_selftest(void)
 
     if (a == NULL || b == NULL || d == NULL)
     {
-        uart_printf("[SLAB] FAIL: kmalloc returned NULL for supported size\n");
+        pr_info("[SLAB] FAIL: kmalloc returned NULL for supported size\n");
         return;
     }
     if (big != NULL)
     {
-        uart_printf("[SLAB] FAIL: kmalloc(3000) should return NULL\n");
+        pr_info("[SLAB] FAIL: kmalloc(3000) should return NULL\n");
         kfree(big);
         return;
     }

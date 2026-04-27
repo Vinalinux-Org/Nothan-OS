@@ -109,7 +109,7 @@ static struct irq_chip omap_intc_chip = {
 static int omap_intc_probe(struct platform_device *pdev)
 {
     struct resource *mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-    uart_printf("[INTC] probing %s @ 0x%08x\n",
+    pr_info("[INTC] probing %s @ 0x%08x\n",
                 pdev->name, mem ? mem->start : 0);
     intc_init();
     irqchip_register(&omap_intc_chip);

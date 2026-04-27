@@ -125,7 +125,7 @@ static int mmc_enable_clocks(void)
 
     while ((mmio_read32(CM_PER_MMC0_CLKCTRL) & IDLEST_MASK) != IDLEST_FUNC) {
         if (--timeout == 0) {
-            uart_printf("[MMC] ERROR: PRCM clock enable timeout\n");
+            pr_err("[MMC] ERROR: PRCM clock enable timeout\n");
             return E_FAIL;
         }
     }
@@ -171,7 +171,7 @@ int mmc_init(void)
     uint32_t rsp, rca;
     int timeout;
 
-    uart_printf("[MMC] Initializing MMC0 controller...\n");
+    pr_info("[MMC] Initializing MMC0 controller...\n");
 
     if (mmc_enable_clocks() != E_OK) {
         return E_FAIL;
@@ -188,7 +188,7 @@ int mmc_init(void)
     timeout = 1000000;
     while ((mmio_read32(MMC_SYSSTATUS) & 0x01) == 0) {
         if (--timeout == 0) {
-            uart_printf("[MMC] ERROR: SYSSTATUS reset timeout\n");
+            pr_err("[MMC] ERROR: SYSSTATUS reset timeout\n");
             return E_FAIL;
         }
     }
@@ -203,7 +203,7 @@ int mmc_init(void)
     timeout = 10000000;
     while (mmio_read32(MMC_SYSCTL) & (MMC_SYSCTL_SRC | MMC_SYSCTL_SRD)) {
         if (--timeout == 0) {
-            uart_printf("[MMC] ERROR: CMD/DAT reset timeout\n");
+            pr_err("[MMC] ERROR: CMD/DAT reset timeout\n");
             return E_FAIL;
         }
     }
@@ -218,7 +218,7 @@ int mmc_init(void)
     timeout = 100000;
     while ((mmio_read32(MMC_HCTL) & MMC_HCTL_SDBP) == 0) {
         if (--timeout == 0) {
-            uart_printf("[MMC] ERROR: SDBP timeout\n");
+            pr_err("[MMC] ERROR: SDBP timeout\n");
             return E_FAIL;
         }
     }
@@ -230,7 +230,7 @@ int mmc_init(void)
     timeout = 1000000;
     while ((mmio_read32(MMC_SYSCTL) & MMC_SYSCTL_ICS) == 0) {
         if (--timeout == 0) {
-            uart_printf("[MMC] ERROR: ICS timeout\n");
+            pr_err("[MMC] ERROR: ICS timeout\n");
             return E_FAIL;
         }
     }
@@ -250,7 +250,7 @@ int mmc_init(void)
     timeout = 1000000;
     while ((mmio_read32(MMC_STAT) & MMC_STAT_CC) == 0) {
         if (--timeout == 0) {
-            uart_printf("[MMC] ERROR: 80-clock init timeout\n");
+            pr_err("[MMC] ERROR: 80-clock init timeout\n");
             return E_FAIL;
         }
     }
@@ -320,7 +320,7 @@ int mmc_init(void)
         timeout = 1000000;
         while ((mmio_read32(MMC_SYSCTL) & MMC_SYSCTL_ICS) == 0) {
             if (--timeout == 0) {
-                uart_printf("[MMC] ERROR: ICS timeout at 24MHz\n");
+                pr_err("[MMC] ERROR: ICS timeout at 24MHz\n");
                 return E_FAIL;
             }
         }
@@ -331,7 +331,7 @@ int mmc_init(void)
     /* CMD16 — SET_BLOCKLEN = 512. Required for SDSC, no-op on SDHC. */
     mmc_send_cmd(16, 512, MMC_RSP_R1);
 
-    uart_printf("[MMC] Init complete — card type: %s\n",
+    pr_info("[MMC] Init complete — card type: %s\n",
                 sdhc_card ? "SDHC (block addr)" : "SDSC (byte addr)");
     return E_OK;
 }
@@ -355,11 +355,11 @@ int mmc_read_sectors(uint32_t lba, uint32_t count, void *dst)
         while ((mmio_read32(MMC_STAT) & MMC_STAT_BRR) == 0) {
             uint32_t stat = mmio_read32(MMC_STAT);
             if (stat & MMC_STAT_ERRI) {
-                uart_printf("[MMC] ERROR: read error at LBA %u\n", lba + i);
+                pr_err("[MMC] ERROR: read error at LBA %u\n", lba + i);
                 return E_FAIL;
             }
             if (--timeout == 0) {
-                uart_printf("[MMC] ERROR: BRR timeout at LBA %u\n", lba + i);
+                pr_err("[MMC] ERROR: BRR timeout at LBA %u\n", lba + i);
                 return E_FAIL;
             }
         }
@@ -371,7 +371,7 @@ int mmc_read_sectors(uint32_t lba, uint32_t count, void *dst)
         timeout = 10000000;
         while ((mmio_read32(MMC_STAT) & MMC_STAT_TC) == 0) {
             if (--timeout == 0) {
-                uart_printf("[MMC] ERROR: TC timeout at LBA %u\n", lba + i);
+                pr_err("[MMC] ERROR: TC timeout at LBA %u\n", lba + i);
                 return E_FAIL;
             }
         }
@@ -400,7 +400,7 @@ int mmc_write_sectors(uint32_t lba, uint32_t count, const void *src)
         while ((mmio_read32(MMC_STAT) & MMC_STAT_BWR) == 0) {
             uint32_t stat = mmio_read32(MMC_STAT);
             if (stat & MMC_STAT_ERRI) {
-                uart_printf("[MMC] ERROR: write error at LBA %u\n", lba + i);
+                pr_err("[MMC] ERROR: write error at LBA %u\n", lba + i);
                 /* CMD+DAT reset required after write error — without it
                  * the controller stays wedged and all subsequent writes fail. */
                 uint32_t sysctl = mmio_read32(MMC_SYSCTL);
@@ -411,7 +411,7 @@ int mmc_write_sectors(uint32_t lba, uint32_t count, const void *src)
                 return E_FAIL;
             }
             if (--timeout == 0) {
-                uart_printf("[MMC] ERROR: BWR timeout at LBA %u\n", lba + i);
+                pr_err("[MMC] ERROR: BWR timeout at LBA %u\n", lba + i);
                 return E_FAIL;
             }
         }
@@ -423,11 +423,11 @@ int mmc_write_sectors(uint32_t lba, uint32_t count, const void *src)
         timeout = 10000000;
         while ((mmio_read32(MMC_STAT) & MMC_STAT_TC) == 0) {
             if (mmio_read32(MMC_STAT) & MMC_STAT_ERRI) {
-                uart_printf("[MMC] ERROR: TC error at LBA %u\n", lba + i);
+                pr_err("[MMC] ERROR: TC error at LBA %u\n", lba + i);
                 return E_FAIL;
             }
             if (--timeout == 0) {
-                uart_printf("[MMC] ERROR: write TC timeout at LBA %u\n", lba + i);
+                pr_err("[MMC] ERROR: write TC timeout at LBA %u\n", lba + i);
                 return E_FAIL;
             }
         }
@@ -450,7 +450,7 @@ static int omap_hsmmc_probe(struct platform_device *pdev)
 {
     struct resource *mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
     int irq = platform_get_irq(pdev, 0);
-    uart_printf("[MMC] probing %s @ 0x%08x irq %d\n",
+    pr_info("[MMC] probing %s @ 0x%08x irq %d\n",
                 pdev->name, mem ? mem->start : 0, irq);
 
     int rc = mmc_init();

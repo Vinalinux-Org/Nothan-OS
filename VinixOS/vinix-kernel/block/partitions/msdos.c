@@ -42,16 +42,16 @@ int mbr_find_fat32(uint32_t *lba_out, uint32_t *size_out)
         return E_FAIL;
     }
 
-    uart_printf("[MBR] Reading sector 0...\n");
+    pr_info("[MBR] Reading sector 0...\n");
 
     if (mmc_read_sectors(0, 1, mbr_sector_buf) != E_OK) {
-        uart_printf("[MBR] ERROR: Failed to read MBR sector\n");
+        pr_err("[MBR] ERROR: Failed to read MBR sector\n");
         return E_FAIL;
     }
 
     uint16_t sig = read_le16(&mbr_sector_buf[MBR_SIG_OFFSET]);
     if (sig != MBR_SIG_VALUE) {
-        uart_printf("[MBR] ERROR: Invalid signature 0x%x (expected 0xAA55)\n", sig);
+        pr_err("[MBR] ERROR: Invalid signature 0x%x (expected 0xAA55)\n", sig);
         return E_FAIL;
     }
 
@@ -63,7 +63,7 @@ int mbr_find_fat32(uint32_t *lba_out, uint32_t *size_out)
             uint32_t lba  = read_le32(&entry[0x08]);
             uint32_t size = read_le32(&entry[0x0C]);
 
-            uart_printf("[MBR] Found FAT32 partition %d: LBA=%u, size=%u sectors\n",
+            pr_info("[MBR] Found FAT32 partition %d: LBA=%u, size=%u sectors\n",
                         i, lba, size);
 
             *lba_out = lba;
@@ -74,6 +74,6 @@ int mbr_find_fat32(uint32_t *lba_out, uint32_t *size_out)
         }
     }
 
-    uart_printf("[MBR] ERROR: No FAT32 partition found in table\n");
+    pr_err("[MBR] ERROR: No FAT32 partition found in table\n");
     return E_FAIL;
 }

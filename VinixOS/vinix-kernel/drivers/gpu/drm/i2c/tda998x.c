@@ -84,7 +84,7 @@ static void tda_set_page(uint8_t page)
 {
     if (page != g_current_page) {
         if (tda_xfer_write(TDA_HDMI_I2C_ADDR, TDA_CURPAGE_ADDR, page) != 0)
-            uart_printf("[TDA] ERR: page switch to 0x%02x failed\n", page);
+            pr_err("[TDA] ERR: page switch to 0x%02x failed\n", page);
         g_current_page = page;
     }
 }
@@ -356,5 +356,5 @@ void tda19988_init(void)
 {
     tda_probe();
     tda_enable_video();
-    uart_printf("[HDMI] TDA19988 ready\n");
+    pr_info("[HDMI] TDA19988 ready\n");
 }

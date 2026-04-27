@@ -75,23 +75,23 @@ void mmu_init(void)
         "isb\n\t" ::"r"(vbar_va) : "memory");
 
     /* Log final memory map */
-    uart_printf("[MMU] True 3G/1G Virtual Memory Split\n");
-    uart_printf("[MMU] User Space:  VA 0x%x -> PA 0x%x (%d MB) [Cached, User RW]\n",
+    pr_info("[MMU] True 3G/1G Virtual Memory Split\n");
+    pr_info("[MMU] User Space:  VA 0x%x -> PA 0x%x (%d MB) [Cached, User RW]\n",
                 USER_SPACE_VA, USER_SPACE_PA, USER_SPACE_MB);
-    uart_printf("[MMU] Kernel DDR:  VA 0x%x -> PA 0x%x (%d MB) [Cached, Kernel-only]\n",
+    pr_info("[MMU] Kernel DDR:  VA 0x%x -> PA 0x%x (%d MB) [Cached, Kernel-only]\n",
                 KERNEL_DDR_VA, KERNEL_DDR_PA, KERNEL_DDR_MB);
-    uart_printf("[MMU] Page Pool:   VA 0x%x -> PA 0x%x (%d MB) [Cached, Kernel-only]\n",
+    pr_info("[MMU] Page Pool:   VA 0x%x -> PA 0x%x (%d MB) [Cached, Kernel-only]\n",
                 POOL_KERNEL_VA_BASE, POOL_KERNEL_PA_BASE, POOL_KERNEL_MB);
-    uart_printf("[MMU] Peripheral L4_WKUP: PA 0x%x (%d MB) [Strongly Ordered, Identity]\n",
+    pr_info("[MMU] Peripheral L4_WKUP: PA 0x%x (%d MB) [Strongly Ordered, Identity]\n",
                 PERIPH_L4_WKUP_PA, PERIPH_L4_WKUP_SECTIONS);
-    uart_printf("[MMU] Peripheral L4_PER:  PA 0x%x (%d MB) [Strongly Ordered, Identity]\n",
+    pr_info("[MMU] Peripheral L4_PER:  PA 0x%x (%d MB) [Strongly Ordered, Identity]\n",
                 PERIPH_L4_PER_PA, PERIPH_L4_PER_SECTIONS);
-    uart_printf("[MMU] Framebuffer:        PA 0x%x – 0x%x (%d MB) [Non-Cacheable, Identity]\n",
+    pr_info("[MMU] Framebuffer:        PA 0x%x – 0x%x (%d MB) [Non-Cacheable, Identity]\n",
                 FB_PA_BASE, FB_PA_BASE + (FB_SECTIONS * MMU_SECTION_SIZE) - 1, FB_SECTIONS);
-    uart_printf("[MMU] Identity mapping removed (VA 0x80000000 now unmapped)\n");
-    uart_printf("[MMU] VBAR = 0x%x\n", vbar_va);
-    uart_printf("[MMU] DACR = 0x%x (D0=CLIENT, D1=CLIENT)\n", MMU_DACR_VALUE);
-    uart_printf("[MMU] MMU enabled, running at high VA!\n");
+    pr_info("[MMU] Identity mapping removed (VA 0x80000000 now unmapped)\n");
+    pr_info("[MMU] VBAR = 0x%x\n", vbar_va);
+    pr_info("[MMU] DACR = 0x%x (D0=CLIENT, D1=CLIENT)\n", MMU_DACR_VALUE);
+    pr_info("[MMU] MMU enabled, running at high VA!\n");
 }
 
 /* ============================================================

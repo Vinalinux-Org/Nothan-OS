@@ -26,7 +26,7 @@ int i2c_add_adapter(struct i2c_adapter *adap)
 
     adap->nr = num_adapters;
     adapters[num_adapters++] = adap;
-    uart_printf("[I2C] adapter %d (%s) registered\n",
+    pr_info("[I2C] adapter %d (%s) registered\n",
                 adap->nr, adap->name ? adap->name : "?");
     return adap->nr;
 }

@@ -52,7 +52,7 @@ static void lcd_pinmux_setup(void)
     mmio_write32(CONF_LCD_PCLK,  LCD_PAD_MODE0);
     mmio_write32(CONF_LCD_AC_BIAS_EN, LCD_PAD_MODE0);
 
-    uart_printf("[LCDC] LCD pinmux configured (20 pins, 16-bit RGB565)\n");
+    pr_info("[LCDC] LCD pinmux configured (20 pins, 16-bit RGB565)\n");
 }
 
 /* ============================================================
@@ -248,7 +248,7 @@ static void dpll_disp_setup(void)
     timeout = 100000;
     while (!(mmio_read32(CM_IDLEST_DPLL_DISP) & ST_MN_BYPASS) && timeout--);
     if (!timeout) {
-        uart_printf("[LCDC] ERROR: DPLL bypass timeout\n");
+        pr_err("[LCDC] ERROR: DPLL bypass timeout\n");
         return;
     }
 
@@ -267,14 +267,14 @@ static void dpll_disp_setup(void)
     timeout = 100000;
     while (!(mmio_read32(CM_IDLEST_DPLL_DISP) & ST_DPLL_CLK) && timeout--);
     if (!timeout) {
-        uart_printf("[LCDC] ERROR: DPLL lock timeout\n");
+        pr_err("[LCDC] ERROR: DPLL lock timeout\n");
         return;
     }
 
     /* Select DISP DPLL CLKOUT as LCDC pixel clock source (value 0x0) */
     mmio_write32(CLKSEL_LCDC_PIXEL_CLK, 0x0);
 
-    uart_printf("[LCDC] Display PLL locked at %d MHz\n",
+    pr_info("[LCDC] Display PLL locked at %d MHz\n",
                 (24 * DPLL_DISP_M) / (DPLL_DISP_N + 1));
 }
 
@@ -287,7 +287,7 @@ static void lcdc_clock_enable(void)
     uint32_t val;
     uint32_t timeout;
 
-    uart_printf("[LCDC] Enabling LCDC clock...\n");
+    pr_info("[LCDC] Enabling LCDC clock...\n");
 
     /* Wake up LCDC clock domain */
     mmio_write32(CM_PER_LCDC_CLKSTCTRL, 0x2);
@@ -300,11 +300,11 @@ static void lcdc_clock_enable(void)
     while (timeout--) {
         val = mmio_read32(CM_PER_LCDC_CLKCTRL);
         if (((val >> IDLEST_SHIFT) & IDLEST_MASK) == 0) {
-            uart_printf("[LCDC] Module clock enabled\n");
+            pr_info("[LCDC] Module clock enabled\n");
             return;
         }
     }
-    uart_printf("[LCDC] ERROR: Clock enable timeout\n");
+    pr_err("[LCDC] ERROR: Clock enable timeout\n");
 }
 
 /* ============================================================
@@ -329,7 +329,7 @@ static void framebuffer_setup(void)
         fb_pixels[i] = 0x0000;
     }
 
-    uart_printf("[LCDC] Framebuffer at PA 0x%x, %dx%d, RGB565 (16bpp)\n",
+    pr_info("[LCDC] Framebuffer at PA 0x%x, %dx%d, RGB565 (16bpp)\n",
                 FB_PA_BASE, DISPLAY_WIDTH, DISPLAY_HEIGHT);
 }
 
@@ -353,7 +353,7 @@ void lcdc_init(void)
     for (volatile int i = 0; i < 1000; i++);
     mmio_write32(LCDC_BASE + LCD_CLKC_RESET, 0x00);
     for (volatile int i = 0; i < 1000; i++);
-    uart_printf("[LCDC] Clock domain reset complete\n");
+    pr_info("[LCDC] Clock domain reset complete\n");
 
     /* Raster must be off while reconfiguring. */
     mmio_write32(LCDC_BASE + LCD_RASTER_CTRL, 0);
@@ -400,7 +400,7 @@ void lcdc_init(void)
                  HSYNC_INVERT |
                  0x0000FF00);    /* AC bias frequency */
 
-    uart_printf("[LCDC] 800x600 @ %dMHz ready\n",
+    pr_info("[LCDC] 800x600 @ %dMHz ready\n",
                 (24 * DPLL_DISP_M) / (DPLL_DISP_N + 1) / LCDC_CLKDIV);
 }
 
@@ -424,7 +424,7 @@ void lcdc_start_raster(void)
     /* Clear startup transient IRQ flags */
     mmio_write32(LCDC_BASE + LCD_IRQSTATUS, 0xFFFFFFFF);
 
-    uart_printf("[LCDC] Raster active\n");
+    pr_info("[LCDC] Raster active\n");
 }
 
 /* ============================================================

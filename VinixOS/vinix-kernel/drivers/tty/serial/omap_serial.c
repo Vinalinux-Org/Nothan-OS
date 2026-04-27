@@ -172,7 +172,7 @@ static int omap_uart_probe(struct platform_device *pdev)
 {
     struct resource *mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
     int irq = platform_get_irq(pdev, 0);
-    uart_printf("[UART] probing %s @ 0x%08x irq %d\n",
+    pr_info("[UART] probing %s @ 0x%08x irq %d\n",
                 pdev->name, mem ? mem->start : 0, irq);
     uart_init();
     return 0;

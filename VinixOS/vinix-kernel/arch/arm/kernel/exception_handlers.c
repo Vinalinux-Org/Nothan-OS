@@ -20,21 +20,21 @@
 
 static void print_exception_context(struct exception_context *ctx)
 {
-    uart_printf("\n");
-    uart_printf("Exception Context:\n");
-    uart_printf("------------------\n");
-    uart_printf("PC (LR):   0x%08x\n", ctx->lr);
-    uart_printf("SPSR:      0x%08x\n", ctx->spsr);
-    uart_printf("\n");
-    uart_printf("Registers:\n");
-    uart_printf("r0:  0x%08x    r1:  0x%08x\n", ctx->r0, ctx->r1);
-    uart_printf("r2:  0x%08x    r3:  0x%08x\n", ctx->r2, ctx->r3);
-    uart_printf("r4:  0x%08x    r5:  0x%08x\n", ctx->r4, ctx->r5);
-    uart_printf("r6:  0x%08x    r7:  0x%08x\n", ctx->r6, ctx->r7);
-    uart_printf("r8:  0x%08x    r9:  0x%08x\n", ctx->r8, ctx->r9);
-    uart_printf("r10: 0x%08x    r11: 0x%08x\n", ctx->r10, ctx->r11);
-    uart_printf("r12: 0x%08x\n", ctx->r12);
-    uart_printf("\n");
+    pr_info("\n");
+    pr_info("Exception Context:\n");
+    pr_info("------------------\n");
+    pr_info("PC (LR):   0x%08x\n", ctx->lr);
+    pr_info("SPSR:      0x%08x\n", ctx->spsr);
+    pr_info("\n");
+    pr_info("Registers:\n");
+    pr_info("r0:  0x%08x    r1:  0x%08x\n", ctx->r0, ctx->r1);
+    pr_info("r2:  0x%08x    r3:  0x%08x\n", ctx->r2, ctx->r3);
+    pr_info("r4:  0x%08x    r5:  0x%08x\n", ctx->r4, ctx->r5);
+    pr_info("r6:  0x%08x    r7:  0x%08x\n", ctx->r6, ctx->r7);
+    pr_info("r8:  0x%08x    r9:  0x%08x\n", ctx->r8, ctx->r9);
+    pr_info("r10: 0x%08x    r11: 0x%08x\n", ctx->r10, ctx->r11);
+    pr_info("r12: 0x%08x\n", ctx->r12);
+    pr_info("\n");
 }
 
 static const char *decode_cpu_mode(uint32_t spsr)
@@ -65,11 +65,11 @@ static const char *decode_cpu_mode(uint32_t spsr)
  */
 static void halt_kernel(void)
 {
-    uart_printf("\n");
-    uart_printf("====================================\n");
-    uart_printf("       KERNEL HALTED (FATAL)        \n");
-    uart_printf("====================================\n");
-    uart_printf("\n");
+    pr_info("\n");
+    pr_info("====================================\n");
+    pr_info("       KERNEL HALTED (FATAL)        \n");
+    pr_info("====================================\n");
+    pr_info("\n");
 
     /* Infinite loop */
     while (1)
@@ -88,24 +88,24 @@ static void halt_kernel(void)
  */
 void handle_undefined_instruction(struct exception_context *ctx)
 {
-    uart_printf("\n");
-    uart_printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
-    uart_printf("!! UNDEFINED INSTRUCTION EXCEPTION\n");
-    uart_printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+    pr_info("\n");
+    pr_info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+    pr_info("!! UNDEFINED INSTRUCTION EXCEPTION\n");
+    pr_info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
 
-    uart_printf("\n");
-    uart_printf("The CPU encountered an invalid or unsupported instruction.\n");
-    uart_printf("This is a FATAL exception.\n");
+    pr_info("\n");
+    pr_info("The CPU encountered an invalid or unsupported instruction.\n");
+    pr_info("This is a FATAL exception.\n");
 
-    uart_printf("\n");
-    uart_printf("Possible causes:\n");
-    uart_printf("  - Invalid opcode in code\n");
-    uart_printf("  - VFP/NEON instruction without enabling coprocessor\n");
-    uart_printf("  - Corrupted code in memory\n");
-    uart_printf("  - Executing data as code\n");
+    pr_info("\n");
+    pr_info("Possible causes:\n");
+    pr_info("  - Invalid opcode in code\n");
+    pr_info("  - VFP/NEON instruction without enabling coprocessor\n");
+    pr_info("  - Corrupted code in memory\n");
+    pr_info("  - Executing data as code\n");
 
-    uart_printf("\n");
-    uart_printf("CPU Mode: %s\n", decode_cpu_mode(ctx->spsr));
+    pr_info("\n");
+    pr_info("CPU Mode: %s\n", decode_cpu_mode(ctx->spsr));
     print_exception_context(ctx);
 
     halt_kernel();
@@ -120,17 +120,17 @@ void handle_undefined_instruction(struct exception_context *ctx)
  */
 void handle_svc(struct exception_context *ctx)
 {
-    uart_printf("\n");
-    uart_printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
-    uart_printf("!! SUPERVISOR CALL (SVC) EXCEPTION\n");
-    uart_printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+    pr_info("\n");
+    pr_info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+    pr_info("!! SUPERVISOR CALL (SVC) EXCEPTION\n");
+    pr_info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
 
-    uart_printf("\n");
-    uart_printf("SVC instruction was executed.\n");
-    uart_printf("System calls should be handled by svc_handler(), not here.\n");
+    pr_info("\n");
+    pr_info("SVC instruction was executed.\n");
+    pr_info("System calls should be handled by svc_handler(), not here.\n");
 
-    uart_printf("\n");
-    uart_printf("CPU Mode: %s\n", decode_cpu_mode(ctx->spsr));
+    pr_info("\n");
+    pr_info("CPU Mode: %s\n", decode_cpu_mode(ctx->spsr));
     print_exception_context(ctx);
 
     halt_kernel();
@@ -144,31 +144,31 @@ void handle_svc(struct exception_context *ctx)
  */
 void handle_prefetch_abort(struct exception_context *ctx)
 {
-    uart_printf("\n");
-    uart_printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
-    uart_printf("!! PREFETCH ABORT EXCEPTION        \n");
-    uart_printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+    pr_info("\n");
+    pr_info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+    pr_info("!! PREFETCH ABORT EXCEPTION        \n");
+    pr_info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
 
-    uart_printf("\n");
-    uart_printf("Instruction fetch failed.\n");
-    uart_printf("This is a FATAL exception.\n");
+    pr_info("\n");
+    pr_info("Instruction fetch failed.\n");
+    pr_info("This is a FATAL exception.\n");
 
-    uart_printf("\n");
-    uart_printf("Possible causes:\n");
-    uart_printf("  - Branching to invalid address\n");
-    uart_printf("  - MMU permission fault (if MMU enabled)\n");
-    uart_printf("  - Memory not present at fetch address\n");
-    uart_printf("  - Alignment fault\n");
+    pr_info("\n");
+    pr_info("Possible causes:\n");
+    pr_info("  - Branching to invalid address\n");
+    pr_info("  - MMU permission fault (if MMU enabled)\n");
+    pr_info("  - Memory not present at fetch address\n");
+    pr_info("  - Alignment fault\n");
 
-    uart_printf("\n");
-    uart_printf("\n");
-    uart_printf("CPU Mode: %s\n", decode_cpu_mode(ctx->spsr));
+    pr_info("\n");
+    pr_info("\n");
+    pr_info("CPU Mode: %s\n", decode_cpu_mode(ctx->spsr));
     print_exception_context(ctx);
 
     /* FAULT CONTAINMENT LOGIC */
     if ((ctx->spsr & 0x1F) == 0x10)
     {
-        uart_printf("[FAULT] User prefetch abort: task %d ('%s') — SIGSEGV\n",
+        pr_err("[FAULT] User prefetch abort: task %d ('%s') — SIGSEGV\n",
                     current ? current->id : -1,
                     current ? current->name : "???");
         if (!current) PANIC("User fault with no current task");
@@ -179,7 +179,7 @@ void handle_prefetch_abort(struct exception_context *ctx)
         return;
     }
 
-    uart_printf("[FAULT] KERNEL PANIC: Prefetch Abort in Privileged Mode!\n");
+    pr_err("[FAULT] KERNEL PANIC: Prefetch Abort in Privileged Mode!\n");
     halt_kernel();
 }
 
@@ -240,31 +240,31 @@ void handle_data_abort(struct exception_context *ctx)
     __asm__ __volatile__("mrc p15, 0, %0, c5, c0, 0" : "=r"(dfsr));
     __asm__ __volatile__("mrc p15, 0, %0, c6, c0, 0" : "=r"(dfar));
 
-    uart_printf("\n");
-    uart_printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
-    uart_printf("!! DATA ABORT EXCEPTION            \n");
-    uart_printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+    pr_info("\n");
+    pr_info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+    pr_info("!! DATA ABORT EXCEPTION            \n");
+    pr_info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
 
-    uart_printf("\n");
-    uart_printf("Data access (load/store) failed.\n");
+    pr_info("\n");
+    pr_info("Data access (load/store) failed.\n");
 
     /* Fault diagnostics from DFSR/DFAR */
-    uart_printf("\n");
-    uart_printf("Fault Details:\n");
-    uart_printf("  DFAR (Fault Address): 0x%08x\n", dfar);
-    uart_printf("  DFSR (Fault Status):  0x%08x\n", dfsr);
-    uart_printf("  Fault Type: %s\n", decode_fault_status(dfsr));
-    uart_printf("  Access Type: %s\n", (dfsr & (1 << 11)) ? "WRITE" : "READ");
-    uart_printf("  Domain: %u\n", (dfsr >> 4) & 0xF);
+    pr_info("\n");
+    pr_info("Fault Details:\n");
+    pr_info("  DFAR (Fault Address): 0x%08x\n", dfar);
+    pr_info("  DFSR (Fault Status):  0x%08x\n", dfsr);
+    pr_info("  Fault Type: %s\n", decode_fault_status(dfsr));
+    pr_info("  Access Type: %s\n", (dfsr & (1 << 11)) ? "WRITE" : "READ");
+    pr_info("  Domain: %u\n", (dfsr >> 4) & 0xF);
 
-    uart_printf("\n");
-    uart_printf("CPU Mode: %s\n", decode_cpu_mode(ctx->spsr));
+    pr_info("\n");
+    pr_info("CPU Mode: %s\n", decode_cpu_mode(ctx->spsr));
     print_exception_context(ctx);
 
     /* FAULT CONTAINMENT LOGIC */
     if ((ctx->spsr & 0x1F) == 0x10)
     {
-        uart_printf("[FAULT] User data abort at PC=0x%08x DFAR=0x%08x: task %d ('%s') — SIGSEGV\n",
+        pr_err("[FAULT] User data abort at PC=0x%08x DFAR=0x%08x: task %d ('%s') — SIGSEGV\n",
                     ctx->lr, dfar,
                     current ? current->id : -1,
                     current ? current->name : "???");
@@ -275,7 +275,7 @@ void handle_data_abort(struct exception_context *ctx)
         return;
     }
 
-    uart_printf("[FAULT] KERNEL PANIC: Data Abort in Privileged Mode!\n");
+    pr_err("[FAULT] KERNEL PANIC: Data Abort in Privileged Mode!\n");
     halt_kernel();
 }
 
@@ -288,17 +288,17 @@ void handle_data_abort(struct exception_context *ctx)
  */
 void handle_irq(struct exception_context *ctx)
 {
-    uart_printf("\n");
-    uart_printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
-    uart_printf("!! UNEXPECTED IRQ EXCEPTION        \n");
-    uart_printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+    pr_info("\n");
+    pr_info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+    pr_info("!! UNEXPECTED IRQ EXCEPTION        \n");
+    pr_info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
 
-    uart_printf("\n");
-    uart_printf("IRQ exception occurred, but IRQ should be MASKED!\n");
-    uart_printf("This indicates a kernel bug.\n");
+    pr_info("\n");
+    pr_info("IRQ exception occurred, but IRQ should be MASKED!\n");
+    pr_info("This indicates a kernel bug.\n");
 
-    uart_printf("\n");
-    uart_printf("CPU Mode: %s\n", decode_cpu_mode(ctx->spsr));
+    pr_info("\n");
+    pr_info("CPU Mode: %s\n", decode_cpu_mode(ctx->spsr));
     print_exception_context(ctx);
 
     halt_kernel();
@@ -313,17 +313,17 @@ void handle_irq(struct exception_context *ctx)
  */
 void handle_fiq(struct exception_context *ctx)
 {
-    uart_printf("\n");
-    uart_printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
-    uart_printf("!! UNEXPECTED FIQ EXCEPTION        \n");
-    uart_printf("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+    pr_info("\n");
+    pr_info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
+    pr_info("!! UNEXPECTED FIQ EXCEPTION        \n");
+    pr_info("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
 
-    uart_printf("\n");
-    uart_printf("FIQ exception occurred, but FIQ is NOT USED!\n");
-    uart_printf("This indicates a serious kernel bug.\n");
+    pr_info("\n");
+    pr_info("FIQ exception occurred, but FIQ is NOT USED!\n");
+    pr_info("This indicates a serious kernel bug.\n");
 
-    uart_printf("\n");
-    uart_printf("CPU Mode: %s\n", decode_cpu_mode(ctx->spsr));
+    pr_info("\n");
+    pr_info("CPU Mode: %s\n", decode_cpu_mode(ctx->spsr));
     print_exception_context(ctx);
 
     halt_kernel();

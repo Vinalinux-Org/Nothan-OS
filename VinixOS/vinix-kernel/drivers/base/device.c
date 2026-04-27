@@ -11,7 +11,7 @@ int bus_register(struct bus_type *bus)
 {
     bus->num_devices = 0;
     bus->num_drivers = 0;
-    uart_printf("[BUS] %s registered\n", bus->name ? bus->name : "?");
+    pr_info("[BUS] %s registered\n", bus->name ? bus->name : "?");
     return 0;
 }
 
@@ -24,7 +24,7 @@ static int try_bind(struct bus_type *bus, struct device *dev, struct driver *drv
     int rc = drv->probe(dev);
     if (rc != 0) {
         dev->driver = NULL;
-        uart_printf("[BUS] probe %s failed for %s: %d\n",
+        pr_err("[BUS] probe %s failed for %s: %d\n",
                     drv->name, dev->name, rc);
     }
     return rc;
@@ -59,7 +59,7 @@ int bus_add_driver(struct bus_type *bus, struct driver *drv)
         if (dev->driver == drv) bound++;
     }
     if (bound == 0 && last_err == 0) {
-        uart_printf("[BUS] driver '%s' registered, no matching device yet\n",
+        pr_info("[BUS] driver '%s' registered, no matching device yet\n",
                     drv->name);
     }
     return last_err;

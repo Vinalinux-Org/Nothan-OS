@@ -22,7 +22,7 @@ int add_disk(struct gendisk *disk)
 {
     if (num_disks >= MAX_DISKS) return E_FAIL;
     disks[num_disks++] = disk;
-    uart_printf("[BLK] registered %s (%u sectors x %u B)\n",
+    pr_info("[BLK] registered %s (%u sectors x %u B)\n",
                 disk->name, disk->total_sectors, disk->sector_size);
     return E_OK;
 }

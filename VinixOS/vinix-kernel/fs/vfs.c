@@ -34,7 +34,7 @@ static struct vfs_mount mount_table[MAX_MOUNTS];
 
 void vfs_init(void)
 {
-    uart_printf("[VFS] Initializing Virtual File System...\n");
+    pr_info("[VFS] Initializing Virtual File System...\n");
 
     for (int i = 0; i < MAX_FDS; i++) {
         boot_fd_table[i].in_use = false;
@@ -51,19 +51,19 @@ void vfs_init(void)
         mount_table[i].in_use = false;
     }
 
-    uart_printf("[VFS] Initialization complete\n");
+    pr_info("[VFS] Initialization complete\n");
 }
 
 int vfs_mount(const char *mount_point, struct vfs_operations *fs_ops)
 {
-    uart_printf("[VFS] Mounting filesystem at '%s'...\n", mount_point);
+    pr_info("[VFS] Mounting filesystem at '%s'...\n", mount_point);
 
     int slot = -1;
     for (int i = 0; i < MAX_MOUNTS; i++) {
         if (!mount_table[i].in_use) { slot = i; break; }
     }
     if (slot < 0) {
-        uart_printf("[VFS] ERROR: No free mount slots\n");
+        pr_err("[VFS] ERROR: No free mount slots\n");
         return E_FAIL;
     }
 
@@ -72,7 +72,7 @@ int vfs_mount(const char *mount_point, struct vfs_operations *fs_ops)
     mount_table[slot].mp_len = strlen(mount_point);
     mount_table[slot].in_use = true;
 
-    uart_printf("[VFS] Filesystem mounted at '%s'\n", mount_point);
+    pr_info("[VFS] Filesystem mounted at '%s'\n", mount_point);
     return E_OK;
 }
 
