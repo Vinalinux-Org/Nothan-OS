@@ -14,6 +14,7 @@
 #include "vinix/mmc/host.h"
 #include "vinix/blkdev.h"
 #include "vinix/printk.h"
+#include "vinix/errno.h"
 
 #define MAX_MMC_DISKS 2
 
@@ -40,7 +41,7 @@ static int mmc_block_read(struct gendisk *disk, uint32_t lba,
                           uint32_t count, void *buf)
 {
     (void)disk;
-    if (!current_disk || !current_disk->io.read_sectors) return -1;
+    if (!current_disk || !current_disk->io.read_sectors) return -EIO;
     return current_disk->io.read_sectors(lba, count, buf);
 }
 
@@ -48,7 +49,7 @@ static int mmc_block_write(struct gendisk *disk, uint32_t lba,
                            uint32_t count, const void *buf)
 {
     (void)disk;
-    if (!current_disk || !current_disk->io.write_sectors) return -1;
+    if (!current_disk || !current_disk->io.write_sectors) return -EIO;
     return current_disk->io.write_sectors(lba, count, buf);
 }
 
@@ -62,7 +63,7 @@ int mmc_block_register(struct mmc_host *host,
     for (int i = 0; i < MAX_MMC_DISKS; i++) {
         if (!disks[i].in_use) { md = &disks[i]; break; }
     }
-    if (!md) return -1;
+    if (!md) return -ENOSPC;
 
     md->io.read_sectors  = read_fn;
     md->io.write_sectors = write_fn;

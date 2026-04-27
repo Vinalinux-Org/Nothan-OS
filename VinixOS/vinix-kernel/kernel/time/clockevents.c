@@ -13,6 +13,7 @@
 
 #include "vinix/clocksource.h"
 #include "vinix/printk.h"
+#include "vinix/errno.h"
 #include "scheduler.h"
 
 static struct clock_event_device *active_dev;
@@ -25,7 +26,7 @@ static void clockevents_handler(struct clock_event_device *dev)
 
 int clockevents_register_device(struct clock_event_device *dev)
 {
-    if (!dev) return -1;
+    if (!dev) return -EINVAL;
 
     /* Highest-rated device wins for MVP single-active model. */
     if (active_dev && dev->rating <= active_dev->rating) {

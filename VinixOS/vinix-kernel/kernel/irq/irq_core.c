@@ -10,6 +10,7 @@
 #include "uart.h"
 #include "types.h"
 #include "vinix/irqchip.h"
+#include "vinix/errno.h"
 
 struct irq_desc {
     irq_handler_t  handler;
@@ -35,9 +36,9 @@ void irq_init(void)
 int request_irq(unsigned int irq, irq_handler_t handler,
                 unsigned long flags, const char *name, void *dev)
 {
-    if (irq >= MAX_IRQS)        return -1;
-    if (handler == NULL)        return -1;
-    if (irq_table[irq].handler) return -1;
+    if (irq >= MAX_IRQS)        return -EINVAL;
+    if (handler == NULL)        return -EINVAL;
+    if (irq_table[irq].handler) return -EBUSY;
 
     irq_table[irq].handler = handler;
     irq_table[irq].dev     = dev;

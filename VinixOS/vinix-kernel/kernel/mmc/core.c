@@ -13,6 +13,7 @@
 
 #include "vinix/mmc/host.h"
 #include "vinix/printk.h"
+#include "vinix/errno.h"
 #include "string.h"
 
 #define MAX_MMC_HOSTS 2
@@ -35,7 +36,7 @@ struct mmc_host *mmc_alloc_host(int extra_priv, const char *name)
 
 int mmc_add_host(struct mmc_host *host)
 {
-    if (!host) return -1;
+    if (!host) return -EINVAL;
 
     /* host already came from our static pool; just commit the slot. */
     num_hosts++;

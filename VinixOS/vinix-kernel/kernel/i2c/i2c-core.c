@@ -10,6 +10,7 @@
  * ============================================================ */
 
 #include "vinix/i2c.h"
+#include "vinix/errno.h"
 #include "uart.h"
 #include "string.h"
 
@@ -20,8 +21,8 @@ static int                 num_adapters = 0;
 
 int i2c_add_adapter(struct i2c_adapter *adap)
 {
-    if (!adap || !adap->algo || !adap->algo->master_xfer) return -1;
-    if (num_adapters >= MAX_I2C_ADAPTERS) return -1;
+    if (!adap || !adap->algo || !adap->algo->master_xfer) return -EINVAL;
+    if (num_adapters >= MAX_I2C_ADAPTERS) return -ENOSPC;
 
     adap->nr = num_adapters;
     adapters[num_adapters++] = adap;
@@ -32,8 +33,8 @@ int i2c_add_adapter(struct i2c_adapter *adap)
 
 int i2c_transfer(struct i2c_adapter *adap, struct i2c_msg *msgs, int count)
 {
-    if (!adap || !adap->algo || !adap->algo->master_xfer) return -1;
-    if (!msgs || count <= 0) return -1;
+    if (!adap || !adap->algo || !adap->algo->master_xfer) return -EINVAL;
+    if (!msgs || count <= 0) return -EINVAL;
 
     return adap->algo->master_xfer(adap, msgs, count);
 }
