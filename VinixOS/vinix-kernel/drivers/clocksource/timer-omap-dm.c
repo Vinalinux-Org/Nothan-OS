@@ -167,20 +167,21 @@ void timer_init(void)
         pr_err("[TIMER] request_irq failed\n");
         return;
     }
+
+    /* Register the clockevent BEFORE enabling the IRQ + starting the
+     * timer. Otherwise an IRQ that fires in the gap finds
+     * clkevt.event_handler == NULL and drops the tick. */
+    omap_dmtimer_clkevt.name                = "omap-dmtimer";
+    omap_dmtimer_clkevt.rating              = 200;
+    omap_dmtimer_clkevt.set_state_periodic  = omap_dmtimer_set_periodic;
+    clockevents_register_device(&omap_dmtimer_clkevt);
+
     enable_irq(TIMER2_IRQ);
 
     mmio_write32(DMTIMER2_BASE + TCLR, TCLR_AR);
     timeout = 10000;
     while ((mmio_read32(DMTIMER2_BASE + TWPS) & TWPS_W_PEND_TCLR) && timeout--);
     mmio_write32(DMTIMER2_BASE + TCLR, TCLR_AR | TCLR_ST);
-
-    /* Hand the tick over to the clockevents framework — IRQ
-     * handler now dispatches via clkevt->event_handler instead
-     * of calling scheduler_tick directly. */
-    omap_dmtimer_clkevt.name                = "omap-dmtimer";
-    omap_dmtimer_clkevt.rating              = 200;
-    omap_dmtimer_clkevt.set_state_periodic  = omap_dmtimer_set_periodic;
-    clockevents_register_device(&omap_dmtimer_clkevt);
 
     pr_info("[TIMER] DMTimer2 running (%u ms tick, irq %u)\n", period_ms, TIMER2_IRQ);
 }
