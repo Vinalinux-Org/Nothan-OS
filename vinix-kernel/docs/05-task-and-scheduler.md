@@ -8,7 +8,7 @@
 
 ## Task Structure
 
-File: `VinixOS/vinix-kernel/include/task.h`
+File: `vinix-kernel/kernel/include/task.h`
 
 ```c
 struct task_context {

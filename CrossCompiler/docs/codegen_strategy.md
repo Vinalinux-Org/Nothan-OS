@@ -302,4 +302,4 @@ add:
 
 - [ir_format.md](ir_format.md) — IR instructions được map ở đây
 - [architecture.md](architecture.md) — Codegen trong compiler pipeline
-- [VinixOS/docs/06-syscall-mechanism.md](../../VinixOS/docs/06-syscall-mechanism.md) — Kernel-side syscall handling
+- [vinix-kernel/docs/06-syscall-mechanism.md](../../vinix-kernel/docs/06-syscall-mechanism.md) — Kernel-side syscall handling

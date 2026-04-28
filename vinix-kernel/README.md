@@ -36,7 +36,7 @@ VinixOS là bare-metal monolithic kernel tự viết 100% từ zero — không d
 ## Cấu Trúc Project
 
 ```text
-VinixOS/
+vinix-kernel/
 ├── bootloader/              # MLO (SRAM stage, boots kernel from SD sector 2048)
 ├── platform/bbb/            # BBB/AM3358 board: memory map, IRQ numbers, platform device table
 ├── kernel/

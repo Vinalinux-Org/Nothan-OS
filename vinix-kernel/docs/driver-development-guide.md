@@ -87,7 +87,7 @@ void               skb_reserve(struct sk_buff *skb, int len);
 
 ## 3. Khai báo platform_device
 
-File: [VinixOS/vinix-kernel/arch/arm/mach-omap2/board-bbb.c]
+File: [vinix-kernel/kernel/arch/arm/mach-omap2/board-bbb.c]
 
 ```c
 static struct platform_device bbb_cpsw0 = {
@@ -104,7 +104,7 @@ Append vào array `bbb_devices[]`. Kernel core tự register.
 
 ## 4. Skeleton driver file
 
-File: `VinixOS/vinix-kernel/drivers/net/ethernet/ti/cpsw.c`
+File: `vinix-kernel/kernel/drivers/net/ethernet/ti/cpsw.c`
 
 ```c
 /* ============================================================

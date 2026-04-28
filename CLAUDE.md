@@ -155,8 +155,8 @@ VinCC **KHÔNG** compile:
 ### Thứ tự build
 
 ```bash
-make -C VinixOS userspace   # TRƯỚC — kernel nhúng shell payload
-make -C VinixOS kernel      # SAU  — kernel lấy shell mới nhất
+make -C vinix-kernel userspace   # TRƯỚC — kernel nhúng shell payload
+make -C vinix-kernel kernel      # SAU  — kernel lấy shell mới nhất
 ```
 
 ### Memory Map (runtime)
@@ -587,8 +587,8 @@ Mọi driver phải register qua đúng subsystem class (qua header tương ứn
 
 **Documents tham chiếu**:
 
-- [VinixOS/docs/driver-development-guide.md] — driver writer template (full ethernet skeleton)
-- [VinixOS/docs/10-subsystem-reference.md] — pattern + example cho mọi subsystem
+- [vinix-kernel/docs/driver-development-guide.md] — driver writer template (full ethernet skeleton)
+- [vinix-kernel/docs/10-subsystem-reference.md] — pattern + example cho mọi subsystem
 - Plan Phase 4 (deferred probe + i2c_board_info + driver migration): `~/.claude/plans/t-i-ngh-s-c-woolly-ember.md`
 
 ---

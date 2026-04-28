@@ -26,8 +26,8 @@ TOPDIR="$(dirname "$SCRIPT_DIR")"
 echo "========================================"
 echo " 1/3  Build kernel + userspace"
 echo "========================================"
-make -C "$TOPDIR/VinixOS/userspace"
-make -C "$TOPDIR/VinixOS/vinix-kernel"
+make -C "$TOPDIR/vinix-kernel/userspace"
+make -C "$TOPDIR/vinix-kernel/vinix-kernel"
 
 echo ""
 echo "========================================"
@@ -47,13 +47,13 @@ BIN_APPS="shell ls cat echo ps kill pwd free uname hello rm mv"
 for app in $BIN_APPS; do
     dest=$app
     [ "$app" = "shell" ] && dest=sh
-    src="$TOPDIR/VinixOS/userspace/build/apps/$app/$app.elf"
+    src="$TOPDIR/vinix-kernel/userspace/build/apps/$app/$app.elf"
     [ -f "$src" ] || { echo "missing $src"; exit 1; }
     cp "$src" "$MOUNT/bin/$dest"
     echo "  $(printf '%-6s' $app) -> $MOUNT/bin/$dest  ($(stat -c%s "$src") bytes)"
 done
 
-INIT_SRC="$TOPDIR/VinixOS/userspace/build/apps/init/init.elf"
+INIT_SRC="$TOPDIR/vinix-kernel/userspace/build/apps/init/init.elf"
 if [ -f "$INIT_SRC" ]; then
     cp "$INIT_SRC" "$MOUNT/sbin/init"
     echo "  init   -> $MOUNT/sbin/init   ($(stat -c%s "$INIT_SRC") bytes)"

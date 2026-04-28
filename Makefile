@@ -23,7 +23,7 @@ vinixos:
 	@echo "========================================="
 	@echo "Building VinixOS..."
 	@echo "========================================="
-	$(MAKE) -C VinixOS
+	$(MAKE) -C vinix-kernel
 
 # Build/verify compiler
 compiler:
@@ -41,7 +41,7 @@ compiler:
 # Clean all build artifacts
 clean:
 	@echo "Cleaning VinixOS..."
-	$(MAKE) -C VinixOS clean
+	$(MAKE) -C vinix-kernel clean
 	@echo "Cleaning CrossCompiler..."
 	$(MAKE) -C CrossCompiler clean
 	@echo "Clean complete"
@@ -49,7 +49,7 @@ clean:
 # Run tests
 test: vinixos
 	@echo "Running VinixOS tests..."
-	$(MAKE) -C VinixOS test
+	$(MAKE) -C vinix-kernel test
 	@echo ""
 	@echo "Running Compiler tests..."
 	$(MAKE) -C CrossCompiler test

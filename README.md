@@ -10,15 +10,15 @@
 
 ### Boot Log
 
-![Boot Log](VinixOS/docs/images/boot-log.png)
+![Boot Log](vinix-kernel/docs/images/boot-log.png)
 
 ### Splash Screen
 
-![Splash Screen](VinixOS/docs/images/logo.png)
+![Splash Screen](vinix-kernel/docs/images/logo.png)
 
 ### Home Screen
 
-![Home Screen](VinixOS/docs/images/home.png)
+![Home Screen](vinix-kernel/docs/images/home.png)
 
 ---
 
@@ -187,14 +187,14 @@ cd Vinix-OS
 #### Bước 2: Build VinixOS (bootloader + kernel + userspace)
 
 ```bash
-make -C VinixOS
+make -C vinix-kernel
 ```
 
 Output:
 
-- `VinixOS/bootloader/MLO` — first-stage bootloader
-- `VinixOS/vinix-kernel/build/kernel.bin` — kernel với embedded init (PID 1 payload)
-- `VinixOS/userspace/build/apps/<app>/<app>.elf` — 10 external utilities + init + shell
+- `vinix-kernel/bootloader/MLO` — first-stage bootloader
+- `vinix-kernel/kernel/build/kernel.bin` — kernel với embedded init (PID 1 payload)
+- `vinix-kernel/userspace/build/apps/<app>/<app>.elf` — 10 external utilities + init + shell
 
 #### Bước 3: Flash SD Card
 
@@ -338,7 +338,7 @@ Hello, VinixOS!
 
 ```
 Vinix-OS/
-├── VinixOS/
+├── vinix-kernel/
 │   ├── bootloader/          ← MLO (SRAM @ 0x402F0400)
 │   ├── kernel/
 │   ├── platform/bbb/        ← AM3358 board: memory map, IRQ, platform device table
@@ -380,18 +380,18 @@ Vinix-OS/
 
 | Component | Trạng Thái | Tài Liệu |
 |-----------|-----------|---------|
-| Bootloader (MLO) | ✅ Shipped | [01-boot-and-bringup.md](VinixOS/docs/01-boot-and-bringup.md) |
+| Bootloader (MLO) | ✅ Shipped | [01-boot-and-bringup.md](vinix-kernel/docs/01-boot-and-bringup.md) |
 | Platform Layer (4-layer HAL) | ✅ Shipped | `platform/bbb/` |
-| Memory (page_alloc + slab + kmalloc + VMM + L2) | ✅ Shipped | [03-memory-and-mmu.md](VinixOS/docs/03-memory-and-mmu.md) |
+| Memory (page_alloc + slab + kmalloc + VMM + L2) | ✅ Shipped | [03-memory-and-mmu.md](vinix-kernel/docs/03-memory-and-mmu.md) |
 | Concurrency (spinlock + atomic + wait_queue + sleep) | ✅ Shipped | `kernel/src/kernel/sync/` |
-| Interrupt + Exception Handling | ✅ Shipped | [04-interrupt-and-exception.md](VinixOS/docs/04-interrupt-and-exception.md) |
-| Preemptive Scheduler | ✅ Shipped | [05-task-and-scheduler.md](VinixOS/docs/05-task-and-scheduler.md) |
+| Interrupt + Exception Handling | ✅ Shipped | [04-interrupt-and-exception.md](vinix-kernel/docs/04-interrupt-and-exception.md) |
+| Preemptive Scheduler | ✅ Shipped | [05-task-and-scheduler.md](vinix-kernel/docs/05-task-and-scheduler.md) |
 | Process Model (fork/exec/wait/kill/SIGSEGV) | ✅ Shipped | `kernel/src/kernel/proc/` |
-| Syscalls (22, AAPCS + errno) | ✅ Shipped | [06-syscall-mechanism.md](VinixOS/docs/06-syscall-mechanism.md) |
-| VFS + FAT32 + devfs + procfs + block + bcache | ✅ Shipped | [99-system-overview.md](VinixOS/docs/99-system-overview.md) |
+| Syscalls (22, AAPCS + errno) | ✅ Shipped | [06-syscall-mechanism.md](vinix-kernel/docs/06-syscall-mechanism.md) |
+| VFS + FAT32 + devfs + procfs + block + bcache | ✅ Shipped | [99-system-overview.md](vinix-kernel/docs/99-system-overview.md) |
 | Linux-style Driver Model (platform_device/driver) | ✅ Shipped | `kernel/src/kernel/driver/` |
 | vinixlibc (POSIX subset ~1.4 KLOC) | ✅ Shipped | `userspace/vinixlibc/` |
-| Userspace (init + shell + 10 coreutils) | ✅ Shipped | [08-userspace-application.md](VinixOS/docs/08-userspace-application.md) |
+| Userspace (init + shell + 10 coreutils) | ✅ Shipped | [08-userspace-application.md](vinix-kernel/docs/08-userspace-application.md) |
 | Selftest harness | ✅ Shipped | `kernel/src/kernel/test/selftest.c` |
 | HDMI Display (800×600) + Boot Screen | ✅ Shipped | `kernel/src/ui/boot_screen.c` |
 | Networking (CPSW + UDP/ICMP/ARP) | ⏳ Deferred to phase 2 | — |
@@ -401,18 +401,18 @@ Vinix-OS/
 
 ## Tài Liệu
 
-### VinixOS (`VinixOS/docs/`)
+### VinixOS (`vinix-kernel/docs/`)
 
 | File | Nội Dung |
 |------|---------|
-| [01-boot-and-bringup.md](VinixOS/docs/01-boot-and-bringup.md) | ROM → MLO → entry.S, MMU Phase A |
-| [02-kernel-initialization.md](VinixOS/docs/02-kernel-initialization.md) | `kernel_main()` step-by-step |
-| [03-memory-and-mmu.md](VinixOS/docs/03-memory-and-mmu.md) | Page table, address translation |
-| [04-interrupt-and-exception.md](VinixOS/docs/04-interrupt-and-exception.md) | INTC, IRQ flow, exception handlers |
-| [05-task-and-scheduler.md](VinixOS/docs/05-task-and-scheduler.md) | Context switch, round-robin |
-| [06-syscall-mechanism.md](VinixOS/docs/06-syscall-mechanism.md) | SVC ABI, pointer validation |
-| [08-userspace-application.md](VinixOS/docs/08-userspace-application.md) | crt0.S, linker script, shell |
-| [99-system-overview.md](VinixOS/docs/99-system-overview.md) | Big picture, flows, memory map |
+| [01-boot-and-bringup.md](vinix-kernel/docs/01-boot-and-bringup.md) | ROM → MLO → entry.S, MMU Phase A |
+| [02-kernel-initialization.md](vinix-kernel/docs/02-kernel-initialization.md) | `kernel_main()` step-by-step |
+| [03-memory-and-mmu.md](vinix-kernel/docs/03-memory-and-mmu.md) | Page table, address translation |
+| [04-interrupt-and-exception.md](vinix-kernel/docs/04-interrupt-and-exception.md) | INTC, IRQ flow, exception handlers |
+| [05-task-and-scheduler.md](vinix-kernel/docs/05-task-and-scheduler.md) | Context switch, round-robin |
+| [06-syscall-mechanism.md](vinix-kernel/docs/06-syscall-mechanism.md) | SVC ABI, pointer validation |
+| [08-userspace-application.md](vinix-kernel/docs/08-userspace-application.md) | crt0.S, linker script, shell |
+| [99-system-overview.md](vinix-kernel/docs/99-system-overview.md) | Big picture, flows, memory map |
 
 ### CrossCompiler (`CrossCompiler/docs/`)
 
@@ -458,7 +458,7 @@ Vinix-OS/
 
 **Build fails:**
 - Verify `arm-none-eabi-gcc` đã install: `arm-none-eabi-gcc --version`
-- Dùng `make -C VinixOS` để build — Makefile tự xử lý build order (userspace trước kernel)
+- Dùng `make -C vinix-kernel` để build — Makefile tự xử lý build order (userspace trước kernel)
 
 **VinCC compiler error:**
 - Kiểm tra feature có trong Subset C: xem [subset_c_spec.md](CrossCompiler/docs/subset_c_spec.md)

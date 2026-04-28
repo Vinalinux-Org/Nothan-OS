@@ -17,7 +17,7 @@ VinixOS là một bare-metal OS tự phát triển từ đầu, chạy trên **B
 ## Cấu trúc project
 
 ```
-VinixOS/
+vinix-kernel/
 ├── bootloader/     ← MLO: clock, DDR3, load kernel từ SD card
 ├── kernel/         ← Kernel chính
 │   ├── src/

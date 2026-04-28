@@ -42,7 +42,7 @@ arm-linux-gnueabihf-ld --version
 ```bash
 # Clone repo
 git clone <repository-url>
-cd VinixOS
+cd vinix-kernel
 
 # Install Python dependencies
 cd CrossCompiler
@@ -226,10 +226,10 @@ int main() {
 python3 -m toolchain.main -o myapp myapp.c
 
 # 2. Copy binary vào initfs (sẽ có trong RAMFS)
-cp myapp VinixOS/initfs/myapp
+cp myapp vinix-kernel/initfs/myapp
 
 # 3. Build lại kernel (embed file mới)
-make -C VinixOS kernel
+make -C vinix-kernel kernel
 
 # 4. Flash lên SD card
 bash scripts/flash_sdcard.sh /dev/sdX
@@ -325,4 +325,4 @@ clean:
 
 - [architecture.md](architecture.md) — Pipeline chi tiết
 - [subset_c_spec.md](subset_c_spec.md) — Ngôn ngữ được support
-- [VinixOS/docs/06-syscall-mechanism.md](../../VinixOS/docs/06-syscall-mechanism.md) — Syscall ABI
+- [vinix-kernel/docs/06-syscall-mechanism.md](../../vinix-kernel/docs/06-syscall-mechanism.md) — Syscall ABI
