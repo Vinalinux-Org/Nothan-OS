@@ -5,7 +5,6 @@
  * ============================================================ */
 
 #include "uart.h"
-#include "watchdog.h"
 #include "scheduler.h"
 #include "idle.h"
 #include "timer.h"
@@ -59,11 +58,8 @@ static struct task_struct shell_task;
  * ============================================================ */
 void kernel_main(void)
 {
-    /* 1. Hardware Init */
-    watchdog_disable();
-
     /* core_initcall — board file registers platform bus + devices.
-     * arch_initcall — early HW (uart for log output). */
+     * arch_initcall — early HW (uart for log output, watchdog disable). */
     do_initcalls(1);
     do_initcalls(3);
 

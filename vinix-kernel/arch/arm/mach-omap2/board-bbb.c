@@ -37,11 +37,19 @@ static struct platform_device omap_hsmmc0 = {
     .clk_id = "mmc0",
 };
 
+static struct platform_device omap_wdt = {
+    .name   = "omap-wdt",
+    .base   = 0x44E35000,
+    .irq    = 0,
+    .clk_id = "wdt1",
+};
+
 static struct platform_device *bbb_devices[] = {
     &omap_uart0,
     &omap_intc,
     &omap_dmtimer2,
     &omap_hsmmc0,
+    &omap_wdt,
 };
 
 static int __init bbb_platform_init(void)
