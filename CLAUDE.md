@@ -585,11 +585,32 @@ Mọi driver phải register qua đúng subsystem class (qua header tương ứn
 | Watchdog | `vinix/watchdog.h` | `watchdog_register_device` | core build trong Phase 4 |
 | Network | `vinix/netdevice.h` + `vinix/etherdevice.h` + `vinix/skbuff.h` | `register_netdev` | core framework có (Phase 5), driver chờ |
 
+### Gold reference driver
+
+Khi viết driver mới, **copy template** từ [docs/driver-template/](docs/driver-template/) — đó là canonical skeleton 100% compliant với THE CONVENTION:
+
+- `docs/driver-template/platform_driver.c` — skeleton cho memory-mapped peripheral (UART, MMC, timer, watchdog, IRQ controller, framebuffer...).
+- `docs/driver-template/i2c_driver.c` — skeleton cho i2c client (HDMI encoder, codec, EEPROM). Note: i2c client framework chưa landed, template document target shape.
+
+Khi nghi ngờ pattern, **đọc gold reference** [vinix-kernel/drivers/tty/serial/omap_serial.c](vinix-kernel/drivers/tty/serial/omap_serial.c) — driver được verify 100% compliant.
+
+**CẤM clone từ driver khác** trong codebase mà không verify driver đó cũng compliant. Pre-iteration A có driver vi phạm; nếu thấy code không match THE CONVENTION → bug, report ngay đừng clone.
+
+### Strengthen — "no hardcoded address" rule
+
+Driver TUYỆT ĐỐI KHÔNG hardcode peripheral base address. Nếu đang viết `#define XXX_BASE 0x4XXXXXXX` trong file `drivers/`, DỪNG NGAY:
+
+1. Peripheral base **PHẢI** đến từ `platform_get_resource(pdev, IORESOURCE_MEM, 0)` → board file → `bbb_devices[]`.
+2. Cross-cutting register set (PRCM clock, Control Module pinmux) define ở `arch/arm/mach-omap2/include/mach/<group>.h`, driver `#include "mach/<group>.h"` (xem `mach/prcm.h`, `mach/control.h`).
+3. Bit field định nghĩa (offset within peripheral's own register block) **CÓ THỂ** stay trong driver vì là driver-internal.
+
+**Lý do**: port sang SoC khác = chỉ viết `arch/arm/mach-<new>/` + bbb_devices alternative. Driver code phải zero hardcoded address để portable.
+
 **Documents tham chiếu**:
 
-- [docs/driver-development-guide.md] — driver writer template (full ethernet skeleton)
-- [docs/10-subsystem-reference.md] — pattern + example cho mọi subsystem
-- Plan Phase 4 (deferred probe + i2c_board_info + driver migration): `~/.claude/plans/t-i-ngh-s-c-woolly-ember.md`
+- [docs/driver-template/](docs/driver-template/) — copy-paste skeleton + README
+- [docs/driver-development-guide.md](docs/driver-development-guide.md) — driver writer template (full ethernet skeleton)
+- [docs/10-subsystem-reference.md](docs/10-subsystem-reference.md) — pattern + example cho mọi subsystem
 
 ---
 
