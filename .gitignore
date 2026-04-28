@@ -1,8 +1,8 @@
 # Build Directories
 /build/
-/vinix-kernel/bootloader/build/
-/vinix-kernel/kernel/build/
-/vinix-kernel/userspace/build/
+/bootloader/build/
+/vinix-kernel/build/
+/userspace/build/
 /CrossCompiler/toolchain/build/
 /CrossCompiler/toolchain/dist/
 /CrossCompiler/toolchain/*.egg-info/

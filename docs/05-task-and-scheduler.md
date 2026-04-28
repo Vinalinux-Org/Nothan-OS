@@ -2,13 +2,13 @@
 
 > **Phạm vi:** Task structure, context switch mechanism, round-robin preemptive scheduler, và timer configuration.
 > **Yêu cầu trước:** [04-interrupt-and-exception.md](04-interrupt-and-exception.md) — timer IRQ là trigger của scheduler.
-> **Files liên quan:** `vinix-kernel/include/task.h`, `vinix-kernel/kernel/sched/`, `vinix-kernel/arch/arm/scheduler/context_switch.S`, `vinix-kernel/drivers/clocksource/timer-omap-dm.c`
+> **Files liên quan:** `vinix-kernel/include/task.h`, `vinix-kernel/sched/`, `vinix-kernel/arch/arm/scheduler/context_switch.S`, `vinix-kernel/drivers/clocksource/timer-omap-dm.c`
 
 ---
 
 ## Task Structure
 
-File: `vinix-kernel/kernel/include/task.h`
+File: `vinix-kernel/include/task.h`
 
 ```c
 struct task_context {
@@ -45,7 +45,7 @@ struct task_struct {
 
 ## Task Stack Initialization
 
-File: `vinix-kernel/kernel/sched/task.c`
+File: `vinix-kernel/sched/task.c`
 
 ```c
 void task_stack_init(struct task_struct *task,
@@ -148,7 +148,7 @@ context_switch:
 
 ## Scheduler Implementation
 
-File: `vinix-kernel/kernel/sched/scheduler.c`
+File: `vinix-kernel/sched/scheduler.c`
 
 ### Data Structures
 

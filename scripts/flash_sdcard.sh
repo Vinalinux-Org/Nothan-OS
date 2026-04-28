@@ -23,8 +23,8 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOPDIR="$(dirname "$SCRIPT_DIR")"
-MLO="$TOPDIR/vinix-kernel/bootloader/MLO"
-KERNEL="$TOPDIR/vinix-kernel/kernel/build/kernel.bin"
+MLO="$TOPDIR/bootloader/MLO"
+KERNEL="$TOPDIR/vinix-kernel/build/kernel.bin"
 
 echo "========================================"
 echo " Update MLO + Kernel (RAW mode)"

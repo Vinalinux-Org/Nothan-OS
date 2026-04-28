@@ -25,7 +25,7 @@ BẮT BUỘC tuân thủ mọi lúc. Không có ngoại lệ.
 
 - Truy cập register chỉ qua `mmio_read32(addr)` / `mmio_write32(addr, val)`
 - Lấy register address và bit definition từ AM335x TRM — KHÔNG được đoán
-- **KHÔNG hardcode peripheral address** trong `vinix-kernel/kernel/` hay subsystem core — dùng `arch/arm/mach-omap2/include/mach/` constants
+- **KHÔNG hardcode peripheral address** trong `vinix-kernel/` hay subsystem core — dùng `arch/arm/mach-omap2/include/mach/` constants
 
 **Toolchain — KHÔNG được:**
 
@@ -587,8 +587,8 @@ Mọi driver phải register qua đúng subsystem class (qua header tương ứn
 
 **Documents tham chiếu**:
 
-- [vinix-kernel/docs/driver-development-guide.md] — driver writer template (full ethernet skeleton)
-- [vinix-kernel/docs/10-subsystem-reference.md] — pattern + example cho mọi subsystem
+- [docs/driver-development-guide.md] — driver writer template (full ethernet skeleton)
+- [docs/10-subsystem-reference.md] — pattern + example cho mọi subsystem
 - Plan Phase 4 (deferred probe + i2c_board_info + driver migration): `~/.claude/plans/t-i-ngh-s-c-woolly-ember.md`
 
 ---

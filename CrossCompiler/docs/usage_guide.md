@@ -325,4 +325,4 @@ clean:
 
 - [architecture.md](architecture.md) — Pipeline chi tiết
 - [subset_c_spec.md](subset_c_spec.md) — Ngôn ngữ được support
-- [vinix-kernel/docs/06-syscall-mechanism.md](../../vinix-kernel/docs/06-syscall-mechanism.md) — Syscall ABI
+- [docs/06-syscall-mechanism.md](../../docs/06-syscall-mechanism.md) — Syscall ABI

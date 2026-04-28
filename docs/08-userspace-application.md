@@ -9,7 +9,7 @@
 ## Cấu Trúc Thư Mục
 
 ```text
-vinix-kernel/userspace/
+userspace/
 ├── apps/
 │   └── shell/
 │       ├── shell.c      ← main loop, command dispatch
@@ -50,7 +50,7 @@ User Space: 0x40000000 — 0x40FFFFFF (1MB total)
 
 ## Runtime Startup — `crt0.S`
 
-File: `vinix-kernel/userspace/lib/crt0.S`
+File: `userspace/lib/crt0.S`
 
 ```asm
 .section .text.startup
@@ -91,7 +91,7 @@ halt:
 
 ## Linker Script — `app.ld`
 
-File: `vinix-kernel/userspace/linker/app.ld`
+File: `userspace/linker/app.ld`
 
 ```ld
 OUTPUT_FORMAT("elf32-littlearm")
@@ -139,7 +139,7 @@ SECTIONS {
 
 ## Syscall Wrappers
 
-File: `vinix-kernel/userspace/lib/syscall.c`
+File: `userspace/lib/syscall.c`
 
 Pattern chung cho mọi wrapper — đặt syscall number vào `r7`, arguments vào `r0-r3`, rồi `svc #0`:
 
@@ -193,7 +193,7 @@ int read(void *buf, uint32_t len) {
 
 ## Shell Application
 
-File: `vinix-kernel/userspace/apps/shell/shell.c`
+File: `userspace/apps/shell/shell.c`
 
 ### Main Loop
 
@@ -247,8 +247,8 @@ int main(void) {
 ### Build Order (bắt buộc)
 
 ```text
-Step 1: make -C vinix-kernel/userspace        → shell.bin
-Step 2: make -C vinix-kernel/kernel           → kernel.bin (embed shell.bin)
+Step 1: make -C userspace        → shell.bin
+Step 2: make -C vinix-kernel           → kernel.bin (embed shell.bin)
 ```
 
 > ⚠️ **Quan trọng:** Kernel Makefile gọi userspace build tự động nếu `shell.bin` chưa có. Nhưng nếu chỉ sửa userspace, phải build kernel lại để re-embed.
@@ -280,7 +280,7 @@ shell.bin: shell.elf
 
 ### Embedding vào Kernel
 
-File: `vinix-kernel/kernel/init/payload.S`
+File: `vinix-kernel/init/payload.S`
 
 ```asm
 .section .rodata

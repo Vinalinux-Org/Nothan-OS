@@ -192,8 +192,8 @@ vincc program.c -o program
 ### Bước 2: Nhúng Vào Kernel
 
 ```bash
-cp program vinix-kernel/kernel/src/kernel/files/
-cd vinix-kernel/kernel
+cp program vinix-kernel/src/kernel/files/
+cd vinix-kernel
 make
 ```
 

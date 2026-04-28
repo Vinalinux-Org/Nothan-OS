@@ -15,5 +15,5 @@ Tài liệu tham khảo cho việc phát triển SD card driver trong kernel Vin
 | Source | Ghi chú |
 |--------|---------|
 | `docs_trainingAI/drivers/sdcard/source/omap_hsmmc.c` | Linux host controller driver |
-| `vinix-kernel/bootloader/src/mmc.c` | Đã chạy được trên board thật |
+| `bootloader/src/mmc.c` | Đã chạy được trên board thật |
 

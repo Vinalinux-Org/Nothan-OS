@@ -25,7 +25,7 @@ CPSR[I]  = clear (IRQ enabled) sau khi return
 
 ## Syscall Table
 
-File: `vinix-kernel/kernel/include/syscalls.h`
+File: `vinix-kernel/include/syscalls.h`
 
 | # | Tên | Arguments | Return | Mô Tả |
 |---|-----|-----------|--------|-------|
@@ -63,7 +63,7 @@ File: `vinix-kernel/kernel/include/syscalls.h`
 
 ## User-side Syscall Wrappers
 
-File: `vinix-kernel/userspace/lib/syscall.c`
+File: `userspace/lib/syscall.c`
 
 Pattern chung — force compiler đặt values vào đúng registers:
 

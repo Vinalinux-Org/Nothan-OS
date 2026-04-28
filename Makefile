@@ -1,7 +1,9 @@
 # RefARM-OS Top-Level Makefile
-# Build entire project: VinixOS + CrossCompiler
+# Build entire project: bootloader + userspace + kernel + CrossCompiler
 
-.PHONY: all clean vinixos compiler help test
+MAKEFLAGS += --no-print-directory
+
+.PHONY: all clean vinixos bootloader userspace kernel compiler help test
 
 # Default target
 all: vinixos compiler
@@ -18,10 +20,27 @@ all: vinixos compiler
 	@echo "  3. Connect serial: screen /dev/ttyUSB0 115200"
 	@echo ""
 
-# Build VinixOS (bootloader + kernel)
-vinixos:
+# VinixOS = bootloader + userspace + kernel (kernel embeds shell payload, so userspace must precede)
+vinixos: bootloader userspace kernel
 	@echo "========================================="
-	@echo "Building VinixOS..."
+	@echo " VinixOS Build Complete                  "
+	@echo "========================================="
+
+bootloader:
+	@echo "========================================="
+	@echo " Building Bootloader                     "
+	@echo "========================================="
+	$(MAKE) -C bootloader
+
+userspace:
+	@echo "========================================="
+	@echo " Building Userspace                      "
+	@echo "========================================="
+	$(MAKE) -C userspace
+
+kernel: userspace
+	@echo "========================================="
+	@echo " Building Kernel                         "
 	@echo "========================================="
 	$(MAKE) -C vinix-kernel
 
@@ -40,19 +59,23 @@ compiler:
 
 # Clean all build artifacts
 clean:
-	@echo "Cleaning VinixOS..."
-	$(MAKE) -C vinix-kernel clean
+	@echo "Cleaning Bootloader..."
+	@$(MAKE) -C bootloader clean
+	@echo "Cleaning Userspace..."
+	@$(MAKE) -C userspace clean
+	@echo "Cleaning Kernel..."
+	@$(MAKE) -C vinix-kernel clean
 	@echo "Cleaning CrossCompiler..."
-	$(MAKE) -C CrossCompiler clean
+	@$(MAKE) -C CrossCompiler clean
 	@echo "Clean complete"
 
 # Run tests
 test: vinixos
 	@echo "Running VinixOS tests..."
-	$(MAKE) -C vinix-kernel test
+	@$(MAKE) -C vinix-kernel test
 	@echo ""
 	@echo "Running Compiler tests..."
-	$(MAKE) -C CrossCompiler test
+	@$(MAKE) -C CrossCompiler test
 
 # Help target
 help:
@@ -60,7 +83,10 @@ help:
 	@echo ""
 	@echo "Targets:"
 	@echo "  all        - Build VinixOS and verify compiler (default)"
-	@echo "  vinixos    - Build VinixOS only (bootloader + kernel)"
+	@echo "  vinixos    - Build VinixOS (bootloader + userspace + kernel)"
+	@echo "  bootloader - Build bootloader only (MLO)"
+	@echo "  userspace  - Build userspace only (init, shell, coreutils)"
+	@echo "  kernel     - Build kernel only (depends on userspace for embedded shell)"
 	@echo "  compiler   - Verify compiler source"
 	@echo "  clean      - Clean all build artifacts"
 	@echo "  test       - Run test suites"

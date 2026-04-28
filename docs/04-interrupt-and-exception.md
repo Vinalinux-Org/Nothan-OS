@@ -2,7 +2,7 @@
 
 > **Phạm vi:** ARMv7-A exception model, vector table, INTC configuration, và complete IRQ flow từ hardware đến handler.
 > **Yêu cầu trước:** [03-memory-and-mmu.md](03-memory-and-mmu.md) — VBAR phụ thuộc MMU; [02-kernel-initialization.md](02-kernel-initialization.md) — thứ tự init INTC/IRQ.
-> **Files liên quan:** `vinix-kernel/arch/arm/entry/entry.S`, `vinix-kernel/arch/arm/exceptions/`, `vinix-kernel/arch/arm/kernel/exception_handlers.c`, `vinix-kernel/drivers/irqchip/irq-omap-intc.c`, `vinix-kernel/kernel/irq/irq_core.c`
+> **Files liên quan:** `vinix-kernel/arch/arm/entry/entry.S`, `vinix-kernel/arch/arm/exceptions/`, `vinix-kernel/arch/arm/kernel/exception_handlers.c`, `vinix-kernel/drivers/irqchip/irq-omap-intc.c`, `vinix-kernel/irq/irq_core.c`
 
 ---
 
@@ -39,7 +39,7 @@ Khi exception xảy ra, CPU **tự động** thực hiện (không cần softwar
 
 ## Vector Table
 
-File: `vinix-kernel/kernel/arch/arm/entry/entry.S`
+File: `vinix-kernel/arch/arm/entry/entry.S`
 
 ```asm
 .section .text.vectors, "ax"
@@ -237,7 +237,7 @@ void intc_enable_interrupt(uint32_t irq_num, uint32_t priority) {
 
 ## IRQ Handler Registration
 
-File: `vinix-kernel/kernel/irq/irq_core.c`
+File: `vinix-kernel/irq/irq_core.c`
 
 ```c
 #define MAX_IRQS 128
