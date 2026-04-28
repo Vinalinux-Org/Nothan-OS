@@ -1,8 +1,4 @@
-/* ============================================================
- * timer.c
- * ------------------------------------------------------------
- * AM335x DMTimer2 driver.
- * ============================================================ */
+/* AM335x DMTimer2 driver. */
 
 #include "types.h"
 #include "timer.h"
@@ -13,6 +9,9 @@
 #include "uart.h"
 #include "trace.h"
 #include "mach/prcm.h"
+#include "vinix/clocksource.h"
+#include "platform_device.h"
+#include "vinix/init.h"
 
 /* CM_PER_L4LS_CLKSTCTRL bits */
 #define CLKTRCTRL_MASK          0x3
@@ -98,7 +97,6 @@ static void timer2_clock_enable(void)
 
 /* INTC EOI runs in irq_dispatch() — handler only clears peripheral IRQ
  * and routes the tick through the registered clock_event_device. */
-#include "vinix/clocksource.h"
 
 static struct clock_event_device omap_dmtimer_clkevt;
 
@@ -212,11 +210,7 @@ void delay_ms(uint32_t ms)
         ;
 }
 
-/* ============================================================
- * Platform driver wiring
- * ============================================================ */
-
-#include "platform_device.h"
+/* Platform driver wiring */
 
 static int omap_dmtimer_probe(struct platform_device *pdev)
 {
@@ -233,5 +227,4 @@ static struct platform_driver omap_dmtimer_driver = {
     .probe = omap_dmtimer_probe,
 };
 
-#include "vinix/init.h"
 module_platform_driver(omap_dmtimer_driver);

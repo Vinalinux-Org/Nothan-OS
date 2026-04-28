@@ -7,6 +7,10 @@
 #include "intc.h"
 #include "mmio.h"
 #include "cpu.h"
+#include "platform_device.h"
+#include "uart.h"
+#include "vinix/irqchip.h"
+#include "vinix/init.h"
 
 void intc_init(void)
 {
@@ -71,14 +75,6 @@ void intc_set_priority(uint32_t irq_num, uint32_t priority)
     mmio_write32(INTC_BASE + INTC_ILR(irq_num), ilr);
 }
 
-/* ============================================================
- * Platform driver wiring
- * ============================================================ */
-
-#include "platform_device.h"
-#include "uart.h"
-#include "vinix/irqchip.h"
-
 /* irq_chip vtable — kernel's enable_irq/disable_irq dispatch
  * here once irqchip_register has run. ack/eoi go through the
  * existing intc_eoi path; intc_get_active_irq feeds the IRQ
@@ -121,7 +117,6 @@ static struct platform_driver omap_intc_driver = {
     .probe = omap_intc_probe,
 };
 
-#include "vinix/init.h"
 static int __init omap_intc_driver_init(void)
 {
     return platform_driver_register(&omap_intc_driver);

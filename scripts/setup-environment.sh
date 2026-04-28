@@ -54,10 +54,10 @@ apt-get install dosfstools -y       # mkfs.vfat cho FAT32 partition
 # Install Python development dependencies cho VinCC compiler
 echo ""
 echo "Installing Python compiler dependencies..."
-if [ -f "CrossCompiler/requirements.txt" ]; then
-    pip3 install -r CrossCompiler/requirements.txt
+if [ -f "compiler/requirements.txt" ]; then
+    pip3 install -r compiler/requirements.txt
 else
-    echo "Warning: CrossCompiler/requirements.txt not found."
+    echo "Warning: compiler/requirements.txt not found."
     echo "Make sure to run this script from the project root directory."
 fi
 

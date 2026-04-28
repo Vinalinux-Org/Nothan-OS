@@ -1,5 +1,5 @@
 # RefARM-OS Top-Level Makefile
-# Build entire project: bootloader + userspace + kernel + CrossCompiler
+# Build entire project: bootloader + userspace + kernel + compiler
 
 MAKEFLAGS += --no-print-directory
 
@@ -50,7 +50,7 @@ compiler:
 	@echo "========================================="
 	@echo "Verifying VinCC Compiler..."
 	@echo "========================================="
-	@if [ ! -f CrossCompiler/toolchain/main.py ]; then \
+	@if [ ! -f compiler/toolchain/main.py ]; then \
 		echo "Error: Compiler source not found"; \
 		exit 1; \
 	fi
@@ -65,8 +65,8 @@ clean:
 	@$(MAKE) -C userspace clean
 	@echo "Cleaning Kernel..."
 	@$(MAKE) -C vinix-kernel clean
-	@echo "Cleaning CrossCompiler..."
-	@$(MAKE) -C CrossCompiler clean
+	@echo "Cleaning Compiler..."
+	@$(MAKE) -C compiler clean
 	@echo "Clean complete"
 
 # Run tests
@@ -75,7 +75,7 @@ test: vinixos
 	@$(MAKE) -C vinix-kernel test
 	@echo ""
 	@echo "Running Compiler tests..."
-	@$(MAKE) -C CrossCompiler test
+	@$(MAKE) -C compiler test
 
 # Help target
 help:

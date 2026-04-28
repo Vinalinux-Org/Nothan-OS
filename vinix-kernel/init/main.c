@@ -1,8 +1,4 @@
-/* ============================================================
- * main.c
- * ------------------------------------------------------------
- * Kernel Entry Point
- * ============================================================ */
+/* Kernel Entry Point */
 
 #include "uart.h"
 #include "scheduler.h"
@@ -19,8 +15,6 @@
 #include "atomic.h"
 #include "spinlock.h"
 #include "cpu.h"
-
-extern void sync_selftest(void);
 #include "vfs.h"
 #include "devfs.h"
 #include "procfs.h"
@@ -37,15 +31,15 @@ extern void sync_selftest(void);
 #include "tda19988.h"
 #include "fb.h"
 #include "boot_screen.h"
-/* ============================================================
- * User Space Payload (Defined in payload.S)
- * ============================================================ */
+
+extern void sync_selftest(void);
+
+/* User Space Payload (Defined in payload.S) */
 extern uint8_t _shell_payload_start;
 extern uint8_t _shell_payload_end;
 
-/* ============================================================
- * User App Memory Definitions
- * ============================================================ */
+
+/* User App Memory Definitions */
 static struct task_struct shell_task;
 
 /* We use the end of the 1MB User Space (0x40000000 -> 0x40100000)
@@ -53,9 +47,8 @@ static struct task_struct shell_task;
 #define USER_STACK_BASE (USER_SPACE_VA + (USER_SPACE_MB * 1024 * 1024))
 #define USER_STACK_SIZE 4096
 
-/* ============================================================
- * Kernel Main
- * ============================================================ */
+
+/* Kernel Main */
 void kernel_main(void)
 {
     /* core_initcall — board file registers platform bus + devices.

@@ -1,8 +1,8 @@
-/* ============================================================
- * uart.c
- * ------------------------------------------------------------
- * UART Driver
- * ============================================================ */
+/*
+ * AM335x UART0 driver.
+ *
+ * AM335x TRM Ch.19.
+ */
 
 #include "types.h"
 #include "uart.h"
@@ -10,6 +10,8 @@
 #include "cpu.h"
 #include "irq.h"
 #include "intc.h"
+#include "platform_device.h"
+#include "vinix/init.h"
 #include "mach/prcm.h"
 #include "mach/memmap.h"
 #include "mach/irqs.h"
@@ -49,9 +51,7 @@
 #define FCR_RX_CLR      (1 << 1)
 #define FCR_TX_CLR      (1 << 2)
 
-/* ============================================================
- * RX Interrupt Handler — drains FIFO, hands bytes to serial_core
- * ============================================================ */
+/* RX interrupt handler — drains FIFO, hands bytes to serial_core. */
 
 static void uart_rx_irq_handler(void *data)
 {
@@ -85,9 +85,7 @@ static void uart_rx_irq_handler(void *data)
     }
 }
 
-/* ============================================================
- * UART Initialization — ring buffer state owned by serial_core.
- * ============================================================ */
+/* UART initialization — ring buffer state owned by serial_core. */
 
 void uart_init(void)
 {
@@ -137,11 +135,6 @@ void uart_enable_rx_interrupt(void)
     enable_irq(PLATFORM_IRQ_UART0);
 }
 
-/* ============================================================
- * TX Functions
- * ============================================================
- */
-
 void uart_putc(char c)
 {
     while (!(mmio_read32(UART0_BASE + UART_LSR) & LSR_THRE));
@@ -161,12 +154,6 @@ void uart_puts(const char *s)
  * live in kernel/tty/serial/serial_core.c — they consume the ring
  * buffer that uart_serial_rx_push fills from this driver's IRQ. */
 
-/* ============================================================
- * Platform driver wiring
- * ============================================================ */
-
-#include "platform_device.h"
-
 static int omap_uart_probe(struct platform_device *pdev)
 {
     struct resource *mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
@@ -182,7 +169,6 @@ static struct platform_driver omap_uart_driver = {
     .probe = omap_uart_probe,
 };
 
-#include "vinix/init.h"
 static int __init omap_uart_driver_init(void)
 {
     return platform_driver_register(&omap_uart_driver);

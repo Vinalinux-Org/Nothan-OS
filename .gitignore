@@ -3,9 +3,9 @@
 /bootloader/build/
 /vinix-kernel/build/
 /userspace/build/
-/CrossCompiler/toolchain/build/
-/CrossCompiler/toolchain/dist/
-/CrossCompiler/toolchain/*.egg-info/
+/compiler/toolchain/build/
+/compiler/toolchain/dist/
+/compiler/toolchain/*.egg-info/
 
 # Build Artifacts (Global)
 *.o
@@ -78,13 +78,13 @@ tags
 TAGS
 .gdb_history
 
-# CrossCompiler runtime artifacts
-/CrossCompiler/toolchain/runtime/*.a
-/CrossCompiler/toolchain/runtime/*.o
-/CrossCompiler/tests/programs/*.s
-/CrossCompiler/tests/programs/*.o
-/CrossCompiler/tests/integration/programs/*.s
-/CrossCompiler/tests/integration/programs/*.o
+# Compiler runtime artifacts
+/compiler/toolchain/runtime/*.a
+/compiler/toolchain/runtime/*.o
+/compiler/tests/programs/*.s
+/compiler/tests/programs/*.o
+/compiler/tests/integration/programs/*.s
+/compiler/tests/integration/programs/*.o
 test_hello
 fibonacci
 program

@@ -63,7 +63,7 @@ vinix-kernel/
 │   ├── apps/                # init, shell, ls, cat, echo, ps, kill, pwd, free, uname, rm, mv, hello
 │   ├── lib/                 # crt0.S, syscall.c
 │   └── vinixlibc/           # POSIX subset: string, stdio, stdlib, unistd, fcntl, ctype, signal, sys/*
-└── docs/                    # tài liệu kỹ thuật
+└── Documentation/           # tài liệu kỹ thuật
 ```
 
 ## Yêu Cầu Hệ Thống
@@ -235,7 +235,7 @@ Power On → ROM Code → MLO → Kernel (entry.S) → kernel_main() → Schedul
 
 ## Tài Liệu
 
-Tài liệu kỹ thuật chi tiết trong `docs/`:
+Tài liệu kỹ thuật chi tiết trong `Documentation/`:
 
 1. `01-boot-and-bringup.md` - Boot sequence
 2. `02-kernel-initialization.md` - Kernel startup

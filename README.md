@@ -10,15 +10,15 @@
 
 ### Boot Log
 
-![Boot Log](docs/images/boot-log.png)
+![Boot Log](Documentation/images/boot-log.png)
 
 ### Splash Screen
 
-![Splash Screen](docs/images/logo.png)
+![Splash Screen](Documentation/images/logo.png)
 
 ### Home Screen
 
-![Home Screen](docs/images/home.png)
+![Home Screen](Documentation/images/home.png)
 
 ---
 
@@ -304,7 +304,7 @@ vincc --version
 #### Bước 2: Compile thử chương trình test
 
 ```bash
-vincc -o test_hello CrossCompiler/tests/programs/test_hello.c
+vincc -o test_hello compiler/tests/programs/test_hello.c
 ```
 
 Nếu thành công sẽ tạo file `test_hello` (ELF32 binary):
@@ -353,15 +353,15 @@ Vinix-OS/
 │   │   ├── apps/            ← init, shell, 10 coreutils + hello
 │   │   ├── lib/             ← crt0.S, syscall wrappers
 │   │   └── vinixlibc/       ← POSIX subset (~1.4 KLOC hand-written)
-│   └── docs/                ← tài liệu kỹ thuật
+│   └── Documentation/       ← tài liệu kỹ thuật
 │
-├── CrossCompiler/
+├── compiler/
 │   ├── toolchain/
 │   │   ├── frontend/        ← Lexer, Parser, Semantic Analyzer
 │   │   ├── middleend/ir/    ← IR Generator (3AC)
 │   │   ├── backend/armv7a/  ← Code Generator, Register Allocator
 │   │   └── runtime/         ← crt0.S, syscalls.S, divmod.S, app.ld
-│   └── docs/                ← 5 tài liệu kỹ thuật
+│   └── Documentation/       ← 5 tài liệu kỹ thuật
 │
 ├── scripts/
 │   ├── setup-environment.sh
@@ -380,49 +380,49 @@ Vinix-OS/
 
 | Component | Trạng Thái | Tài Liệu |
 |-----------|-----------|---------|
-| Bootloader (MLO) | ✅ Shipped | [01-boot-and-bringup.md](docs/01-boot-and-bringup.md) |
+| Bootloader (MLO) | ✅ Shipped | [01-boot-and-bringup.md](Documentation/01-boot-and-bringup.md) |
 | Platform Layer (4-layer HAL) | ✅ Shipped | `platform/bbb/` |
-| Memory (page_alloc + slab + kmalloc + VMM + L2) | ✅ Shipped | [03-memory-and-mmu.md](docs/03-memory-and-mmu.md) |
+| Memory (page_alloc + slab + kmalloc + VMM + L2) | ✅ Shipped | [03-memory-and-mmu.md](Documentation/03-memory-and-mmu.md) |
 | Concurrency (spinlock + atomic + wait_queue + sleep) | ✅ Shipped | `kernel/src/kernel/sync/` |
-| Interrupt + Exception Handling | ✅ Shipped | [04-interrupt-and-exception.md](docs/04-interrupt-and-exception.md) |
-| Preemptive Scheduler | ✅ Shipped | [05-task-and-scheduler.md](docs/05-task-and-scheduler.md) |
+| Interrupt + Exception Handling | ✅ Shipped | [04-interrupt-and-exception.md](Documentation/04-interrupt-and-exception.md) |
+| Preemptive Scheduler | ✅ Shipped | [05-task-and-scheduler.md](Documentation/05-task-and-scheduler.md) |
 | Process Model (fork/exec/wait/kill/SIGSEGV) | ✅ Shipped | `kernel/src/kernel/proc/` |
-| Syscalls (22, AAPCS + errno) | ✅ Shipped | [06-syscall-mechanism.md](docs/06-syscall-mechanism.md) |
-| VFS + FAT32 + devfs + procfs + block + bcache | ✅ Shipped | [99-system-overview.md](docs/99-system-overview.md) |
+| Syscalls (22, AAPCS + errno) | ✅ Shipped | [06-syscall-mechanism.md](Documentation/06-syscall-mechanism.md) |
+| VFS + FAT32 + devfs + procfs + block + bcache | ✅ Shipped | [99-system-overview.md](Documentation/99-system-overview.md) |
 | Linux-style Driver Model (platform_device/driver) | ✅ Shipped | `kernel/src/kernel/driver/` |
 | vinixlibc (POSIX subset ~1.4 KLOC) | ✅ Shipped | `userspace/vinixlibc/` |
-| Userspace (init + shell + 10 coreutils) | ✅ Shipped | [08-userspace-application.md](docs/08-userspace-application.md) |
+| Userspace (init + shell + 10 coreutils) | ✅ Shipped | [08-userspace-application.md](Documentation/08-userspace-application.md) |
 | Selftest harness | ✅ Shipped | `kernel/src/kernel/test/selftest.c` |
 | HDMI Display (800×600) + Boot Screen | ✅ Shipped | `kernel/src/ui/boot_screen.c` |
 | Networking (CPSW + UDP/ICMP/ARP) | ⏳ Deferred to phase 2 | — |
-| Compiler Frontend / IR / Backend / Runtime | ✅ Shipped | [architecture.md](CrossCompiler/docs/architecture.md) |
+| Compiler Frontend / IR / Backend / Runtime | ✅ Shipped | [architecture.md](compiler/Documentation/architecture.md) |
 
 ---
 
 ## Tài Liệu
 
-### VinixOS (`docs/`)
+### VinixOS (`Documentation/`)
 
 | File | Nội Dung |
 |------|---------|
-| [01-boot-and-bringup.md](docs/01-boot-and-bringup.md) | ROM → MLO → entry.S, MMU Phase A |
-| [02-kernel-initialization.md](docs/02-kernel-initialization.md) | `kernel_main()` step-by-step |
-| [03-memory-and-mmu.md](docs/03-memory-and-mmu.md) | Page table, address translation |
-| [04-interrupt-and-exception.md](docs/04-interrupt-and-exception.md) | INTC, IRQ flow, exception handlers |
-| [05-task-and-scheduler.md](docs/05-task-and-scheduler.md) | Context switch, round-robin |
-| [06-syscall-mechanism.md](docs/06-syscall-mechanism.md) | SVC ABI, pointer validation |
-| [08-userspace-application.md](docs/08-userspace-application.md) | crt0.S, linker script, shell |
-| [99-system-overview.md](docs/99-system-overview.md) | Big picture, flows, memory map |
+| [01-boot-and-bringup.md](Documentation/01-boot-and-bringup.md) | ROM → MLO → entry.S, MMU Phase A |
+| [02-kernel-initialization.md](Documentation/02-kernel-initialization.md) | `kernel_main()` step-by-step |
+| [03-memory-and-mmu.md](Documentation/03-memory-and-mmu.md) | Page table, address translation |
+| [04-interrupt-and-exception.md](Documentation/04-interrupt-and-exception.md) | INTC, IRQ flow, exception handlers |
+| [05-task-and-scheduler.md](Documentation/05-task-and-scheduler.md) | Context switch, round-robin |
+| [06-syscall-mechanism.md](Documentation/06-syscall-mechanism.md) | SVC ABI, pointer validation |
+| [08-userspace-application.md](Documentation/08-userspace-application.md) | crt0.S, linker script, shell |
+| [99-system-overview.md](Documentation/99-system-overview.md) | Big picture, flows, memory map |
 
-### CrossCompiler (`CrossCompiler/docs/`)
+### Compiler (`compiler/Documentation/`)
 
 | File | Nội Dung |
 |------|---------|
-| [architecture.md](CrossCompiler/docs/architecture.md) | 7-phase pipeline, module organization |
-| [usage_guide.md](CrossCompiler/docs/usage_guide.md) | Install, options, examples |
-| [subset_c_spec.md](CrossCompiler/docs/subset_c_spec.md) | Ngôn ngữ Subset C specification |
-| [ir_format.md](CrossCompiler/docs/ir_format.md) | Three-Address Code IR format |
-| [codegen_strategy.md](CrossCompiler/docs/codegen_strategy.md) | Register allocation, ARM mapping |
+| [architecture.md](compiler/Documentation/architecture.md) | 7-phase pipeline, module organization |
+| [usage_guide.md](compiler/Documentation/usage_guide.md) | Install, options, examples |
+| [subset_c_spec.md](compiler/Documentation/subset_c_spec.md) | Ngôn ngữ Subset C specification |
+| [ir_format.md](compiler/Documentation/ir_format.md) | Three-Address Code IR format |
+| [codegen_strategy.md](compiler/Documentation/codegen_strategy.md) | Register allocation, ARM mapping |
 
 ---
 
@@ -461,7 +461,7 @@ Vinix-OS/
 - Dùng `make -C vinix-kernel` để build — Makefile tự xử lý build order (userspace trước kernel)
 
 **VinCC compiler error:**
-- Kiểm tra feature có trong Subset C: xem [subset_c_spec.md](CrossCompiler/docs/subset_c_spec.md)
+- Kiểm tra feature có trong Subset C: xem [subset_c_spec.md](compiler/Documentation/subset_c_spec.md)
 - `++`/`--` không hỗ trợ — dùng `i = i + 1`
 
 ---

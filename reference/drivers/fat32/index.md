@@ -2,7 +2,7 @@
 
 Tài liệu tham khảo cho việc phát triển FAT32 filesystem driver trong kernel VinixOS.
 
-## Tài liệu liên quan (trong docs_trainingAI)
+## Tài liệu liên quan (trong reference)
 
 | File | Mô tả |
 |------|-------|

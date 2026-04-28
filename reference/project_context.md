@@ -26,9 +26,9 @@ vinix-kernel/
 │   │   └── kernel/     ← main, scheduler, fs (vfs + ramfs), mmu, syscall
 │   └── include/        ← public headers
 ├── userspace/      ← Shell app chạy ở User Mode 0x40000000
-└── docs/           ← Tài liệu kỹ thuật từng subsystem
+└── Documentation/  ← Tài liệu kỹ thuật từng subsystem
 
-CrossCompiler/      ← Phase 2: Python cross compiler → ARMv7-A (HOÀN THÀNH)
+compiler/           ← Phase 2: Python cross compiler → ARMv7-A (HOÀN THÀNH)
 ```
 
 ---
@@ -63,13 +63,13 @@ CrossCompiler/      ← Phase 2: Python cross compiler → ARMv7-A (HOÀN THÀNH
 ### SD card driver trong kernel
 - Port `bootloader/src/mmc.c` vào `vinix-kernel/drivers/mmc/host/omap_hsmmc.c`
 - Thêm write support (`mmc_write_sectors`)
-- Tài liệu: `docs_trainingAI/drivers/sdcard/index.md`
+- Tài liệu: `reference/drivers/sdcard/index.md`
 
 ### FAT32 filesystem driver
 - Thay thế RAMFS bằng FAT32 từ SD card làm root `/`
 - Stack: MMC driver → block device abstraction → FAT32 driver → `vfs_mount("/", &fat32_ops)`
 - Phase 1: read-only (mount, ls, cat)
 - Phase 2: write support (lưu data người dùng)
-- Tài liệu: `docs_trainingAI/drivers/fat32/index.md`
+- Tài liệu: `reference/drivers/fat32/index.md`
 
 

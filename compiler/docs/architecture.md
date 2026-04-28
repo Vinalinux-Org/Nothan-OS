@@ -1,7 +1,7 @@
 # Kiến Trúc Compiler (VinCC)
 
 > **Phạm vi:** Pipeline tổng thể từ source code đến ELF binary — 7 phases, module organization, và design decisions.
-> **Yêu cầu trước:** Không có — đây là tài liệu entry point cho CrossCompiler.
+> **Yêu cầu trước:** Không có — đây là tài liệu entry point cho compiler.
 > **Files liên quan:** `toolchain/main.py`, `toolchain/frontend/`, `toolchain/middleend/`, `toolchain/backend/`, `toolchain/runtime/`
 
 ---

@@ -13,7 +13,7 @@
 sudo apt-get install gcc-arm-linux-gnueabihf binutils-arm-linux-gnueabihf
 
 # 2. Build runtime library
-cd CrossCompiler && make runtime
+cd compiler && make runtime
 
 # 3. Compile và chạy
 python3 -m toolchain.main -o hello hello.c
@@ -45,7 +45,7 @@ git clone <repository-url>
 cd vinix-kernel
 
 # Install Python dependencies
-cd CrossCompiler
+cd compiler
 pip3 install -r requirements.txt
 
 # Build runtime library (crt0.S, syscalls.S, divmod.S)
@@ -325,4 +325,4 @@ clean:
 
 - [architecture.md](architecture.md) — Pipeline chi tiết
 - [subset_c_spec.md](subset_c_spec.md) — Ngôn ngữ được support
-- [docs/06-syscall-mechanism.md](../../docs/06-syscall-mechanism.md) — Syscall ABI
+- [../../Documentation/06-syscall-mechanism.md](../../Documentation/06-syscall-mechanism.md) — Syscall ABI

@@ -71,7 +71,7 @@ BẮT BUỘC tuân thủ mọi lúc. Không có ngoại lệ.
 - Kernel: Linux (any tree), FreeBSD, NetBSD, Minix, xv6, seL4, Zephyr
 - Driver: bất kỳ upstream driver code nào
 
-### Reference code ở `docs_trainingAI/drivers/*/source/`
+### Reference code ở `reference/drivers/*/source/`
 
 - CHỈ được **đọc để hiểu logic và sequence**
 - PHẢI **viết lại từ đầu** theo naming + convention VinixOS
@@ -173,7 +173,7 @@ Constants định nghĩa ở `vinix-kernel/arch/arm/mach-omap2/include/mach/memo
 
 ### Knowledge Base
 
-Hardware authoritative ở `docs_trainingAI/`:
+Hardware authoritative ở `reference/`:
 
 - `project_context.md` — đọc trước khi bắt đầu session mới
 - `am335x/` — AM335x TRM (27 chapter)
@@ -310,7 +310,7 @@ cpsw (P7)   → net        → NET     → eth0
 
 ### Rule vàng khi execute
 
-> *"Unix semantics hoàn hảo là siren call đưa dev lạc 6 tháng edge case. MVP dừng ở feature có consumer. Mọi cám dỗ mở rộng → `docs/known_gaps.md`."*
+> *"Unix semantics hoàn hảo là siren call đưa dev lạc 6 tháng edge case. MVP dừng ở feature có consumer. Mọi cám dỗ mở rộng → `Documentation/known_gaps.md`."*
 
 ---
 
@@ -549,7 +549,7 @@ After do_initcalls(7): driver_deferred_probe_trigger() — final retry pass
 CRITICAL: Trước khi viết driver mới, verify TẤT CẢ item. THIẾU bất kỳ → DỪNG NGAY, KHÔNG ĐOÁN:
 
 ```text
-Để viết driver cho [peripheral], tôi cần từ docs_trainingAI/:
+Để viết driver cho [peripheral], tôi cần từ reference/:
 - [item còn thiếu] → AM335x TRM Ch.XX
 - [item còn thiếu] → AM335x TRM Ch.XX
 ```
@@ -587,10 +587,10 @@ Mọi driver phải register qua đúng subsystem class (qua header tương ứn
 
 ### Gold reference driver
 
-Khi viết driver mới, **copy template** từ [docs/driver-template/](docs/driver-template/) — đó là canonical skeleton 100% compliant với THE CONVENTION:
+Khi viết driver mới, **copy template** từ [Documentation/driver-template/](Documentation/driver-template/) — đó là canonical skeleton 100% compliant với THE CONVENTION:
 
-- `docs/driver-template/platform_driver.c` — skeleton cho memory-mapped peripheral (UART, MMC, timer, watchdog, IRQ controller, framebuffer...).
-- `docs/driver-template/i2c_driver.c` — skeleton cho i2c client (HDMI encoder, codec, EEPROM). Note: i2c client framework chưa landed, template document target shape.
+- `Documentation/driver-template/platform_driver.c` — skeleton cho memory-mapped peripheral (UART, MMC, timer, watchdog, IRQ controller, framebuffer...).
+- `Documentation/driver-template/i2c_driver.c` — skeleton cho i2c client (HDMI encoder, codec, EEPROM). Note: i2c client framework chưa landed, template document target shape.
 
 Khi nghi ngờ pattern, **đọc gold reference** [vinix-kernel/drivers/tty/serial/omap_serial.c](vinix-kernel/drivers/tty/serial/omap_serial.c) — driver được verify 100% compliant.
 
@@ -608,9 +608,9 @@ Driver TUYỆT ĐỐI KHÔNG hardcode peripheral base address. Nếu đang viế
 
 **Documents tham chiếu**:
 
-- [docs/driver-template/](docs/driver-template/) — copy-paste skeleton + README
-- [docs/driver-development-guide.md](docs/driver-development-guide.md) — driver writer template (full ethernet skeleton)
-- [docs/10-subsystem-reference.md](docs/10-subsystem-reference.md) — pattern + example cho mọi subsystem
+- [Documentation/driver-template/](Documentation/driver-template/) — copy-paste skeleton + README
+- [Documentation/driver-development-guide.md](Documentation/driver-development-guide.md) — driver writer template (full ethernet skeleton)
+- [Documentation/10-subsystem-reference.md](Documentation/10-subsystem-reference.md) — pattern + example cho mọi subsystem
 
 ---
 
@@ -731,4 +731,4 @@ Match phạm vi hành động chính xác với điều user hỏi.
 
 1. Kiểm tra plan file — có trong roadmap chưa?
 2. Có consumer cụ thể trong U1/demo chưa?
-3. Nếu không → `docs/known_gaps.md`, KHÔNG add vào phase đang chạy
+3. Nếu không → `Documentation/known_gaps.md`, KHÔNG add vào phase đang chạy

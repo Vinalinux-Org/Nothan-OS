@@ -1,8 +1,4 @@
-/* ============================================================
- * svc_handler.c
- * ------------------------------------------------------------
- * SVC exception handler — system call dispatcher.
- * ============================================================ */
+/* SVC exception handler — system call dispatcher. */
 
 #include "types.h"
 #include "assert.h"
@@ -20,18 +16,15 @@
 extern uint8_t _shell_payload_start;
 extern uint8_t _shell_payload_end;
 
-/*
- * Validation boundaries
- * Used to ensure user pointers are within allowed True User Space regions.
- */
 
-/* ============================================================
- * Helper: Validate User Pointer
- * ============================================================
+/* Validation boundaries
+ * Used to ensure user pointers are within allowed True User Space regions. */
+
+
+/* Helper: Validate User Pointer
  * Enforces strict memory rules:
  * Pointers must point to the User Space region (0x40000000 -> +1MB).
- * This sandboxes User interactions preventing Kernel corruption.
- */
+ * This sandboxes User interactions preventing Kernel corruption. */
 static int validate_user_pointer(const void *ptr, uint32_t len)
 {
     uint32_t start = (uint32_t)ptr;
@@ -55,9 +48,8 @@ static int validate_user_pointer(const void *ptr, uint32_t len)
     return E_PTR;
 }
 
-/* ============================================================
- * Syscall Handlers
- * ============================================================ */
+
+/* Syscall Handlers */
 
 /* sys_write(const void *buf, uint32_t len) */
 static int32_t sys_write(struct svc_context *ctx)
@@ -379,9 +371,8 @@ static int32_t sys_exec(struct svc_context *ctx)
     return (int32_t)ctx->r0;
 }
 
-/* ============================================================
- * SVC Handler (Dispatcher)
- * ============================================================ */
+
+/* SVC Handler (Dispatcher) */
 void svc_handler(struct svc_context *ctx)
 {
     /*

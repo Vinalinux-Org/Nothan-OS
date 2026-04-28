@@ -302,4 +302,4 @@ add:
 
 - [ir_format.md](ir_format.md) — IR instructions được map ở đây
 - [architecture.md](architecture.md) — Codegen trong compiler pipeline
-- [docs/06-syscall-mechanism.md](../../docs/06-syscall-mechanism.md) — Kernel-side syscall handling
+- [../../Documentation/06-syscall-mechanism.md](../../Documentation/06-syscall-mechanism.md) — Kernel-side syscall handling

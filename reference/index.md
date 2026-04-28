@@ -1,4 +1,4 @@
-# docs_trainingAI — Index
+# reference — Index
 
 Tài liệu kỹ thuật phục vụ AI-assisted development cho VinixOS trên BeagleBone Black.
 

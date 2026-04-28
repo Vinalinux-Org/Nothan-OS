@@ -1,10 +1,9 @@
-/* ============================================================
- * lcdc.c
- * ------------------------------------------------------------
+/*
  * AM335x LCDC raster driver — 800x600@60Hz, RGB565.
- * ============================================================ */
-
-/* Pattern reference: U-Boot am335x-fb.c — re-implemented. */
+ *
+ * Pattern reference: U-Boot am335x-fb.c — re-implemented.
+ * AM335x TRM Ch.13.
+ */
 
 #include "types.h"
 #include "lcdc.h"
@@ -62,9 +61,7 @@ static void lcd_pinmux_setup(void)
 #define ST_DPLL_CLK             (1 << 0)
 #define ST_MN_BYPASS            (1 << 8)
 
-/* ============================================================
- * LCDC Register Offsets
- * ============================================================ */
+/* LCDC register offsets. */
 
 #define LCD_PID             0x00    /* Module ID */
 #define LCD_CTRL            0x04    /* Control */
@@ -140,12 +137,13 @@ static void lcd_pinmux_setup(void)
 #define VSYNC_INVERT    (1 << 20)
 
 /* ============================================================
- * 800x600 @ 60Hz VESA DMT
- * ============================================================
+/*
+ * 800x600 @ 60Hz VESA DMT timing.
+ *
  * Pixel clock: 40 MHz
  * Sync: PHSYNC, PVSYNC (both positive)
  * Source: QNX drm_800x600 struct (hdmi.c line 157-172)
- * ============================================================ */
+ */
 
 #define DISPLAY_WIDTH   800
 #define DISPLAY_HEIGHT  600
@@ -158,9 +156,8 @@ static void lcd_pinmux_setup(void)
 #define DISPLAY_VSW     4
 #define PIXEL_CLOCK     40000000    /* 40 MHz */
 
-/* ============================================================
- * Framebuffer Layout
- * ============================================================
+/*
+ * Framebuffer layout.
  *
  * LCDC requires a 32-byte palette header at the start of the
  * framebuffer, even in raw data mode. First word must be 0x4000
@@ -178,15 +175,10 @@ static void lcd_pinmux_setup(void)
  * Actually mapped via dedicated section in mmu.c */
 #define FB_VA_BASE      FB_PA_BASE
 
-/* ============================================================
- * Module State
- * ============================================================ */
-
 static uint16_t *fb_pixels = NULL;  /* pointer to first pixel (after palette), RGB565 */
 
-/* ============================================================
- * Display PLL Configuration
- * ============================================================
+/*
+ * Display PLL configuration.
  *
  * DPLL_DISP generates LCD_CLK.
  * LCD_PCLK = LCD_CLK / CLKDIV (CLKDIV is in LCD_CTRL register).

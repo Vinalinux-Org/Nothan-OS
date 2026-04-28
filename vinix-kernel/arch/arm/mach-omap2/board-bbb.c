@@ -1,9 +1,5 @@
-/* ============================================================
- * board-bbb.c
- * ------------------------------------------------------------
- * BeagleBone Black platform bus table — registers omap-uart,
- * omap-intc, omap-dmtimer, omap-hsmmc with the platform bus.
- * ============================================================ */
+/* BeagleBone Black platform bus table — registers omap-uart,
+ * omap-intc, omap-dmtimer, omap-hsmmc with the platform bus. */
 
 #include "platform_device.h"
 #include "mach/irqs.h"

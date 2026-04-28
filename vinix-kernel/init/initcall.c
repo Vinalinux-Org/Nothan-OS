@@ -1,8 +1,4 @@
-/* ============================================================
- * initcall.c
- * ------------------------------------------------------------
- * Iterate .initcall<N>.init sections, invoke registered fns.
- * ============================================================ */
+/* Iterate .initcall<N>.init sections, invoke registered fns. */
 
 #include "vinix/init.h"
 #include "uart.h"

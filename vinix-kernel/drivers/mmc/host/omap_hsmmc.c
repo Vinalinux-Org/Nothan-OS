@@ -1,8 +1,4 @@
-/* ============================================================
- * mmc.c
- * ------------------------------------------------------------
- * AM335x MMC0 driver — 512B sector read (CMD17) / write (CMD24).
- * ============================================================ */
+/* AM335x MMC0 driver — 512B sector read (CMD17) / write (CMD24). */
 
 #include "types.h"
 #include "mmio.h"
@@ -11,6 +7,10 @@
 #include "syscalls.h"
 #include "mach/prcm.h"
 #include "mach/control.h"
+#include "platform_device.h"
+#include "vinix/mmc/host.h"
+#include "vinix/errno.h"
+#include "vinix/init.h"
 
 /* MMC0 pinmux pads — TRM 9.3.1 conf_<pin> registers */
 #define CONF_MMC0_DAT3          (CTRL_MODULE_BASE + 0x8F0)
@@ -419,14 +419,8 @@ int mmc_write_sectors(uint32_t lba, uint32_t count, const void *src)
     return E_OK;
 }
 
-/* ============================================================
- * Platform driver wiring — registers as mmc_host, lets
- * kernel/mmc/block.c create the gendisk.
- * ============================================================ */
-
-#include "platform_device.h"
-#include "vinix/mmc/host.h"
-#include "vinix/errno.h"
+/* Platform driver wiring — registers as mmc_host, lets
+ * kernel/mmc/block.c create the gendisk. */
 
 static int omap_hsmmc_probe(struct platform_device *pdev)
 {
@@ -452,7 +446,6 @@ static struct platform_driver omap_hsmmc_driver = {
     .probe = omap_hsmmc_probe,
 };
 
-#include "vinix/init.h"
 static int __init omap_hsmmc_driver_init(void)
 {
     return platform_driver_register(&omap_hsmmc_driver);

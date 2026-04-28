@@ -62,7 +62,7 @@ Script sẽ:
 Nếu muốn chạy test suite hoặc develop compiler:
 
 ```bash
-# Từ thư mục CrossCompiler/
+# Từ thư mục compiler/
 pip3 install -r requirements.txt
 ```
 
@@ -217,7 +217,7 @@ Hello, VinixOS!
 ## Cấu Trúc Project
 
 ```
-CrossCompiler/
+compiler/
 ├── toolchain/              # Source code compiler
 │   ├── main.py             # Entry point
 │   ├── frontend/           # Lexer, Parser, Semantic

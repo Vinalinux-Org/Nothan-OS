@@ -1,12 +1,9 @@
-/* ============================================================
- * platform.c
- * ------------------------------------------------------------
- * Platform bus — name-match drv↔pdev, resource lookup.
- * ============================================================ */
+/* Platform bus — name-match drv↔pdev, resource lookup. */
 
 #include "platform_device.h"
 #include "string.h"
 #include "uart.h"
+#include "syscalls.h"
 
 static int platform_match(struct device *dev, struct driver *drv)
 {
@@ -89,11 +86,7 @@ int platform_get_irq(struct platform_device *pdev, unsigned int index)
     return r ? (int)r->start : -1;
 }
 
-/* ============================================================
- * Introspection (shell `devlist`)
- * ============================================================ */
-
-#include "syscalls.h"
+/* Introspection (shell `devlist`) */
 
 static void copy_name(char *dst, const char *src, int cap)
 {

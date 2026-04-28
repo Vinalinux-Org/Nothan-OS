@@ -10,7 +10,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SRC_COMPILER_DIR="$ROOT_DIR/CrossCompiler/toolchain"
+SRC_COMPILER_DIR="$ROOT_DIR/compiler/toolchain"
 
 if [[ ! -d "$SRC_COMPILER_DIR" ]]; then
     echo -e "${RED}Error: compiler source directory not found at $SRC_COMPILER_DIR${NC}"
@@ -18,7 +18,7 @@ if [[ ! -d "$SRC_COMPILER_DIR" ]]; then
 fi
 
 run_local() {
-    cd "$ROOT_DIR/CrossCompiler"
+    cd "$ROOT_DIR/compiler"
     exec python3 -m toolchain.main "$@"
 }
 
