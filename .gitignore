@@ -1,8 +1,8 @@
 # Build Directories
 /build/
-/VinixOS/bootloader/build/
-/VinixOS/kernel/build/
-/VinixOS/userspace/build/
+/vinix-kernel/bootloader/build/
+/vinix-kernel/kernel/build/
+/vinix-kernel/userspace/build/
 /CrossCompiler/toolchain/build/
 /CrossCompiler/toolchain/dist/
 /CrossCompiler/toolchain/*.egg-info/
@@ -88,4 +88,4 @@ TAGS
 test_hello
 fibonacci
 program
-VinixOS/build/
+vinix-kernel/build/
