@@ -87,6 +87,11 @@
 #define DDR_PA_BASE PLATFORM_DDR_PA_BASE
 #define DDR_SIZE_MB PLATFORM_DDR_SIZE_MB
 
+/* Boot identity map: PA == VA for the full DDR window.
+ * Built in mmu_build_page_table_boot(), torn down in mmu_init(). */
+#define BOOT_IDENTITY_PA    DDR_PA_BASE
+#define BOOT_IDENTITY_MB    DDR_SIZE_MB
+
 /* PA ↔ VA conversion offset */
 #define VA_OFFSET (KERNEL_VA_BASE - DDR_PA_BASE) /* 0x40000000 */
 

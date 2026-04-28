@@ -1,70 +1,47 @@
 #!/bin/bash
-# RefARM-OS Environment Setup Script
-# Ubuntu 22.04 LTS
-#
-# USAGE: Chạy từ thư mục gốc của project với quyền root:
-#   sudo bash scripts/setup-environment.sh
+# setup-environment.sh — install VinixOS build dependencies on Ubuntu 22.04.
+# Run from project root with sudo: sudo bash scripts/setup-environment.sh
 
 set -e
 
-echo "Installing dependencies for RefARM-OS..."
+echo "Installing VinixOS dependencies..."
 
-# Update package lists
 apt-get update
 apt-get upgrade -y
 
 # Build tools
-apt-get install build-essential -y
-apt-get install make -y
-apt-get install gcc -y
-apt-get install g++ -y
-apt-get install flex -y
-apt-get install bison -y
-apt-get install git -y
+apt-get install -y build-essential make gcc g++ flex bison git
 
-# Libraries (cần để build cross-compiler toolchain từ source nếu cần)
-apt-get install libgmp3-dev -y
-apt-get install libmpc-dev -y
-apt-get install libmpfr-dev -y
-apt-get install libisl-dev -y
-apt-get install texinfo -y
+# Libraries needed if building arm-none-eabi toolchain from source
+apt-get install -y libgmp3-dev libmpc-dev libmpfr-dev libisl-dev texinfo
 
-# ARM toolchain
-apt-get install gcc-arm-none-eabi -y
-apt-get install binutils-arm-none-eabi -y
-apt-get install binutils-arm-linux-gnueabihf -y
+# ARM bare-metal toolchain (kernel + userspace)
+apt-get install -y gcc-arm-none-eabi binutils-arm-none-eabi
 
-# Python
-apt-get install python3 -y
-apt-get install python3-pip -y
-apt-get install python3-venv -y
+# ARM Linux toolchain (VinCC code generation backend)
+apt-get install -y binutils-arm-linux-gnueabihf
+
+# Python (VinCC compiler)
+apt-get install -y python3 python3-pip python3-venv
 
 # Serial console
-apt-get install screen -y
-apt-get install minicom -y
+apt-get install -y screen minicom
 
-# Multilib support
-apt-get install gcc-multilib -y
-apt-get install libc6-i386 -y
+# Multilib
+apt-get install -y gcc-multilib libc6-i386
 
-# SD card flashing tools
-apt-get install parted -y
-apt-get install dosfstools -y       # mkfs.vfat cho FAT32 partition
+# SD card tools
+apt-get install -y parted dosfstools
 
-# Install Python development dependencies cho VinCC compiler
 echo ""
-echo "Installing Python compiler dependencies..."
+echo "Installing VinCC Python dependencies..."
 if [ -f "compiler/requirements.txt" ]; then
     pip3 install -r compiler/requirements.txt
 else
-    echo "Warning: compiler/requirements.txt not found."
-    echo "Make sure to run this script from the project root directory."
+    echo "warning: compiler/requirements.txt not found — run from project root"
 fi
 
 echo ""
-echo "Installation complete!"
-echo ""
-echo "Next steps:"
-echo "  cd vinix-kernel && make"
+echo "Done. Next:"
+echo "  make                          # build userspace then kernel"
 echo "  bash scripts/install_compiler.sh"
-echo ""
