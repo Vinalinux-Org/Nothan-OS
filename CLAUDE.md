@@ -107,14 +107,14 @@ vinix-kernel/
 │   └── mach-omap2/            — AM3358 SoC + BBB board (was platform/bbb/)
 │       └── include/mach/      — memory map, IRQ numbers, board headers
 ├── init/                      — main.c, payload.S, do_initcalls
-├── kernel/                    — generic C: sched, locking, irq, irqchip,
-│                                i2c, mmc, time, printk, tty (KHÔNG đụng khi port)
-├── drivers/                   — HW drivers, organized by Linux subsystem:
-│   ├── tty/serial/            (omap_serial.c)
+├── kernel/                    — core kernel: sched, locking, irq, time, printk
+│                                (KHÔNG đụng khi port)
+├── drivers/                   — HW drivers + subsystem cores, organized by Linux subsystem:
+│   ├── tty/                   (serial_core.c, serial/omap_serial.c)
 │   ├── irqchip/               (irq-omap-intc.c)
 │   ├── clocksource/           (timer-omap-dm.c)
-│   ├── mmc/host/              (omap_hsmmc.c)
-│   ├── i2c/busses/            (i2c-omap.c)
+│   ├── mmc/                   (core/core.c, core/mmc_block.c, host/omap_hsmmc.c)
+│   ├── i2c/                   (i2c-core.c, busses/i2c-omap.c)
 │   ├── gpu/drm/{tilcdc,i2c}/  (lcdc, tda998x)
 │   ├── video/fbdev/           (fbmem.c, fbcon.c)
 │   ├── watchdog/              (omap_wdt.c)
@@ -128,7 +128,7 @@ vinix-kernel/
                                 serial_core, tty, fb, clocksource, ...)
 ```
 
-**Port sang SoC khác** = viết `arch/arm/mach-<new>/` + driver mới. `kernel/` không đổi dòng nào.
+**Port sang SoC khác** = viết `arch/arm/mach-<new>/` + driver mới. `kernel/` + `drivers/*/core/` không đổi dòng nào.
 
 ### Component
 

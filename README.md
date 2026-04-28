@@ -340,15 +340,26 @@ Hello, VinixOS!
 Vinix-OS/
 ├── vinix-kernel/
 │   ├── bootloader/          ← MLO (SRAM @ 0x402F0400)
-│   ├── kernel/
-│   ├── platform/bbb/        ← AM3358 board: memory map, IRQ, platform device table
-│   ├── kernel/
-│   │   ├── src/
-│   │   │   ├── arch/arm/    ← entry.S, MMU asm, context switch, exception vectors
-│   │   │   ├── drivers/     ← uart, timer, intc, mmc, i2c, lcdc, fb, tda19988, mbr, watchdog
-│   │   │   ├── kernel/      ← mm, mmu, sync, scheduler, proc, fs, block, dev, driver, core, ui, test
-│   │   │   └── ui/          ← boot_screen.c (boot log, splash, home)
-│   │   └── include/
+│   ├── arch/arm/            ← entry.S, MMU asm, context switch, exception vectors
+│   │   └── mach-omap2/      ← AM3358 board: memory map, IRQ, platform device table
+│   ├── init/                ← main.c, payload.S, do_initcalls
+│   ├── kernel/              ← core kernel: sched, locking, irq, time, printk
+│   ├── drivers/             ← HW drivers + subsystem cores:
+│   │   ├── tty/             (serial_core.c, serial/omap_serial.c)
+│   │   ├── irqchip/         (irq-omap-intc.c)
+│   │   ├── clocksource/     (timer-omap-dm.c)
+│   │   ├── mmc/             (core/core.c, core/mmc_block.c, host/omap_hsmmc.c)
+│   │   ├── i2c/             (i2c-core.c, busses/i2c-omap.c)
+│   │   ├── gpu/drm/         (tilcdc, tda998x)
+│   │   ├── video/fbdev/     (fbmem.c, fbcon.c)
+│   │   ├── watchdog/        (omap_wdt.c)
+│   │   ├── base/            (device.c, platform.c)
+│   │   └── char/            (char_dev.c)
+│   ├── fs/                  ← VFS, FAT32, devfs, procfs
+│   ├── mm/                  ← page_alloc, slab, vmm
+│   ├── block/               ← block layer, buffer_cache
+│   ├── lib/                 ← string, format, fonts
+│   ├── include/vinix/       ← subsystem headers
 │   ├── userspace/
 │   │   ├── apps/            ← init, shell, 10 coreutils + hello
 │   │   ├── lib/             ← crt0.S, syscall wrappers

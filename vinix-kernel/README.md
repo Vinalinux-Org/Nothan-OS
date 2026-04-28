@@ -38,27 +38,27 @@ VinixOS là bare-metal monolithic kernel tự viết 100% từ zero — không d
 ```text
 vinix-kernel/
 ├── bootloader/              # MLO (SRAM stage, boots kernel from SD sector 2048)
-├── platform/bbb/            # BBB/AM3358 board: memory map, IRQ numbers, platform device table
-├── kernel/
-│   ├── src/
-│   │   ├── arch/arm/        # entry.S, MMU asm, context switch, exception vectors
-│   │   ├── drivers/         # uart, timer, intc, mmc, i2c, lcdc, fb, tda19988, mbr, watchdog
-│   │   └── kernel/
-│   │       ├── core/        # svc_handler (syscall entry)
-│   │       ├── mmu/         # L1/L2 page tables, TTBR0 switch
-│   │       ├── mm/          # page_alloc, slab, kmalloc, vmm
-│   │       ├── sync/        # spinlock, atomic, wait_queue, sleep
-│   │       ├── scheduler/   # task_struct, round-robin, context_switch.S
-│   │       ├── proc/        # fork, exec, wait, exit, ELF loader
-│   │       ├── fs/          # vfs, fat32, devfs, procfs
-│   │       ├── block/       # block_device, buffer_cache
-│   │       ├── dev/         # char_device framework
-│   │       ├── driver/      # platform_device/driver, bus matching
-│   │       ├── irq/         # IRQ dispatch
-│   │       ├── exceptions/  # DFSR/DFAR decode, panic, page fault → SIGSEGV
-│   │       ├── ui/          # HDMI boot screen (boot log + splash + home)
-│   │       └── test/        # selftest harness
-│   └── include/             # kernel headers
+├── arch/arm/                # entry.S, MMU asm, context switch, exception vectors
+│   └── mach-omap2/          # BBB/AM3358 board: memory map, IRQ numbers, platform device table
+├── init/                    # main.c, initcall.c, payload.S
+├── kernel/                  # core kernel: sched, locking, irq, time, printk, fork/exec/wait
+├── drivers/                 # HW drivers + subsystem cores:
+│   ├── tty/                 # serial_core.c, serial/omap_serial.c
+│   ├── irqchip/             # irq-omap-intc.c
+│   ├── clocksource/         # timer-omap-dm.c
+│   ├── mmc/                 # core/core.c, core/mmc_block.c, host/omap_hsmmc.c
+│   ├── i2c/                 # i2c-core.c, busses/i2c-omap.c
+│   ├── gpu/drm/             # tilcdc, tda998x
+│   ├── video/               # boot_screen.c, fbdev/fbmem.c, fbdev/fbcon.c
+│   ├── watchdog/            # omap_wdt.c
+│   ├── base/                # device.c, platform.c (driver model)
+│   └── char/                # char_dev.c
+├── fs/                      # vfs.c, fat32.c, devfs.c, procfs.c
+├── mm/                      # page_alloc.c, slab.c, vmm.c
+├── block/                   # block.c, buffer_cache.c, partitions/msdos.c
+├── lib/                     # string.c, format.c, fonts/, test/selftest.c
+├── include/                 # kernel headers
+│   └── vinix/               # subsystem headers (i2c.h, mmc/host.h, serial_core.h, ...)
 ├── userspace/
 │   ├── apps/                # init, shell, ls, cat, echo, ps, kill, pwd, free, uname, rm, mv, hello
 │   ├── lib/                 # crt0.S, syscall.c
