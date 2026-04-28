@@ -11,10 +11,12 @@
 #include "irq.h"
 #include "intc.h"
 #include "mach/prcm.h"
+#include "mach/memmap.h"
+#include "mach/irqs.h"
 
-/* Hardware Definitions */
-#define UART0_BASE      0x44E09000
-#define UART0_IRQ       72
+/* UART0_BASE from mach/memmap.h — used pre-probe for earlycon TX path.
+ * RX interrupt setup uses PLATFORM_IRQ_UART0 from mach/irqs.h. */
+#define UART0_BASE      OMAP_UART0_BASE
 
 /* UART Register Offsets */
 #define UART_RHR        0x00
@@ -126,13 +128,13 @@ void uart_enable_rx_interrupt(void)
     mmio_write32(UART0_BASE + UART_IER, IER_RHR_IT);
     
     /* Register IRQ handler */
-    int ret = request_irq(UART0_IRQ, uart_rx_irq_handler, 0, "omap-uart", NULL);
+    int ret = request_irq(PLATFORM_IRQ_UART0, uart_rx_irq_handler, 0, "omap-uart", NULL);
     if (ret != 0) {
         return;  /* Registration failed */
     }
     
     /* Enable IRQ in interrupt controller */
-    enable_irq(UART0_IRQ);
+    enable_irq(PLATFORM_IRQ_UART0);
 }
 
 /* ============================================================

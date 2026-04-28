@@ -22,27 +22,24 @@
 
 #define PIN_MODE_0              0
 
-/* ============================================================
- * MMC0 Controller Registers
- * Base: 0x48060000
- * ============================================================ */
+/* MMC0 controller register offsets — TRM Ch.18. */
+#define MMC_SYSCONFIG           0x110
+#define MMC_SYSSTATUS           0x114
+#define MMC_CON                 0x12C
+#define MMC_BLK                 0x204
+#define MMC_ARG                 0x208
+#define MMC_CMD                 0x20C
+#define MMC_RSP10               0x210
+#define MMC_DATA                0x220
+#define MMC_HCTL                0x228
+#define MMC_SYSCTL              0x22C
+#define MMC_STAT                0x230
+#define MMC_IE                  0x234
+#define MMC_ISE                 0x238
+#define MMC_CAPA                0x240
 
-#define MMC0_BASE               0x48060000
-
-#define MMC_SYSCONFIG           (MMC0_BASE + 0x110)
-#define MMC_SYSSTATUS           (MMC0_BASE + 0x114)
-#define MMC_CON                 (MMC0_BASE + 0x12C)
-#define MMC_BLK                 (MMC0_BASE + 0x204)
-#define MMC_ARG                 (MMC0_BASE + 0x208)
-#define MMC_CMD                 (MMC0_BASE + 0x20C)
-#define MMC_RSP10               (MMC0_BASE + 0x210)
-#define MMC_DATA                (MMC0_BASE + 0x220)
-#define MMC_HCTL                (MMC0_BASE + 0x228)
-#define MMC_SYSCTL              (MMC0_BASE + 0x22C)
-#define MMC_STAT                (MMC0_BASE + 0x230)
-#define MMC_IE                  (MMC0_BASE + 0x234)
-#define MMC_ISE                 (MMC0_BASE + 0x238)
-#define MMC_CAPA                (MMC0_BASE + 0x240)
+/* Set in probe() from platform_get_resource — used by all register accessors. */
+static uint32_t mmc_base;
 
 /* MMC_HCTL bits */
 #define MMC_HCTL_SDBP           (1 << 8)         /* SD Bus Power */
@@ -122,12 +119,12 @@ static int mmc_send_cmd(uint32_t cmd, uint32_t arg, uint32_t flags)
     uint32_t status;
     int timeout = 10000000;
 
-    mmio_write32(MMC_STAT, 0xFFFFFFFF);
-    mmio_write32(MMC_ARG, arg);
-    mmio_write32(MMC_CMD, (cmd << 24) | flags);
+    mmio_write32(mmc_base + MMC_STAT, 0xFFFFFFFF);
+    mmio_write32(mmc_base + MMC_ARG, arg);
+    mmio_write32(mmc_base + MMC_CMD, (cmd << 24) | flags);
 
     do {
-        status = mmio_read32(MMC_STAT);
+        status = mmio_read32(mmc_base + MMC_STAT);
         if (--timeout == 0) {
             return E_FAIL;
         }
@@ -136,17 +133,17 @@ static int mmc_send_cmd(uint32_t cmd, uint32_t arg, uint32_t flags)
     if (status & MMC_STAT_ERRI) {
         /* SD spec requires CMD-line reset after error, otherwise
          * controller stays stuck and every subsequent command fails. */
-        uint32_t sysctl = mmio_read32(MMC_SYSCTL);
-        mmio_write32(MMC_SYSCTL, sysctl | MMC_SYSCTL_SRC);
+        uint32_t sysctl = mmio_read32(mmc_base + MMC_SYSCTL);
+        mmio_write32(mmc_base + MMC_SYSCTL, sysctl | MMC_SYSCTL_SRC);
 
         int src_timeout = 100000;
-        while ((mmio_read32(MMC_SYSCTL) & MMC_SYSCTL_SRC) && (--src_timeout > 0));
+        while ((mmio_read32(mmc_base + MMC_SYSCTL) & MMC_SYSCTL_SRC) && (--src_timeout > 0));
 
-        mmio_write32(MMC_STAT, 0xFFFFFFFF);
+        mmio_write32(mmc_base + MMC_STAT, 0xFFFFFFFF);
         return E_FAIL;
     }
 
-    mmio_write32(MMC_STAT, MMC_STAT_CC);
+    mmio_write32(mmc_base + MMC_STAT, MMC_STAT_CC);
     return E_OK;
 }
 
@@ -168,9 +165,9 @@ int mmc_init(void)
     mmio_write32(CONF_MMC0_CLK,  PIN_MODE_0 | PIN_INPUT_EN | PIN_PULLUP_EN);
     mmio_write32(CONF_MMC0_CMD,  PIN_MODE_0 | PIN_INPUT_EN | PIN_PULLUP_EN);
 
-    mmio_write32(MMC_SYSCONFIG, 0x02);
+    mmio_write32(mmc_base + MMC_SYSCONFIG, 0x02);
     timeout = 1000000;
-    while ((mmio_read32(MMC_SYSSTATUS) & 0x01) == 0) {
+    while ((mmio_read32(mmc_base + MMC_SYSSTATUS) & 0x01) == 0) {
         if (--timeout == 0) {
             pr_err("[MMC] ERROR: SYSSTATUS reset timeout\n");
             return E_FAIL;
@@ -179,28 +176,28 @@ int mmc_init(void)
 
     /* Keep clocks ungated during init, otherwise power mgmt may cut
      * them mid-sequence and subsequent commands silently fail. */
-    mmio_write32(MMC_SYSCONFIG, 0x00000308);
+    mmio_write32(mmc_base + MMC_SYSCONFIG, 0x00000308);
 
-    mmio_write32(MMC_CON, 0x00000000);
+    mmio_write32(mmc_base + MMC_CON, 0x00000000);
 
-    mmio_write32(MMC_SYSCTL, mmio_read32(MMC_SYSCTL) | MMC_SYSCTL_SRC | MMC_SYSCTL_SRD);
+    mmio_write32(mmc_base + MMC_SYSCTL, mmio_read32(mmc_base + MMC_SYSCTL) | MMC_SYSCTL_SRC | MMC_SYSCTL_SRD);
     timeout = 10000000;
-    while (mmio_read32(MMC_SYSCTL) & (MMC_SYSCTL_SRC | MMC_SYSCTL_SRD)) {
+    while (mmio_read32(mmc_base + MMC_SYSCTL) & (MMC_SYSCTL_SRC | MMC_SYSCTL_SRD)) {
         if (--timeout == 0) {
             pr_err("[MMC] ERROR: CMD/DAT reset timeout\n");
             return E_FAIL;
         }
     }
 
-    mmio_write32(MMC_CAPA, mmio_read32(MMC_CAPA) | (1 << 24));
+    mmio_write32(mmc_base + MMC_CAPA, mmio_read32(mmc_base + MMC_CAPA) | (1 << 24));
 
     /* SD spec: set voltage first, THEN assert SDBP. Reversed order
      * leaves the card in an undefined power state. */
-    mmio_write32(MMC_HCTL, MMC_HCTL_SDVS_3_3V);
-    mmio_write32(MMC_HCTL, mmio_read32(MMC_HCTL) | MMC_HCTL_SDBP);
+    mmio_write32(mmc_base + MMC_HCTL, MMC_HCTL_SDVS_3_3V);
+    mmio_write32(mmc_base + MMC_HCTL, mmio_read32(mmc_base + MMC_HCTL) | MMC_HCTL_SDBP);
 
     timeout = 100000;
-    while ((mmio_read32(MMC_HCTL) & MMC_HCTL_SDBP) == 0) {
+    while ((mmio_read32(mmc_base + MMC_HCTL) & MMC_HCTL_SDBP) == 0) {
         if (--timeout == 0) {
             pr_err("[MMC] ERROR: SDBP timeout\n");
             return E_FAIL;
@@ -208,40 +205,40 @@ int mmc_init(void)
     }
 
     /* 400kHz for the init phase per SD spec: 96MHz / CLKD=240 */
-    mmio_write32(MMC_SYSCTL, 0x000E3C01);
+    mmio_write32(mmc_base + MMC_SYSCTL, 0x000E3C01);
     mmc_delay(1000);
 
     timeout = 1000000;
-    while ((mmio_read32(MMC_SYSCTL) & MMC_SYSCTL_ICS) == 0) {
+    while ((mmio_read32(mmc_base + MMC_SYSCTL) & MMC_SYSCTL_ICS) == 0) {
         if (--timeout == 0) {
             pr_err("[MMC] ERROR: ICS timeout\n");
             return E_FAIL;
         }
     }
 
-    mmio_write32(MMC_SYSCTL, mmio_read32(MMC_SYSCTL) | MMC_SYSCTL_CEN);
+    mmio_write32(mmc_base + MMC_SYSCTL, mmio_read32(mmc_base + MMC_SYSCTL) | MMC_SYSCTL_CEN);
 
-    mmio_write32(MMC_IE,  0xFFFFFFFF);
-    mmio_write32(MMC_ISE, 0xFFFFFFFF);
-    mmio_write32(MMC_STAT, 0xFFFFFFFF);
+    mmio_write32(mmc_base + MMC_IE,  0xFFFFFFFF);
+    mmio_write32(mmc_base + MMC_ISE, 0xFFFFFFFF);
+    mmio_write32(mmc_base + MMC_STAT, 0xFFFFFFFF);
 
     /* 80-clock wakeup: SD spec requires ≥74 clocks with CMD line high
      * before any command. Controller handles this via SD_CON[INIT]. */
-    mmio_write32(MMC_CON, mmio_read32(MMC_CON) | (1 << 1));
-    mmio_write32(MMC_CMD, 0x00000000);
+    mmio_write32(mmc_base + MMC_CON, mmio_read32(mmc_base + MMC_CON) | (1 << 1));
+    mmio_write32(mmc_base + MMC_CMD, 0x00000000);
     mmc_delay(10000);
 
     timeout = 1000000;
-    while ((mmio_read32(MMC_STAT) & MMC_STAT_CC) == 0) {
+    while ((mmio_read32(mmc_base + MMC_STAT) & MMC_STAT_CC) == 0) {
         if (--timeout == 0) {
             pr_err("[MMC] ERROR: 80-clock init timeout\n");
             return E_FAIL;
         }
     }
-    mmio_write32(MMC_STAT, MMC_STAT_CC);
-    mmio_write32(MMC_CON, mmio_read32(MMC_CON) & ~(1 << 1));
+    mmio_write32(mmc_base + MMC_STAT, MMC_STAT_CC);
+    mmio_write32(mmc_base + MMC_CON, mmio_read32(mmc_base + MMC_CON) & ~(1 << 1));
     mmc_delay(5000);
-    mmio_write32(MMC_STAT, 0xFFFFFFFF);
+    mmio_write32(mmc_base + MMC_STAT, 0xFFFFFFFF);
 
     /* Card identification sequence per SD spec */
     mmc_send_cmd(0, 0, MMC_RSP_NONE);
@@ -261,7 +258,7 @@ int mmc_init(void)
             continue;
         }
 
-        rsp = mmio_read32(MMC_RSP10);
+        rsp = mmio_read32(mmc_base + MMC_RSP10);
         if (rsp & (1U << 31)) {
             /* Card ready; bit 30 = HCS (SDHC/SDXC) */
             if (rsp & (1 << 30)) {
@@ -275,16 +272,16 @@ int mmc_init(void)
     mmc_send_cmd(2, 0, MMC_RSP_R2);     /* CMD2 — ALL_SEND_CID */
 
     mmc_send_cmd(3, 0, MMC_RSP_R6);     /* CMD3 — SEND_RELATIVE_ADDR */
-    rca = (mmio_read32(MMC_RSP10) >> 16) & 0xFFFF;
+    rca = (mmio_read32(mmc_base + MMC_RSP10) >> 16) & 0xFFFF;
 
     mmc_send_cmd(9, rca << 16, MMC_RSP_R2);  /* CMD9 — SEND_CSD */
     mmc_send_cmd(7, rca << 16, MMC_RSP_R1b); /* CMD7 — SELECT_CARD */
 
     /* Widen data timeout to max (DTO field = 14) */
     {
-        uint32_t sysctl = mmio_read32(MMC_SYSCTL);
+        uint32_t sysctl = mmio_read32(mmc_base + MMC_SYSCTL);
         sysctl = (sysctl & ~(0xF << 16)) | (14 << 16);
-        mmio_write32(MMC_SYSCTL, sysctl);
+        mmio_write32(mmc_base + MMC_SYSCTL, sysctl);
     }
 
     /* Bump card clock from 400kHz → 24MHz (CLKD = 4, since 96MHz/4 = 24MHz).
@@ -292,24 +289,24 @@ int mmc_init(void)
     {
         uint32_t sysctl;
 
-        sysctl = mmio_read32(MMC_SYSCTL);
+        sysctl = mmio_read32(mmc_base + MMC_SYSCTL);
         sysctl &= ~MMC_SYSCTL_CEN;
-        mmio_write32(MMC_SYSCTL, sysctl);
+        mmio_write32(mmc_base + MMC_SYSCTL, sysctl);
 
-        sysctl = mmio_read32(MMC_SYSCTL);
+        sysctl = mmio_read32(mmc_base + MMC_SYSCTL);
         sysctl &= ~(0xFFC0);
         sysctl |= (4 << 6);
-        mmio_write32(MMC_SYSCTL, sysctl);
+        mmio_write32(mmc_base + MMC_SYSCTL, sysctl);
 
         timeout = 1000000;
-        while ((mmio_read32(MMC_SYSCTL) & MMC_SYSCTL_ICS) == 0) {
+        while ((mmio_read32(mmc_base + MMC_SYSCTL) & MMC_SYSCTL_ICS) == 0) {
             if (--timeout == 0) {
                 pr_err("[MMC] ERROR: ICS timeout at 24MHz\n");
                 return E_FAIL;
             }
         }
 
-        mmio_write32(MMC_SYSCTL, mmio_read32(MMC_SYSCTL) | MMC_SYSCTL_CEN);
+        mmio_write32(mmc_base + MMC_SYSCTL, mmio_read32(mmc_base + MMC_SYSCTL) | MMC_SYSCTL_CEN);
     }
 
     /* CMD16 — SET_BLOCKLEN = 512. Required for SDSC, no-op on SDHC. */
@@ -327,17 +324,17 @@ int mmc_read_sectors(uint32_t lba, uint32_t count, void *dst)
     int timeout;
 
     for (i = 0; i < count; i++) {
-        mmio_write32(MMC_BLK, (1 << 16) | 512);
-        mmio_write32(MMC_STAT, 0xFFFFFFFF);
+        mmio_write32(mmc_base + MMC_BLK, (1 << 16) | 512);
+        mmio_write32(mmc_base + MMC_STAT, 0xFFFFFFFF);
 
         /* SDSC takes byte address, SDHC takes block number */
         uint32_t arg = sdhc_card ? (lba + i) : ((lba + i) * 512);
-        mmio_write32(MMC_ARG, arg);
-        mmio_write32(MMC_CMD, (17 << 24) | MMC_RSP_R1 | MMC_CMD_DP | MMC_CMD_DDIR_READ);
+        mmio_write32(mmc_base + MMC_ARG, arg);
+        mmio_write32(mmc_base + MMC_CMD, (17 << 24) | MMC_RSP_R1 | MMC_CMD_DP | MMC_CMD_DDIR_READ);
 
         timeout = 10000000;
-        while ((mmio_read32(MMC_STAT) & MMC_STAT_BRR) == 0) {
-            uint32_t stat = mmio_read32(MMC_STAT);
+        while ((mmio_read32(mmc_base + MMC_STAT) & MMC_STAT_BRR) == 0) {
+            uint32_t stat = mmio_read32(mmc_base + MMC_STAT);
             if (stat & MMC_STAT_ERRI) {
                 pr_err("[MMC] ERROR: read error at LBA %u\n", lba + i);
                 return E_FAIL;
@@ -349,18 +346,18 @@ int mmc_read_sectors(uint32_t lba, uint32_t count, void *dst)
         }
 
         for (j = 0; j < 128; j++) {
-            *buf++ = mmio_read32(MMC_DATA);
+            *buf++ = mmio_read32(mmc_base + MMC_DATA);
         }
 
         timeout = 10000000;
-        while ((mmio_read32(MMC_STAT) & MMC_STAT_TC) == 0) {
+        while ((mmio_read32(mmc_base + MMC_STAT) & MMC_STAT_TC) == 0) {
             if (--timeout == 0) {
                 pr_err("[MMC] ERROR: TC timeout at LBA %u\n", lba + i);
                 return E_FAIL;
             }
         }
 
-        mmio_write32(MMC_STAT, 0xFFFFFFFF);
+        mmio_write32(mmc_base + MMC_STAT, 0xFFFFFFFF);
     }
 
     return E_OK;
@@ -373,25 +370,25 @@ int mmc_write_sectors(uint32_t lba, uint32_t count, const void *src)
     int timeout;
 
     for (i = 0; i < count; i++) {
-        mmio_write32(MMC_BLK, (1 << 16) | 512);
-        mmio_write32(MMC_STAT, 0xFFFFFFFF);
+        mmio_write32(mmc_base + MMC_BLK, (1 << 16) | 512);
+        mmio_write32(mmc_base + MMC_STAT, 0xFFFFFFFF);
 
         uint32_t arg = sdhc_card ? (lba + i) : ((lba + i) * 512);
-        mmio_write32(MMC_ARG, arg);
-        mmio_write32(MMC_CMD, (24 << 24) | MMC_RSP_R1 | MMC_CMD_DP | MMC_CMD_DDIR_WRITE);
+        mmio_write32(mmc_base + MMC_ARG, arg);
+        mmio_write32(mmc_base + MMC_CMD, (24 << 24) | MMC_RSP_R1 | MMC_CMD_DP | MMC_CMD_DDIR_WRITE);
 
         timeout = 10000000;
-        while ((mmio_read32(MMC_STAT) & MMC_STAT_BWR) == 0) {
-            uint32_t stat = mmio_read32(MMC_STAT);
+        while ((mmio_read32(mmc_base + MMC_STAT) & MMC_STAT_BWR) == 0) {
+            uint32_t stat = mmio_read32(mmc_base + MMC_STAT);
             if (stat & MMC_STAT_ERRI) {
                 pr_err("[MMC] ERROR: write error at LBA %u\n", lba + i);
                 /* CMD+DAT reset required after write error — without it
                  * the controller stays wedged and all subsequent writes fail. */
-                uint32_t sysctl = mmio_read32(MMC_SYSCTL);
-                mmio_write32(MMC_SYSCTL, sysctl | MMC_SYSCTL_SRC | MMC_SYSCTL_SRD);
+                uint32_t sysctl = mmio_read32(mmc_base + MMC_SYSCTL);
+                mmio_write32(mmc_base + MMC_SYSCTL, sysctl | MMC_SYSCTL_SRC | MMC_SYSCTL_SRD);
                 int t = 100000;
-                while ((mmio_read32(MMC_SYSCTL) & (MMC_SYSCTL_SRC | MMC_SYSCTL_SRD)) && --t > 0);
-                mmio_write32(MMC_STAT, 0xFFFFFFFF);
+                while ((mmio_read32(mmc_base + MMC_SYSCTL) & (MMC_SYSCTL_SRC | MMC_SYSCTL_SRD)) && --t > 0);
+                mmio_write32(mmc_base + MMC_STAT, 0xFFFFFFFF);
                 return E_FAIL;
             }
             if (--timeout == 0) {
@@ -401,12 +398,12 @@ int mmc_write_sectors(uint32_t lba, uint32_t count, const void *src)
         }
 
         for (j = 0; j < 128; j++) {
-            mmio_write32(MMC_DATA, *buf++);
+            mmio_write32(mmc_base + MMC_DATA, *buf++);
         }
 
         timeout = 10000000;
-        while ((mmio_read32(MMC_STAT) & MMC_STAT_TC) == 0) {
-            if (mmio_read32(MMC_STAT) & MMC_STAT_ERRI) {
+        while ((mmio_read32(mmc_base + MMC_STAT) & MMC_STAT_TC) == 0) {
+            if (mmio_read32(mmc_base + MMC_STAT) & MMC_STAT_ERRI) {
                 pr_err("[MMC] ERROR: TC error at LBA %u\n", lba + i);
                 return E_FAIL;
             }
@@ -416,7 +413,7 @@ int mmc_write_sectors(uint32_t lba, uint32_t count, const void *src)
             }
         }
 
-        mmio_write32(MMC_STAT, 0xFFFFFFFF);
+        mmio_write32(mmc_base + MMC_STAT, 0xFFFFFFFF);
     }
 
     return E_OK;
@@ -429,13 +426,16 @@ int mmc_write_sectors(uint32_t lba, uint32_t count, const void *src)
 
 #include "platform_device.h"
 #include "vinix/mmc/host.h"
+#include "vinix/errno.h"
 
 static int omap_hsmmc_probe(struct platform_device *pdev)
 {
     struct resource *mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-    int irq = platform_get_irq(pdev, 0);
-    pr_info("[MMC] probing %s @ 0x%08x irq %d\n",
-                pdev->name, mem ? mem->start : 0, irq);
+    if (!mem)
+        return -ENODEV;
+
+    mmc_base = mem->start;
+    pr_info("[MMC] probing %s @ 0x%08x\n", pdev->name, mmc_base);
 
     int rc = mmc_init();
     if (rc != E_OK) return rc;
