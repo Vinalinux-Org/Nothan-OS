@@ -1,8 +1,6 @@
-/* ============================================================
- * string.h
- * ------------------------------------------------------------
- * Kernel libc string + memory subset.
- * ============================================================ */
+/*
+ * lib/include/string.h — kernel libc string and memory subset
+ */
 
 #ifndef STRING_H
 #define STRING_H

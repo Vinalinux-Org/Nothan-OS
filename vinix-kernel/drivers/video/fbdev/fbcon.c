@@ -1,10 +1,10 @@
-/* ============================================================
- * fbcon.c
- * ------------------------------------------------------------
- * Text console layered on top of fbmem's graphics primitives.
- * Tracks (col, row) cursor, handles \n, \r, \t, line wrap, and
- * scrolling by copying pixel rows up.
- * ============================================================ */
+/*
+ * drivers/video/fbdev/fbcon.c — framebuffer text console
+ *
+ * Layered on top of fbmem's graphics primitives.  Tracks cursor
+ * position, handles \n, \r, \t, line wrap, and scrolling by
+ * copying pixel rows up one font-height at a time.
+ */
 
 #include "fb.h"
 

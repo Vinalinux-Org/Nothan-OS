@@ -1,11 +1,11 @@
-/* ============================================================
+/*
  * fbmem.c — Framebuffer Graphics Primitives
  * RGB565, 800x600 @ 60Hz
  *
  * Owns the framebuffer pointer, dimensions, and pixel-level
  * primitives. Font data lives in lib/fonts/font_8x16.c; the
  * text console layered on top lives in fbcon.c.
- * ============================================================ */
+ */
 
 #include "fb.h"
 #include "lcdc.h"
@@ -62,9 +62,9 @@ uint32_t  fb_get_width(void)   { return g_width;  }
 uint32_t  fb_get_height(void)  { return g_height; }
 uint16_t *fb_get_buffer(void)  { return g_fb;     }
 
-/* ============================================================
+/*
  * Primitives
- * ============================================================ */
+ */
 
 void fb_putpixel(uint32_t x, uint32_t y, uint16_t color)
 {
@@ -116,9 +116,9 @@ void fb_clear(uint16_t color)
     }
 }
 
-/* ============================================================
+/*
  * Text rendering
- * ============================================================ */
+ */
 
 void fb_draw_char(uint32_t x, uint32_t y, char c, uint16_t fg, uint16_t bg)
 {
@@ -180,9 +180,9 @@ void fb_puts_scaled(uint32_t x, uint32_t y, const char *str, uint16_t fg, uint16
     }
 }
 
-/* ============================================================
+/*
  * Circle drawing
- * ============================================================ */
+ */
 
 /* Integer square root — scanline approach, no stdlib needed.
  * For r <= 55: max 55 iterations per call, negligible at 800MHz. */

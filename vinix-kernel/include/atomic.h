@@ -1,8 +1,6 @@
-/* ============================================================
- * atomic.h
- * ------------------------------------------------------------
- * Atomic integer via ARMv7 LDREX/STREX.
- * ============================================================ */
+/*
+ * include/atomic.h — Atomic read/modify/write primitives.
+ */
 
 #ifndef ATOMIC_H
 #define ATOMIC_H

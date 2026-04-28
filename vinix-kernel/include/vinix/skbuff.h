@@ -1,13 +1,6 @@
-/* ============================================================
- * vinix/skbuff.h
- * ------------------------------------------------------------
- * Socket buffer — packet container. head/data/tail/end pattern
- * lets layers prepend headers (skb_push) and strip headers
- * (skb_pull) without realloc.
- *
- * MVP: linear buffer only (no fragmentation). Slab-backed
- * payload allocation. Refcount = 1 (no cloning).
- * ============================================================ */
+/*
+ * include/vinix/skbuff.h — Socket buffer (skbuff) interface
+ */
 
 #ifndef VINIX_SKBUFF_H
 #define VINIX_SKBUFF_H

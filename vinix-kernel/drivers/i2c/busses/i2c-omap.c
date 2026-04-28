@@ -1,8 +1,10 @@
-/* ============================================================
- * i2c.c
- * ------------------------------------------------------------
- * AM335x I2C0 polling-mode driver — 7-bit master TX/RX.
- * ============================================================ */
+/*
+ * AM335x I2C0 Driver
+ *
+ * Provides polling-mode I2C master functionality (7-bit addressing).
+ * This driver handles the low-level register configuration required to
+ * transmit and receive data over the I2C bus.
+ */
 
 #include "types.h"
 #include "i2c.h"
@@ -17,9 +19,7 @@
 /* mode 0 | pullup enabled | RX active | slow slew */
 #define PAD_I2C0_MODE           0x70
 
-/* ============================================================
- * I2C0 Register Offsets
- * ============================================================ */
+/* Hardware Register Offsets */
 
 #define I2C_REVNB_LO    0x00    /* Module revision (low) */
 #define I2C_REVNB_HI    0x04    /* Module revision (high) */
@@ -41,21 +41,15 @@
 #define I2C_BUFSTAT     0xC0    /* Buffer status */
 #define I2C_SYSTEST     0xBC    /* System test register */
 
-/* ============================================================
- * I2C_SYSC bits
- * ============================================================ */
+/* SYSC register bit definitions */
 
 #define I2C_SYSC_SRST   (1 << 1)    /* Software reset */
 
-/* ============================================================
- * I2C_SYSS bits
- * ============================================================ */
+/* SYSS register bit definitions */
 
 #define I2C_SYSS_RDONE  (1 << 0)    /* Reset done */
 
-/* ============================================================
- * I2C_CON bits
- * ============================================================ */
+/* CON register bit definitions */
 
 #define I2C_CON_EN      (1 << 15)   /* Module enable */
 #define I2C_CON_MST     (1 << 10)   /* Master mode */
@@ -63,9 +57,7 @@
 #define I2C_CON_STP     (1 << 1)    /* Stop condition */
 #define I2C_CON_STT     (1 << 0)    /* Start condition */
 
-/* ============================================================
- * I2C_IRQSTATUS bits
- * ============================================================ */
+/* IRQSTATUS register bit definitions */
 
 #define I2C_STAT_BB     (1 << 12)   /* Bus busy */
 #define I2C_STAT_ROVR   (1 << 11)   /* Receive overrun */
@@ -80,15 +72,11 @@
 #define I2C_STAT_NACK   (1 << 1)    /* No acknowledgement */
 #define I2C_STAT_AL     (1 << 0)    /* Arbitration lost */
 
-/* ============================================================
- * Timeout
- * ============================================================ */
+/* Default operation timeout in loops */
 
 #define I2C_TIMEOUT     100000
 
-/* ============================================================
- * Internal Helpers
- * ============================================================ */
+/* Internal helper functions */
 
 /**
  * Wait until bus is not busy.
@@ -158,9 +146,13 @@ static void i2c_flush(void)
     i2c_clear_status();
 }
 
-/* ============================================================
- * I2C Initialization
- * ============================================================ */
+/*
+ * i2c_init - Initialize the I2C hardware
+ *
+ * Configures the pin multiplexing, enables the Wakeup domain clock,
+ * performs a soft reset, and configures the prescaler for 100kHz
+ * standard mode operation.
+ */
 
 void i2c_init(void)
 {
@@ -238,12 +230,13 @@ void i2c_init(void)
     pr_info("[I2C] I2C0 initialized (100kHz standard mode)\n");
 }
 
-/* ============================================================
- * Write Register
- * ============================================================
+/*
+ * i2c_write_reg - Write a single byte to an I2C device register
+ * @slave_addr: The 7-bit I2C address of the target device
+ * @reg: The register address to write to
+ * @val: The value to write into the register
  *
- * I2C write transaction: [S] [slave_addr+W] [reg] [val] [P]
- * Master transmits 2 bytes: register address, then value.
+ * Executes a master transmit transaction: [S] [slave_addr+W] [reg] [val] [P]
  */
 
 int i2c_write_reg(uint8_t slave_addr, uint8_t reg, uint8_t val)
@@ -302,13 +295,15 @@ int i2c_write_reg(uint8_t slave_addr, uint8_t reg, uint8_t val)
     return 0;
 }
 
-/* ============================================================
- * Read Register
- * ============================================================
+/*
+ * i2c_read_reg - Read a single byte from an I2C device register
+ * @slave_addr: The 7-bit I2C address of the target device
+ * @reg: The register address to read from
+ * @val: Pointer to store the read byte
  *
- * I2C read with repeated start:
- *   Phase 1: [S] [slave_addr+W] [reg]          (set register pointer)
- *   Phase 2: [Sr] [slave_addr+R] [data] [P]    (read data)
+ * Executes a master receive transaction using a repeated start:
+ * Phase 1: [S] [slave_addr+W] [reg]          (set register pointer)
+ * Phase 2: [Sr] [slave_addr+R] [data] [P]    (read data)
  */
 
 int i2c_read_reg(uint8_t slave_addr, uint8_t reg, uint8_t *val)
@@ -323,8 +318,8 @@ int i2c_read_reg(uint8_t slave_addr, uint8_t reg, uint8_t *val)
 
     i2c_clear_status();
 
-    /* === Phase 1: Write register address (no stop) === */
-
+    /* Write register address without STOP — slave will hold the pointer
+     * for the subsequent repeated-start read. */
     mmio_write32(I2C0_BASE + I2C_SA, slave_addr);
     mmio_write32(I2C0_BASE + I2C_CNT, 1);
 
@@ -351,8 +346,7 @@ int i2c_read_reg(uint8_t slave_addr, uint8_t reg, uint8_t *val)
     }
     mmio_write32(I2C0_BASE + I2C_IRQSTATUS, I2C_STAT_ARDY);
 
-    /* === Phase 2: Read data (repeated start + stop) === */
-
+    /* Repeated start in receiver mode — read the byte. */
     i2c_clear_status();
     mmio_write32(I2C0_BASE + I2C_CNT, 1);
 
@@ -379,12 +373,15 @@ int i2c_read_reg(uint8_t slave_addr, uint8_t reg, uint8_t *val)
     return 0;
 }
 
-/* ============================================================
- * Read Block
- * ============================================================
+/*
+ * i2c_read_block - Read multiple bytes from an I2C device
+ * @slave_addr: The 7-bit I2C address of the target device
+ * @reg: The starting register address
+ * @buf: Pointer to the buffer to store the read bytes
+ * @len: Number of bytes to read
  *
- * Same as read_reg but reads multiple bytes in phase 2.
- * Used for EDID reading (128/256 bytes).
+ * Similar to i2c_read_reg, but continues reading multiple bytes in phase 2.
+ * Often used for retrieving large data blocks like EDID structures.
  */
 
 int i2c_read_block(uint8_t slave_addr, uint8_t reg, uint8_t *buf, int len)
@@ -403,8 +400,6 @@ int i2c_read_block(uint8_t slave_addr, uint8_t reg, uint8_t *buf, int len)
     }
 
     i2c_clear_status();
-
-    /* === Phase 1: Write register address === */
 
     mmio_write32(I2C0_BASE + I2C_SA, slave_addr);
     mmio_write32(I2C0_BASE + I2C_CNT, 1);
@@ -426,8 +421,7 @@ int i2c_read_block(uint8_t slave_addr, uint8_t reg, uint8_t *buf, int len)
     }
     mmio_write32(I2C0_BASE + I2C_IRQSTATUS, I2C_STAT_ARDY);
 
-    /* === Phase 2: Read len bytes === */
-
+    /* Repeated start in receiver mode — read len bytes sequentially. */
     i2c_clear_status();
     mmio_write32(I2C0_BASE + I2C_CNT, len);
     mmio_write32(I2C0_BASE + I2C_CON,
@@ -453,14 +447,13 @@ int i2c_read_block(uint8_t slave_addr, uint8_t reg, uint8_t *buf, int len)
     return 0;
 }
 
-/* ============================================================
- * Bus Scan (Diagnostic)
- * ============================================================
+/*
+ * i2c_scan - Probe the bus to detect connected devices
  *
- * Probes addresses 0x08-0x77. For each address, attempts a
- * 1-byte write and checks for ACK vs NACK.
- * Prints which addresses respond — helps confirm whether
- * TDA19988 (0x34/0x70) is on this I2C bus.
+ * Iterates through standard 7-bit I2C addresses (0x08 to 0x77). For each
+ * address, attempts a 1-byte write and monitors for an ACK or NACK response.
+ * This is primarily used as a diagnostic tool to verify hardware connections
+ * (e.g., verifying the presence of the TDA19988 HDMI transmitter).
  */
 void i2c_scan(void)
 {
@@ -510,20 +503,15 @@ void i2c_scan(void)
         pr_info("[I2C] Bus scan complete: %d device(s)\n", found);
 }
 
-/* ============================================================
- * i2c_adapter wiring — exposes the AM335x I2C0 controller as a
- * generic Linux-style bus. master_xfer maps i2c_msg sequences
- * onto the existing register-style helpers above (i2c_read_reg /
- * i2c_write_reg / i2c_read_block) — covering the two patterns
- * client drivers actually use today:
+/*
+ * I2C Adapter Wiring
  *
- *   1) single write msg, len = 1+N: byte 0 = reg addr, then N
- *      values starting at that register
- *   2) write reg-pointer (len = 1) followed by read msg (len = N):
- *      multi-byte read starting at byte 0 of the read msg
- *
- * Other patterns return -1 — not a generic xfer engine yet.
- * ============================================================ */
+ * Integrates the AM335x I2C0 controller with the generic I2C subsystem.
+ * The master_xfer function maps standard i2c_msg sequences onto the
+ * underlying hardware-specific helpers. Currently supports:
+ * 1. Single write msg (register address + data payload)
+ * 2. Two-msg read sequence (write register pointer, then read data)
+ */
 
 #include "vinix/i2c.h"
 

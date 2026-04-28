@@ -1,4 +1,10 @@
-/* Kernel Entry Point */
+/*
+ * init/main.c — kernel entry point
+ *
+ * Called from entry.S after MMU and stack setup.  Orchestrates
+ * hardware bring-up, subsystem initialization, and scheduler start.
+ * This function never returns.
+ */
 
 #include "uart.h"
 #include "scheduler.h"
@@ -34,25 +40,39 @@
 
 extern void sync_selftest(void);
 
-/* User Space Payload (Defined in payload.S) */
+/*
+ * Embedded User Payload
+ *
+ * The initial shell application is linked directly into the kernel image
+ * to avoid requiring a working filesystem on early boot.
+ */
 extern uint8_t _shell_payload_start;
 extern uint8_t _shell_payload_end;
 
-
-/* User App Memory Definitions */
+/* Initial User Process State */
 static struct task_struct shell_task;
 
-/* We use the end of the 1MB User Space (0x40000000 -> 0x40100000)
- * as the stack base for the User Task. Let's reserve the top 4KB. */
+/*
+ * We allocate the user stack at the top of the 1MB User Space memory
+ * region (0x40000000 -> 0x40100000). The stack grows downwards.
+ */
 #define USER_STACK_BASE (USER_SPACE_VA + (USER_SPACE_MB * 1024 * 1024))
 #define USER_STACK_SIZE 4096
 
 
-/* Kernel Main */
+/*
+ * kernel_main - The main boot orchestration function
+ *
+ * This function must never return. It transitions the system from
+ * basic hardware initialization into a fully multitasking environment.
+ */
 void kernel_main(void)
 {
-    /* core_initcall — board file registers platform bus + devices.
-     * arch_initcall — early HW (uart for log output, watchdog disable). */
+    /*
+     * Execute early initialization calls:
+     * Level 1: Board file registers the platform bus and static devices.
+     * Level 3: Early hardware like UART for log output and Watchdog disable.
+     */
     do_initcalls(1);
     do_initcalls(3);
 
@@ -61,9 +81,12 @@ void kernel_main(void)
     pr_info(" VinixOS: Interactive Shell\n");
     pr_info("========================================\n\n");
 
-    /* 1.5 MMU Phase B — remove identity map, update VBAR to high VA.
-     * MMU was already enabled by entry.S (Phase A trampoline).
-     * We are now running at VA 0xC0xxxxxx. */
+    /*
+     * Finalize MMU initialization by removing the identity mapping that
+     * was used during the boot process. Also, update the Vector Base
+     * Address Register (VBAR) to point to our high virtual address space
+     * exception vectors. We are now running exclusively at VA 0xC0xxxxxx.
+     */
     mmu_init();
 
     page_alloc_init();
@@ -77,11 +100,16 @@ void kernel_main(void)
 
     sync_selftest();
 
-    /* Graphics subsystem: pixel clock must be running before TDA can output TMDS.
-     * Unlike QNX (where U-Boot already started LCDC), we're bare-metal —
-     * LCDC raster must start first to provide pixel clock on LCD_PCLK pin.
+    /*
+     * Initialize the graphics subsystem early to show the boot screen.
+     * The LCDC hardware must start generating the pixel clock before the
+     * TDA19988 HDMI transmitter is configured.
      *
-     * Order: I2C → LCDC (config + raster start) → TDA (full init with pixel clock) */
+     * Bring-up sequence:
+     * 1. Initialize I2C (required for TDA config)
+     * 2. Configure LCDC and start the raster to provide the pixel clock
+     * 3. Initialize the TDA19988 HDMI chip
+     */
     i2c_init();
     i2c_register_adapter();
     i2c_scan();
@@ -92,17 +120,28 @@ void kernel_main(void)
     lcdc_register_fb();         /* fb_info -> fbdev so fb_init reads via subsystem */
     fb_init();
 
-    /* subsys_initcall — interrupt controller before timers/MMC. */
+    /*
+     * Subsystem Init: Initialize the interrupt controller before
+     * any timers or MMC storage devices are brought up.
+     */
     do_initcalls(4);
     irq_init();
     uart_enable_rx_interrupt();
 
-    /* 1.6 Initialize VFS and mount FAT32 rootfs from SD card */
+    /*
+     * Virtual File System Bring-up
+     *
+     * We initialize the block cache and VFS, then attempt to mount the
+     * primary FAT32 partition from the SD card as the root filesystem.
+     */
     pr_info("[BOOT] Initializing Virtual File System...\n");
     bcache_init();
     vfs_init();
 
-    /* fs_initcall — host probes via mmc-core, registers gendisk "mmc0". */
+    /*
+     * Execute filesystem initcalls. The MMC host probes via mmc-core
+     * and registers the gendisk "mmc0" which is required for FAT32.
+     */
     do_initcalls(5);
     if (!get_gendisk("mmc0")) {
         pr_err("[BOOT] ERROR: MMC driver probe failed\n");
@@ -135,7 +174,12 @@ void kernel_main(void)
         while (1);
     }
 
-    /* 1.7 Load User Payload */
+    /*
+     * Load the User-Space Payload
+     *
+     * Copies the embedded shell executable from kernel memory into
+     * the designated 1MB user-space region.
+     */
     uint32_t payload_size = (uint32_t)&_shell_payload_end - (uint32_t)&_shell_payload_start;
     pr_info("[BOOT] Loading User App Payload to 0x%x (Size: %d bytes)\n", USER_SPACE_VA, payload_size);
 
@@ -145,7 +189,12 @@ void kernel_main(void)
         dst[i] = src[i];
     pr_info("[BOOT] Payload successfully copied to User Space.\n");
 
-    /* 2. Schedule Initialization */
+    /*
+     * Initialize the Multitasking Scheduler
+     *
+     * The scheduler takes over CPU execution. We register the idle task
+     * and the initial user shell task.
+     */
     scheduler_init();
 
     struct task_struct *idle_ptr = get_idle_task();
@@ -164,18 +213,24 @@ void kernel_main(void)
 
     pr_info("[BOOT] UART init complete. Starting HDMI boot screen...\n");
 
-    /* 3. Boot screen on HDMI — uses timer_early_init() for accurate delay.
-     *    MUST run BEFORE timer_init() which reconfigures timer to 10ms auto-reload.
-     *    delay_ms() needs free-running counter, not auto-reload. */
+    /*
+     * Display the HDMI Boot Screen.
+     * We use a temporary free-running timer for accurate delays during
+     * rendering. This must run before the final scheduler timer is set up.
+     */
     timer_early_init();
     boot_screen_run();
 
-    /* 4. Now reconfigure timer for scheduler — runs all device_initcall(s).
-     * Currently only omap_dmtimer; remaining drivers move here as their
-     * subsystem cores ship. */
+    /*
+     * Device Init: Now reconfigure the timer for the scheduler and run
+     * all remaining device drivers.
+     */
     do_initcalls(6);
 
-    /* Final gate: integration selftest (bcache, procfs). Panics on fail. */
+    /*
+     * Run the final system self-tests to ensure critical structures
+     * like the block cache and procfs are fully functional.
+     */
     selftest_run_all();
 
     pr_info("[BOOT] Boot complete. Starting scheduler...\n");
@@ -183,7 +238,10 @@ void kernel_main(void)
     irq_enable();
     scheduler_start();
 
-    /* Should never reach here */
+    /*
+     * The kernel main thread now becomes the idle loop.
+     * The scheduler will never return from this point.
+     */
     while (1)
     {
         pr_emerg("PANIC: Scheduler returned!\n");

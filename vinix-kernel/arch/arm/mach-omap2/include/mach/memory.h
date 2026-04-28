@@ -1,8 +1,4 @@
-/* ============================================================
- * platform/memory.h
- * ------------------------------------------------------------
- * AM3358 + BeagleBone Black physical memory constants.
- * ============================================================ */
+/* arch/arm/mach-omap2/include/mach/memory.h — AM3358 + BBB physical memory constants. */
 
 #ifndef PLATFORM_MEMORY_H
 #define PLATFORM_MEMORY_H

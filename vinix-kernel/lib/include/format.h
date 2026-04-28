@@ -1,7 +1,8 @@
-/* ============================================================
- * format.h — kernel-side snprintf for /proc generators.
- * Shape mirrors vinixlibc subset; no floating point.
- * ============================================================ */
+/*
+ * lib/include/format.h — kernel snprintf for procfs generators
+ *
+ * ksnprintf/kvsnprintf: no floating point, no stream/fd sink.
+ */
 
 #ifndef KERNEL_FORMAT_H
 #define KERNEL_FORMAT_H

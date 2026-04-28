@@ -1,12 +1,11 @@
-/* ============================================================
- * fat32.c
- * ------------------------------------------------------------
- * FAT32 filesystem driver — 8.3 names, root dir only.
- * ============================================================ */
-
-/* INVARIANT: all sector I/O goes through the buffer cache.
- * sector_buf is scratch for BPB + initial root-dir scan only,
- * before any concurrent reader can exist. */
+/*
+ * fs/fat32.c — FAT32 filesystem driver
+ *
+ * Supports 8.3 filenames, subdirectory traversal, and full read/write
+ * including file creation, truncation, deletion, and rename.
+ * All sector I/O goes through the buffer cache (bread/brelse);
+ * sector_buf is used only for BPB parsing before the cache is warm.
+ */
 
 #include "types.h"
 #include "fat32.h"
@@ -373,9 +372,7 @@ int fat32_init(uint32_t partition_lba)
     return E_OK;
 }
 
-/* ============================================================
- * VFS Operations — Read Path
- * ============================================================ */
+/* VFS Operations — Read Path */
 
 struct fat32_resolve {
     uint32_t cluster;
@@ -673,9 +670,7 @@ static int fat32_listdir(const char *path, void *entries, uint32_t max)
     return (int)count;
 }
 
-/* ============================================================
- * Write Path
- * ============================================================ */
+/* Write Path */
 
 /* Writes must land in ALL num_fats copies, otherwise host OSes
  * detect mismatch on next mount and "repair" unpredictably. */

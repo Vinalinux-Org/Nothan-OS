@@ -1,7 +1,8 @@
 /*
- * AM335x UART0 driver.
+ * drivers/tty/serial/omap_serial.c — AM335x UART0 driver
  *
- * AM335x TRM Ch.19.
+ * Implements TX (polling) and RX (interrupt-driven).  Received bytes
+ * are pushed into the serial_core ring buffer via uart_serial_rx_push().
  */
 
 #include "types.h"
@@ -94,44 +95,27 @@ void uart_init(void)
 
 void uart_enable_rx_interrupt(void)
 {
-    /* Enable UART0 module clock (CRITICAL!) */
+    /* UART0 module clock must be enabled before any register access. */
     mmio_write32(CM_PER_UART0_CLKCTRL, 0x2);
-    
-    /* Wait for clock to be functional */
     while ((mmio_read32(CM_PER_UART0_CLKCTRL) & 0x30000) != 0);
-    
-    /* Save current line control register */
+
     uint32_t lcr_save = mmio_read32(UART0_BASE + UART_LCR);
-    
-    /* Ensure operational mode */
     mmio_write32(UART0_BASE + UART_LCR, lcr_save & 0x7F);
-    
-    /* Clear interrupt enable register */
     mmio_write32(UART0_BASE + UART_IER, 0x00);
-    
-    /* Configure FIFO - simple legacy mode
-     * Enable FIFO + clear RX/TX + 8-char trigger */
+
+    /* Enable FIFO, clear RX/TX FIFOs, set 8-char trigger level. */
     mmio_write32(UART0_BASE + UART_FCR, 0x07);
-    
-    /* Small delay for FIFO configuration to take effect */
     for (volatile int i = 0; i < 1000; i++);
-    
-    /* Configure supplementary control register for 1-char granularity */
+
+    /* SCR 0xC0: 1-char granularity for RX DMA trigger. */
     mmio_write32(UART0_BASE + UART_SCR, 0xC0);
-    
-    /* Restore line control register */
     mmio_write32(UART0_BASE + UART_LCR, lcr_save);
-    
-    /* Enable RX interrupt */
     mmio_write32(UART0_BASE + UART_IER, IER_RHR_IT);
-    
-    /* Register IRQ handler */
+
     int ret = request_irq(PLATFORM_IRQ_UART0, uart_rx_irq_handler, 0, "omap-uart", NULL);
-    if (ret != 0) {
-        return;  /* Registration failed */
-    }
-    
-    /* Enable IRQ in interrupt controller */
+    if (ret != 0)
+        return;
+
     enable_irq(PLATFORM_IRQ_UART0);
 }
 

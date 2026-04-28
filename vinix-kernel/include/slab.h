@@ -1,8 +1,6 @@
-/* ============================================================
- * slab.h
- * ------------------------------------------------------------
- * Fixed size-class slab allocator + generic kmalloc/kfree.
- * ============================================================ */
+/*
+ * include/slab.h — Slab allocator interface
+ */
 
 #ifndef SLAB_H
 #define SLAB_H

@@ -1,13 +1,10 @@
-/* ============================================================
- * vinix/printk.h
- * ------------------------------------------------------------
- * printk() — kernel log entry point. KERN_* loglevel prefix
- * strings are empty today; a future printk dispatcher can parse
- * the leading "<N>" to filter by level.
+/*
+ * include/vinix/printk.h — kernel log macros
  *
- * Implementation lives in kernel/printk/printk.c. Drivers should
- * prefer pr_info / pr_err / pr_warn / pr_debug to plain printk.
- * ============================================================ */
+ * KERN_* loglevel prefixes are empty stubs; a future printk
+ * dispatcher can parse the leading "<N>" byte to filter by level.
+ * Drivers should prefer pr_info/pr_err/pr_warn over plain printk.
+ */
 
 #ifndef VINIX_PRINTK_H
 #define VINIX_PRINTK_H

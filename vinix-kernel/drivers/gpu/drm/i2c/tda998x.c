@@ -1,22 +1,23 @@
-/* ============================================================
- * tda19988.c
- * ------------------------------------------------------------
- * NXP TDA19988 HDMI transmitter driver — I2C0 control.
- * ============================================================ */
+/*
+ * drivers/gpu/drm/i2c/tda998x.c — NXP TDA19988 HDMI transmitter driver
+ *
+ * Controls the TDA19988 over I2C0 to configure video output at
+ * 800x600@60Hz (VESA DMT).  Handles PLL setup, AVI InfoFrame,
+ * and HDMI vs DVI mode selection.
+ */
 
 #include "tda19988.h"
 #include "i2c.h"
 #include "uart.h"
 
-/* ============================================================
+/*
  * 800x600@60Hz timing (VESA DMT)
  *
  * H: active=800, FP=40, SW=128, BP=88, total=1056
  * V: active=600, FP=1,  SW=4,   BP=23, total=628
  * Pixel clock: 40 MHz
  * Sync: PHSYNC, PVSYNC (both positive)
- * Source: QNX drm_800x600 struct (hdmi.c line 157-172)
- * ============================================================ */
+ */
 
 #define TSVGA_HTOTAL        1056
 #define TSVGA_VTOTAL        628
@@ -28,9 +29,9 @@
 #define TSVGA_VFP           1
 #define TSVGA_VSW           4
 #define TSVGA_VBP           23
-#define TSVGA_HSKEW         128     /* QNX: 0x80 */
+#define TSVGA_HSKEW         128
 
-/* TDA timing values — QNX formula (hdmi.c lines 469-505) */
+/* TDA timing register values derived from the VESA DMT parameters above. */
 #define TDA_REF_PIX         (3 + TSVGA_HFP + TSVGA_HSKEW)              /* 171 */
 #define TDA_REF_LINE        (1 + TSVGA_VFP)                             /* 2   */
 #define TDA_DE_PIX_S        (TSVGA_HTOTAL - TSVGA_HACTIVE)              /* 256 */
@@ -42,14 +43,14 @@
 #define TDA_VWIN1_LINE_S    (TSVGA_VTOTAL - TSVGA_VACTIVE - 1)          /* 27  */
 #define TDA_VWIN1_LINE_E    (TDA_VWIN1_LINE_S + TSVGA_VACTIVE)          /* 627 */
 
-/* ============================================================
+/*
  * Internal state
- * ============================================================ */
+ */
 static uint8_t g_current_page = 0xFF;   /* invalid sentinel */
 
-/* ============================================================
+/*
  * Low-level I2C primitives — go through generic i2c-core.
- * ============================================================ */
+ */
 
 #include "vinix/i2c.h"
 
@@ -141,10 +142,9 @@ static void tda_write16(uint16_t reg_msb, uint16_t val16)
     tda_write(reg_msb + 1, (uint8_t)(val16 & 0xFF));
 }
 
-/* ============================================================
- * Probe: CEC enable, soft reset, PLL, version
- * Matches U-Boot tda19988_probe() order exactly.
- * ============================================================ */
+/*
+ * tda_probe - initialize CEC, soft reset, PLL, DDC
+ */
 
 static void tda_probe(void)
 {
@@ -184,10 +184,10 @@ static void tda_probe(void)
                   FRO_IM_CLK_CTRL_GHOST_DIS | FRO_IM_CLK_CTRL_IMCLK_SEL);
 }
 
-/* ============================================================
+/*
  * AVI InfoFrame — mandatory in HDMI mode
  * Without this, TV will blank after detecting the source.
- * ============================================================ */
+ */
 
 static void tda_write_avi_infoframe(void)
 {
@@ -225,22 +225,18 @@ static void tda_write_avi_infoframe(void)
     tda_set(REG_DIP_IF_FLAGS, DIP_IF_FLAGS_IF1);
 }
 
-/* ============================================================
+/*
  * Enable: video path configuration + output enable
- * ============================================================ */
+ */
 
 static void tda_enable_video(void)
 {
-    /* QNX init order:
-     * 1. encoder_dpms(): enable ports + VIP mux
-     * 2. encoder_mode_set(): mute audio, config timing, TBG, enable HDMI */
-
     /* Enable ports + VIP mux */
-    tda_write(REG_ENA_AP, 0x03);    /* Audio ports (QNX enables these) */
+    tda_write(REG_ENA_AP, 0x03);    /* enable audio ports */
     tda_write(REG_ENA_VP_0, 0xFF);
     tda_write(REG_ENA_VP_1, 0xFF);
     tda_write(REG_ENA_VP_2, 0xFF);
-    /* VIP muxing for 16-bit RGB565 (QNX values) */
+    /* VIP muxing for 16-bit RGB565 */
     tda_write(REG_VIP_CNTRL_0, 0x23);  /* SWAP_A=2, SWAP_B=3 */
     tda_write(REG_VIP_CNTRL_1, 0x01);  /* SWAP_C=0, SWAP_D=1 */
     tda_write(REG_VIP_CNTRL_2, 0x45);  /* SWAP_E=4, SWAP_F=5 */
@@ -261,7 +257,7 @@ static void tda_enable_video(void)
     /* QNX does NOT write FEAT_POWERDOWN — leave at default */
 
     tda_write(REG_VIP_CNTRL_5, VIP_CNTRL_5_SP_CNT(0));
-    /* No test pattern — pass through LCDC pixel data (QNX default) */
+    /* No test pattern — pass through LCDC pixel data */
     tda_write(REG_VIP_CNTRL_4, VIP_CNTRL_4_BLANKIT(0) | VIP_CNTRL_4_BLC(0));
 
     /* PLL + serializer */
@@ -274,18 +270,17 @@ static void tda_enable_video(void)
     tda_write(REG_SEL_CLK, SEL_CLK_SEL_VRF_CLK(0) |
               SEL_CLK_SEL_CLK1 | SEL_CLK_ENA_SC_CLK);
     /* NOSC = 148500/pixel_clock_kHz - 1, clamped to 3.
-     * 800x600@40MHz: 148500/40000=3, -1=2 */
+     * 800x600@40MHz: 148500/40000 = 3, then -1 = 2 */
     tda_write(REG_PLL_SERIAL_2, PLL_SERIAL_2_SRL_NOSC(2) |
               PLL_SERIAL_2_SRL_PR(0));
 
-    /* Color matrix: bypass only (QNX: reg_set MAT_BP, no MAT_SC change) */
+    /* Color matrix: bypass only */
     tda_set(REG_MAT_CONTRL, MAT_CONTRL_MAT_BP);
 
     /* Analog output — critical for TMDS signal generation */
     tda_write(REG_ANA_GENERAL, 0x09);
 
-    /* Timing registers — QNX formula from tda998x_encoder_mode_set()
-     * using QNX drm_display_mode struct. See defines at top of file. */
+    /* Timing registers — computed from VESA DMT 800x600@60Hz parameters. */
 
     tda_write(REG_VIDFORMAT, 0x00);
 
@@ -321,7 +316,7 @@ static void tda_enable_video(void)
     tda_write16(REG_DE_START_MSB, TDA_DE_PIX_S);                 /* 370  */
     tda_write16(REG_DE_STOP_MSB,  TDA_DE_PIX_E);                 /* 1650 */
 
-    /* TDA19988: enable active space fill (QNX uses 0x01, we used 0x00) */
+    /* TDA19988: enable active space fill */
     tda_write(REG_ENABLE_SPACE, 0x01);
 
     tda_clear(REG_TBG_CNTRL_0, TBG_CNTRL_0_SYNC_MTHD);
@@ -338,7 +333,7 @@ static void tda_enable_video(void)
     tda_clear(REG_TBG_CNTRL_1, TBG_CNTRL_1_DWIN_DIS);
     tda_write(REG_ENC_CNTRL, ENC_CNTRL_CTL_CODE(1));
 
-    /* MUST BE LAST register set (QNX line 607) */
+    /* MUST BE LAST: latch all timing changes */
     tda_clear(REG_TBG_CNTRL_0, TBG_CNTRL_0_SYNC_ONCE);
 
     /* AVI InfoFrame — write AFTER video path is fully enabled.
@@ -348,9 +343,9 @@ static void tda_enable_video(void)
     /* Video path ready */
 }
 
-/* ============================================================
+/*
  * Public API
- * ============================================================ */
+ */
 
 void tda19988_init(void)
 {

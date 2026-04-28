@@ -1,8 +1,6 @@
-/* ============================================================
- * wait_queue.c
- * ------------------------------------------------------------
- * Wait queue — pop-one-waiter wake_up, IRQ-disable serialized.
- * ============================================================ */
+/*
+ * kernel/locking/wait_queue.c — wait queue wake-up
+ */
 
 #include "wait_queue.h"
 #include "task.h"

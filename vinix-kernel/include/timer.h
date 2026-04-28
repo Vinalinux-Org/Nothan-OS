@@ -1,17 +1,13 @@
-/* ============================================================
- * timer.h
- * ------------------------------------------------------------
- * AM335x DMTimer2 driver interface.
- * ============================================================ */
+/*
+ * include/timer.h — AM335x DMTimer2 driver interface — init/tick/delay functions.
+ */
 
 #ifndef TIMER_H
 #define TIMER_H
 
 #include "types.h"
 
-/* ============================================================
- * Timer Configuration
- * ============================================================ */
+
 
 /* DMTimer2 base address */
 #define DMTIMER2_BASE       0x48040000
@@ -19,9 +15,7 @@
 /* Timer IRQ number */
 #define TIMER2_IRQ          68
 
-/* ============================================================
- * Timer API
- * ============================================================ */
+
 
 /* Configures Timer2 for periodic IRQ. Caller must enable IRQ in CPSR. */
 void timer_init(void);

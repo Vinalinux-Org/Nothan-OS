@@ -1,9 +1,10 @@
-/* ============================================================
- * devfs.c
- * ------------------------------------------------------------
- * Adapter exposing struct cdev / file_operations through VFS.
- * Builds an ephemeral struct file per call (no inode model yet).
- * ============================================================ */
+/*
+ * fs/devfs.c — device filesystem
+ *
+ * Exposes registered cdevs through the VFS interface.  Builds an
+ * ephemeral struct file per call — no persistent inode model.
+ * Registers /dev/tty (UART-backed) and /dev/null at init time.
+ */
 
 #include "devfs.h"
 #include "vinix/cdev.h"
@@ -13,9 +14,7 @@
 #include "wait_queue.h"
 #include "string.h"
 
-/* ------------------------------------------------------------
- * /dev/null — silently discards writes, returns EOF on read.
- * ------------------------------------------------------------ */
+/* /dev/null — silently discards writes, returns EOF on read. */
 static int null_read(struct file *f, void *buf, uint32_t len)
 {
     (void)f; (void)buf; (void)len;
@@ -33,10 +32,8 @@ static const struct file_operations null_fops = {
     .write = null_write,
 };
 
-/* ------------------------------------------------------------
- * /dev/tty — wraps the UART. Read blocks on uart_rx_wq; write
- * expands \n → \r\n like the legacy sys_write path.
- * ------------------------------------------------------------ */
+/* /dev/tty — wraps the UART RX/TX path.
+ * Read blocks on uart_rx_wq; write expands \n to \r\n. */
 static int tty_read(struct file *f, void *buf, uint32_t len)
 {
     (void)f;
@@ -67,10 +64,8 @@ static const struct file_operations tty_fops = {
     .write = tty_write,
 };
 
-/* ------------------------------------------------------------
- * VFS adapter — dispatches via fops with an ephemeral struct file.
- * file_index identifies the cdev slot in the registry.
- * ------------------------------------------------------------ */
+/* VFS adapter — dispatches via fops with an ephemeral struct file.
+ * file_index identifies the cdev slot in the registry. */
 static int devfs_lookup(const char *name)
 {
     return cdev_find(name);

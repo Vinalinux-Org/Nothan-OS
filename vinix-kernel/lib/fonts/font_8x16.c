@@ -1,10 +1,9 @@
-/* ============================================================
- * font_8x16.c
- * ------------------------------------------------------------
- * 8x16 bitmap font, ASCII 32-126. Each glyph is 16 bytes, one
- * byte per row, MSB = leftmost pixel. Derived from the classic
- * VGA/PC BIOS font.
- * ============================================================ */
+/*
+ * lib/fonts/font_8x16.c — 8×16 bitmap font, ASCII 32–126
+ *
+ * Each glyph is 16 bytes, one byte per row, MSB = leftmost pixel.
+ * Derived from the classic VGA/PC BIOS character ROM.
+ */
 
 #include "types.h"
 

@@ -1,4 +1,15 @@
-/* SVC exception handler — system call dispatcher. */
+/*
+ * arch/arm/kernel/svc_handler.c — system call dispatcher
+ *
+ * Called from exception_entry_svc after the SVC instruction is taken.
+ * The calling convention is: r7 = syscall number, r0–r3 = arguments.
+ * On return, svc_context.r0 is set to the syscall result and the
+ * trampoline (svc_exit_trampoline) copies it back to the user's r0.
+ *
+ * validate_user_pointer() rejects any pointer that does not fall
+ * entirely within the user virtual address range defined by USER_SPACE_VA
+ * and USER_SPACE_MB.
+ */
 
 #include "types.h"
 #include "assert.h"
@@ -16,51 +27,31 @@
 extern uint8_t _shell_payload_start;
 extern uint8_t _shell_payload_end;
 
-
-/* Validation boundaries
- * Used to ensure user pointers are within allowed True User Space regions. */
-
-
-/* Helper: Validate User Pointer
- * Enforces strict memory rules:
- * Pointers must point to the User Space region (0x40000000 -> +1MB).
- * This sandboxes User interactions preventing Kernel corruption. */
 static int validate_user_pointer(const void *ptr, uint32_t len)
 {
     uint32_t start = (uint32_t)ptr;
     uint32_t end = start + len;
 
-    /* Check for overflow */
     if (end < start)
-    {
         return E_PTR;
-    }
 
     uint32_t allowed_start = USER_SPACE_VA;
     uint32_t allowed_end = USER_SPACE_VA + (USER_SPACE_MB * 1024 * 1024);
 
-    /* Check bounds [start, end) within [allowed_start, allowed_end) */
     if (start >= allowed_start && end <= allowed_end)
-    {
         return E_OK;
-    }
 
     return E_PTR;
 }
 
-
-/* Syscall Handlers */
-
-/* sys_write(const void *buf, uint32_t len) */
+/* ABI compatibility: legacy userspace passes write(buf, len) in r0,r1;
+ * compiler runtime passes write(fd, buf, count) in r0,r1,r2. */
 static int32_t sys_write(struct svc_context *ctx)
 {
     const void *buf = NULL;
     uint32_t len = 0;
     int fd = 1;
 
-    /* ABI compatibility:
-     * - Legacy userspace:   write(buf, len)        in r0, r1
-     * - Compiler runtime:   write(fd, buf, count)  in r0, r1, r2 */
     if (validate_user_pointer((const void *)ctx->r0, (uint32_t)ctx->r1) == E_OK)
     {
         buf = (const void *)ctx->r0;
@@ -78,44 +69,31 @@ static int32_t sys_write(struct svc_context *ctx)
         return E_PTR;
     }
 
-    /* Only stdout/stderr are supported for now */
     if (fd != 1 && fd != 2)
-    {
         return E_ARG;
-    }
 
-    /* 2. Logic (Direct Driver Call for now) */
-    /* Only allow reasonable length to prevent DoS */
     if (len > 256)
-    {
         return E_ARG;
-    }
 
-    /* We can safely cast because we validated range */
     const char *str = (const char *)buf;
     for (uint32_t i = 0; i < len; i++)
     {
         if (str[i] == '\n')
-        {
             uart_putc('\r');
-        }
         uart_putc(str[i]);
     }
 
     return (int32_t)len;
 }
 
-/* sys_exit(int status) */
 static int32_t sys_exit(struct svc_context *ctx)
 {
     int32_t status = (int32_t)ctx->r0;
 
     pr_info("[SVC] Task %d exiting with status %d\n", current->id, status);
 
-    /* PID 1 must never leave the scheduler — if init decides to
-     * exit, restart it from the embedded payload so the system
-     * keeps ticking. This is the only hook that survives when
-     * init hits a bug or tries to exit on purpose. */
+    /* PID 1 must never leave the scheduler — restart from embedded payload
+     * so the system keeps ticking even if init bugs out or exits on purpose. */
     if (current && current->pid == 1)
     {
         uint32_t payload_size = (uint32_t)&_shell_payload_end - (uint32_t)&_shell_payload_start;
@@ -134,45 +112,30 @@ static int32_t sys_exit(struct svc_context *ctx)
         return E_OK;
     }
 
-    /* Any other task: proper exit — zombie + wake waiter. */
     do_exit(status);
     return 0;
 }
 
-/* sys_yield() */
 static int32_t sys_yield(struct svc_context *ctx)
 {
-    /*
-     * CRITICAL FIX: Set need_reschedule flag BEFORE calling schedule
-     *
-     * Without this, voluntary yields may be ignored if the flag was already
-     * cleared by a previous context switch. This causes tasks to get stuck
-     * in busy-wait loops instead of properly yielding CPU to other tasks.
-     *
-     * Example failure scenario without this fix:
-     * 1. Shell calls sys_yield() (need_reschedule=false from previous clear)
-     * 2. sys_yield() calls schedule()
-     * 3. schedule() sees need_reschedule=false, returns immediately
-     * 4. Shell stuck in loop, never switches to Idle
-     */
+    /* Set need_reschedule BEFORE schedule() — without this, a voluntary yield
+     * may be silently ignored if the flag was already cleared, leaving the
+     * task spinning in a busy-wait loop instead of giving up the CPU. */
     extern volatile bool need_reschedule;
     need_reschedule = true;
 
-    /* Voluntary Yield */
     schedule();
     return E_OK;
 }
 
-/* sys_read(void *buf, uint32_t len) */
+/* ABI compatibility: legacy userspace passes read(buf, len) in r0,r1;
+ * compiler runtime passes read(fd, buf, count) in r0,r1,r2. */
 static int32_t sys_read(struct svc_context *ctx)
 {
     void *buf = NULL;
     uint32_t len = 0;
     int fd = 0;
 
-    /* ABI compatibility:
-     * - Legacy userspace: read(buf, len)         in r0, r1
-     * - Compiler runtime: read(fd, buf, count)   in r0, r1, r2 */
     if (validate_user_pointer((void *)ctx->r0, (uint32_t)ctx->r1) == E_OK)
     {
         buf = (void *)ctx->r0;
@@ -189,13 +152,9 @@ static int32_t sys_read(struct svc_context *ctx)
         return E_PTR;
     }
 
-    /* Only stdin is supported for now */
     if (fd != 0)
-    {
         return E_ARG;
-    }
 
-    /* 1. Validation */
     int val_result = validate_user_pointer(buf, len);
     if (val_result != E_OK)
     {
@@ -215,30 +174,24 @@ static int32_t sys_read(struct svc_context *ctx)
 
     int c = uart_getc();
     if (c == -1)
-    {
         return 0;
-    }
+
     *c_buf = (char)c;
     return 1;
 }
 
-/* sys_get_tasks(process_info_t *buf, uint32_t max_count) */
 static int32_t sys_get_tasks(struct svc_context *ctx)
 {
     void *buf = (void *)ctx->r0;
     uint32_t max_count = (uint32_t)ctx->r1;
 
-    // Validate buffer (size = max_count * sizeof(process_info_t))
     uint32_t size = max_count * sizeof(process_info_t);
     if (validate_user_pointer(buf, size) != E_OK)
-    {
         return E_PTR;
-    }
 
     return scheduler_get_tasks(buf, max_count);
 }
 
-/* sys_get_meminfo(mem_info_t *buf) */
 extern uint8_t _text_start[];
 extern uint8_t _text_end[];
 extern uint8_t _data_start[];
@@ -254,9 +207,7 @@ static int32_t sys_get_meminfo(struct svc_context *ctx)
     mem_info_t *buf = (mem_info_t *)ctx->r0;
 
     if (validate_user_pointer(buf, sizeof(mem_info_t)) != E_OK)
-    {
         return E_PTR;
-    }
 
     buf->total = PLATFORM_DDR_SIZE_MB * 1024 * 1024;
 
@@ -271,36 +222,26 @@ static int32_t sys_get_meminfo(struct svc_context *ctx)
     return E_OK;
 }
 
-/* sys_open(const char *path, int flags) */
 static int32_t sys_open(struct svc_context *ctx)
 {
     const char *path = (const char *)ctx->r0;
     int flags = (int)ctx->r1;
 
-    /* Validate path pointer (estimate max path length) */
     if (validate_user_pointer(path, MAX_PATH) != E_OK)
-    {
         return E_PTR;
-    }
 
-    /* Call VFS layer */
     return vfs_open(path, flags);
 }
 
-/* sys_read_file(int fd, void *buf, uint32_t len) */
 static int32_t sys_read_file(struct svc_context *ctx)
 {
     int fd = (int)ctx->r0;
     void *buf = (void *)ctx->r1;
     uint32_t len = (uint32_t)ctx->r2;
 
-    /* CRITICAL: Validate buffer + length range as requested */
     if (validate_user_pointer(buf, len) != E_OK)
-    {
         return E_PTR;
-    }
 
-    /* Call VFS layer */
     return vfs_read(fd, buf, len);
 }
 
@@ -311,76 +252,53 @@ static int32_t sys_write_file(struct svc_context *ctx)
     uint32_t len = (uint32_t)ctx->r2;
 
     if (validate_user_pointer(buf, len) != E_OK)
-    {
         return E_PTR;
-    }
 
     return vfs_write(fd, buf, len);
 }
 
-/* sys_close(int fd) */
 static int32_t sys_close(struct svc_context *ctx)
 {
     int fd = (int)ctx->r0;
-
-    /* Call VFS layer */
     return vfs_close(fd);
 }
 
-/* sys_listdir(const char *path, file_info_t *entries, uint32_t max_entries) */
 static int32_t sys_listdir(struct svc_context *ctx)
 {
     const char *path = (const char *)ctx->r0;
     file_info_t *entries = (file_info_t *)ctx->r1;
     uint32_t max_entries = (uint32_t)ctx->r2;
 
-    /* Validate path pointer */
     if (validate_user_pointer(path, MAX_PATH) != E_OK)
-    {
         return E_PTR;
-    }
 
-    /* Validate entries buffer */
     uint32_t entries_size = max_entries * sizeof(file_info_t);
     if (validate_user_pointer(entries, entries_size) != E_OK)
-    {
         return E_PTR;
-    }
 
-    /* Call VFS layer */
     return vfs_listdir(path, entries, max_entries);
 }
 
-/* sys_exec(const char *path) */
 static int32_t sys_exec(struct svc_context *ctx)
 {
     const char *path = (const char *)ctx->r0;
-    char **argv = (char **)ctx->r1;  /* NULL-terminated, or NULL */
+    char **argv = (char **)ctx->r1;
 
-    if (validate_user_pointer(path, MAX_PATH) != E_OK) {
+    if (validate_user_pointer(path, MAX_PATH) != E_OK)
         return E_PTR;
-    }
-    /* argv itself is validated inside do_exec (it may be NULL). */
 
+    /* argv is validated inside do_exec (it may be NULL). */
     int rc = do_exec(path, ctx, argv);
     if (rc < 0) return rc;
 
-    /* Success: do_exec has set ctx->r0 = argc and ctx->lr to the new
-     * entry point. Return argc so the dispatcher's final
-     * "ctx->r0 = result" is a no-op instead of overwriting argc. */
+    /* do_exec sets ctx->r0 = argc and ctx->lr to the new entry point;
+     * return argc so the dispatcher's ctx->r0 = result is a no-op. */
     return (int32_t)ctx->r0;
 }
 
-
-/* SVC Handler (Dispatcher) */
+/* ABI: r7 = syscall number, r0–r3 = arguments, return value → r0. */
 void svc_handler(struct svc_context *ctx)
 {
-    /*
-     * ABI:
-     * R7 = Syscall Number
-     * R0-R3 = Arguments
-     * Return value -> R0
-     */
     uint32_t syscall_num = ctx->r7;
     int32_t result = E_INVAL;
 
@@ -389,53 +307,18 @@ void svc_handler(struct svc_context *ctx)
 
     switch (syscall_num)
     {
-    case SYS_WRITE:
-        result = sys_write(ctx);
-        break;
-
-    case SYS_EXIT:
-        result = sys_exit(ctx);
-        break;
-
-    case SYS_YIELD:
-        result = sys_yield(ctx);
-        break;
-
-    case SYS_READ:
-        result = sys_read(ctx);
-        break;
-
-    case SYS_GET_TASKS:
-        result = sys_get_tasks(ctx);
-        break;
-
-    case SYS_GET_MEMINFO:
-        result = sys_get_meminfo(ctx);
-        break;
-
-    case SYS_OPEN:
-        result = sys_open(ctx);
-        break;
-
-    case SYS_READ_FILE:
-        result = sys_read_file(ctx);
-        break;
-
-    case SYS_CLOSE:
-        result = sys_close(ctx);
-        break;
-
-    case SYS_LISTDIR:
-        result = sys_listdir(ctx);
-        break;
-
-    case SYS_EXEC:
-        result = sys_exec(ctx);
-        break;
-
-    case SYS_WRITE_FILE:
-        result = sys_write_file(ctx);
-        break;
+    case SYS_WRITE:      result = sys_write(ctx);      break;
+    case SYS_EXIT:       result = sys_exit(ctx);       break;
+    case SYS_YIELD:      result = sys_yield(ctx);      break;
+    case SYS_READ:       result = sys_read(ctx);       break;
+    case SYS_GET_TASKS:  result = sys_get_tasks(ctx);  break;
+    case SYS_GET_MEMINFO:result = sys_get_meminfo(ctx);break;
+    case SYS_OPEN:       result = sys_open(ctx);       break;
+    case SYS_READ_FILE:  result = sys_read_file(ctx);  break;
+    case SYS_CLOSE:      result = sys_close(ctx);      break;
+    case SYS_LISTDIR:    result = sys_listdir(ctx);    break;
+    case SYS_EXEC:       result = sys_exec(ctx);       break;
+    case SYS_WRITE_FILE: result = sys_write_file(ctx); break;
 
     case SYS_GETPID: {
         struct task_struct *t = current;
@@ -453,10 +336,9 @@ void svc_handler(struct svc_context *ctx)
         result = do_fork(ctx);
         break;
 
-    case SYS_DUP: {
+    case SYS_DUP:
         result = vfs_dup((int)ctx->r0);
         break;
-    }
 
     case SYS_UNLINK: {
         const char *path = (const char *)ctx->r0;
@@ -478,24 +360,20 @@ void svc_handler(struct svc_context *ctx)
         void *buf = (void *)ctx->r0;
         uint32_t max_count = (uint32_t)ctx->r1;
         uint32_t size = max_count * sizeof(dev_info_t);
-        if (validate_user_pointer(buf, size) != E_OK) {
-            result = E_PTR;
-            break;
-        }
+        if (validate_user_pointer(buf, size) != E_OK) { result = E_PTR; break; }
         result = platform_list_devices(buf, max_count);
         break;
     }
 
-    case SYS_DUP2: {
+    case SYS_DUP2:
         result = vfs_dup2((int)ctx->r0, (int)ctx->r1);
         break;
-    }
 
     case SYS_KILL: {
         int pid = (int)ctx->r0;
         int sig = (int)ctx->r1;
         /* MVP: any kill delivers SIGKILL. Exit status = 128 + sig for POSIX feel. */
-        int exit_code = (sig > 0) ? (128 + sig) : 137;  /* 137 = 128 + 9 */
+        int exit_code = (sig > 0) ? (128 + sig) : 137;
         result = do_kill_by_pid(pid, exit_code);
         break;
     }
@@ -507,9 +385,7 @@ void svc_handler(struct svc_context *ctx)
         {
             int *user_status = (int *)ctx->r0;
             if (validate_user_pointer(user_status, sizeof(int)) == E_OK)
-            {
                 *user_status = st;
-            }
         }
         result = pid;
         break;
@@ -521,6 +397,5 @@ void svc_handler(struct svc_context *ctx)
         break;
     }
 
-    /* Write return value back to User Context R0 */
     ctx->r0 = result;
 }

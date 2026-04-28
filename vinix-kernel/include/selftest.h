@@ -1,6 +1,6 @@
-/* ============================================================
- * selftest.h — boot-time test harness.
- * ============================================================ */
+/*
+ * include/selftest.h — Kernel self-test runner interface.
+ */
 
 #ifndef SELFTEST_H
 #define SELFTEST_H

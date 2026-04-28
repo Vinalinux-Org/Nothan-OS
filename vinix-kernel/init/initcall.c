@@ -1,4 +1,9 @@
-/* Iterate .initcall<N>.init sections, invoke registered fns. */
+/*
+ * init/initcall.c — initcall level dispatcher
+ *
+ * Iterates the .initcall<N>.init linker sections and invokes each
+ * registered function pointer for the requested level.
+ */
 
 #include "vinix/init.h"
 #include "uart.h"

@@ -1,15 +1,11 @@
-/* ============================================================
- * mmc/core.c
- * ------------------------------------------------------------
- * MMC subsystem registry — host controller drivers (omap_hsmmc,
- * sdhci, ...) call mmc_alloc_host to get an mmc_host slot, fill
- * the ops vtable, then call mmc_add_host to expose it.
+/*
+ * drivers/mmc/core/core.c — MMC host registry
  *
- * Card identification (CMD0/CMD8/ACMD41/CMD2/CMD3/CMD9/CMD7)
- * still lives in the host driver today; mmc-core's job here is
- * just to own the registry. Future work moves the SD-spec
- * sequence into mmc_card_init() that drives host->ops->request.
- * ============================================================ */
+ * Host controller drivers call mmc_alloc_host() to obtain a slot,
+ * fill the ops vtable, then call mmc_add_host() to expose it.
+ * Card identification (CMD0/CMD8/ACMD41/...) currently lives in
+ * the host driver; this file owns only the host registry.
+ */
 
 #include "vinix/mmc/host.h"
 #include "vinix/printk.h"

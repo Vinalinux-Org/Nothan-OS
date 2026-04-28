@@ -1,17 +1,15 @@
-/* ============================================================
- * mmu.c
- * ------------------------------------------------------------
- * MMU init — 3G/1G split, L1 1MB sections, no L2 tables.
- * ============================================================ */
+/*
+ * arch/arm/mm/mmu.c — ARMv7-A MMU initialization
+ *
+ * Manages the kernel's first-level page table (L1, 4096 section entries).
+ * Provides helpers to build the boot page table at physical address,
+ * activate and tear down the identity map, and switch TTBR0 per task.
+ */
 
 #include "mmu.h"
 #include "page_alloc.h"
 #include "uart.h"
 #include "types.h"
-
-/* ============================================================
- * L1 Page Table
- * ============================================================ */
 
 /* 4096 entries × 4 bytes = 16KB, must be 16KB aligned.
  * Placed in .pgd section (kernel VA space).
@@ -24,25 +22,12 @@
 static uint32_t pgd[MMU_L1_ENTRIES]
     __attribute__((aligned(MMU_L1_ALIGN), section(".pgd"), used));
 
-/* ============================================================
- * Linker symbols
- * ============================================================ */
 extern uint32_t _boot_start; /* PA 0x80000000 — vector table */
 
-/* ============================================================
- * Phase B: mmu_init — called from kernel_main at high VA
- * ============================================================
- * By the time this runs, MMU is already ON and we are executing
- * at VA 0xC0xxxxxx. This function:
- *   1. Removes temporary identity mapping (PA == VA for DDR)
- *   2. Updates VBAR to point to vectors at high VA
- *   3. Logs the final memory map
- */
 void mmu_init(void)
 {
     uint32_t i, pa;
 
-    /* Remove temporary identity mapping */
     for (i = 0; i < BOOT_IDENTITY_MB; i++)
     {
         pa = BOOT_IDENTITY_PA + (i * MMU_SECTION_SIZE);
@@ -57,24 +42,19 @@ void mmu_init(void)
         pgd[pa >> MMU_SECTION_SHIFT] = pa | MMU_SECT_FB_RAM;
     }
 
-    /* Flush entire TLB - clear stale identity-map entries */
     __asm__ __volatile__(
         "mov r0, #0\n\t"
         "mcr p15, 0, r0, c8, c7, 0\n\t" /* TLBIALL */
         "dsb\n\t"
         "isb\n\t" ::: "r0", "memory");
 
-    /* Update VBAR to high VA
-     * Vector table physical location = _boot_start (PA 0x80000000).
-     * With the high mapping, same memory is at VA 0xC0000000.
-     * VBAR must point to VA so exception vectors resolve correctly. */
+    /* VBAR: same physical memory now reachable at VA 0xC0000000 via high map. */
     uint32_t vbar_va = (uint32_t)&_boot_start + VA_OFFSET;
 
     __asm__ __volatile__(
         "mcr p15, 0, %0, c12, c0, 0\n\t" /* Write VBAR */
         "isb\n\t" ::"r"(vbar_va) : "memory");
 
-    /* Log final memory map */
     pr_info("[MMU] True 3G/1G Virtual Memory Split\n");
     pr_info("[MMU] User Space:  VA 0x%x -> PA 0x%x (%d MB) [Cached, User RW]\n",
                 USER_SPACE_VA, USER_SPACE_PA, USER_SPACE_MB);
@@ -93,10 +73,6 @@ void mmu_init(void)
     pr_info("[MMU] DACR = 0x%x (D0=CLIENT, D1=CLIENT)\n", MMU_DACR_VALUE);
     pr_info("[MMU] MMU enabled, running at high VA!\n");
 }
-
-/* ============================================================
- * L2 page-table installation (runtime, high VA)
- * ============================================================ */
 
 void mmu_flush_tlb(void)
 {
@@ -195,29 +171,32 @@ void mmu_install_user_section(uint32_t *pgd_va, uint32_t user_va,
     __asm__ __volatile__("dsb\n\t" ::: "memory");
 }
 
-/* CRITICAL: runs at PA before MMU enable — must live in
- * .text.boot_entry (VMA == LMA == PA). Takes the pgd PA, not
- * its VA symbol.
+/*
+ * mmu_build_page_table_boot - populate the L1 page table before MMU enable
+ * @pgd_pa: physical address of the 4096-entry L1 table (16KB aligned)
  *
- * Mapping installed:
- *   PA 0x80000000 → VA 0xC0000000 (1MB, user bootstrap, perm)
- *   PA 0x80100000 → VA 0xC0100000 (127MB, kernel-only, perm)
- *   PA 0x80000000 → VA 0x80000000 (128MB, identity, temp)
- *   PA 0x44E00000 → VA 0x44E00000 (1MB, peripheral, perm)
- *   PA 0x48000000 → VA 0x48000000 (3MB, peripheral, perm) */
+ * Called from the boot trampoline while the MMU is off.  Must reside in
+ * .text.boot_entry so that its VMA equals its LMA (physical address).
+ * The pgd_pa argument is the physical address of the table; the VA symbol
+ * _pgd_start is not usable here because the MMU is not yet active.
+ *
+ * Mappings installed:
+ *   PA 0x80000000 → VA 0xC0000000  (kernel DDR, cached, kernel-only)
+ *   PA 0x80000000 → VA 0x80000000  (identity map, temporary, removed by mmu_init)
+ *   PA 0x44E00000 → VA 0x44E00000  (L4_WKUP peripherals, strongly ordered)
+ *   PA 0x48000000 → VA 0x48000000  (L4_PER peripherals, strongly ordered)
+ *   framebuffer PA → same VA        (normal non-cacheable)
+ */
 void __attribute__((section(".text.boot_entry")))
 mmu_build_page_table_boot(uint32_t *pgd_pa)
 {
     uint32_t i;
     uint32_t pa, va_idx;
 
-    /* Clear all entries → Translation Fault (catches NULL pointers) */
     for (i = 0; i < MMU_L1_ENTRIES; i++)
     {
         pgd_pa[i] = 0;
     }
-
-    /* Peripheral identity maps (PA == VA, Kernel-only) */
 
     /* L4_WKUP: UART0, CM_PER, WDT1 (1MB) */
     for (i = 0; i < PERIPH_L4_WKUP_SECTIONS; i++)
@@ -240,7 +219,6 @@ mmu_build_page_table_boot(uint32_t *pgd_pa)
         pgd_pa[pa >> MMU_SECTION_SHIFT] = pa | MMU_SECT_FB_RAM;
     }
 
-    /* True User Space: VA 0x40000000 (User RW) */
     for (i = 0; i < USER_SPACE_MB; i++)
     {
         pa = USER_SPACE_PA + (i * MMU_SECTION_SIZE);
@@ -248,7 +226,6 @@ mmu_build_page_table_boot(uint32_t *pgd_pa)
         pgd_pa[va_idx] = pa | MMU_SECT_USER_RAM;
     }
 
-    /* Kernel DDR: VA 0xC0000000 (Kernel-only) */
     for (i = 0; i < KERNEL_DDR_MB; i++)
     {
         pa = KERNEL_DDR_PA + (i * MMU_SECTION_SIZE);

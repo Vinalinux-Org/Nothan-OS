@@ -1,8 +1,6 @@
-/* ============================================================
- * wait.c
- * ------------------------------------------------------------
- * do_exit / do_wait — process exit and parent reaping.
- * ============================================================ */
+/*
+ * kernel/wait.c — wait() / waitpid() implementation
+ */
 
 #include "proc.h"
 #include "task.h"

@@ -1,12 +1,8 @@
-/* ============================================================
- * vinix/errno.h
- * ------------------------------------------------------------
- * Linux-aligned errno values. Use as `return -EINVAL;` etc.
+/*
+ * include/vinix/errno.h — error codes
  *
- * Old E_* names (E_OK, E_FAIL, E_INVAL, ...) in syscalls.h
- * still resolve for now. New code should prefer the -E* form
- * so signatures match Linux conventions.
- * ============================================================ */
+ * Use as `return -EINVAL;` etc.
+ */
 
 #ifndef VINIX_ERRNO_H
 #define VINIX_ERRNO_H

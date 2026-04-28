@@ -1,13 +1,6 @@
-/* ============================================================
- * vinix/tty.h
- * ------------------------------------------------------------
- * tty_driver / tty_operations — line-discipline-facing vtable
- * shared by serial, console, and pty backends.
- *
- * Today the only TTY is /dev/tty, which goes straight to the
- * UART. This header defines the interface for when a real
- * tty_io.c core lands (line discipline, echo, canonical mode).
- * ============================================================ */
+/*
+ * include/vinix/tty.h — TTY device interface
+ */
 
 #ifndef VINIX_TTY_H
 #define VINIX_TTY_H

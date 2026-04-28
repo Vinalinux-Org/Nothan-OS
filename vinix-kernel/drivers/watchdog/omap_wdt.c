@@ -1,7 +1,7 @@
 /*
- * AM335x WDT1 watchdog driver — disables the on-reset-running watchdog.
+ * drivers/watchdog/omap_wdt.c
  *
- * AM335x TRM Ch.20.
+ * AM335x WDT1 disable driver — ROM leaves WDT1 running at reset; no kicker in v1.
  */
 
 #include "mmio.h"
@@ -17,14 +17,7 @@
 #define WDT_DISABLE_SEQ1        0xAAAA
 #define WDT_DISABLE_SEQ2        0x5555
 
-/*
- * The AM335x WDT1 starts running out of reset; if the kernel never
- * services it the SoC reboots after ~83s. We disable it because
- * VinixOS does not yet implement a watchdog kicker.
- *
- * Sequence per TRM 20.4.3.8: enable clock → write SEQ1 → wait WWPS
- * idle → write SEQ2 → wait WWPS idle.
- */
+/* Two-write magic sequence; poll WWPS between writes or the second write is lost. */
 static void omap_wdt_hw_disable(uint32_t base)
 {
     mmio_write32(CM_WKUP_WDT1_CLKCTRL, MODULEMODE_ENABLE);
@@ -56,9 +49,7 @@ static struct platform_driver omap_wdt_driver = {
     .probe    = omap_wdt_probe,
 };
 
-/* arch_initcall — must disable WDT1 early in boot (TRM: ROM leaves it
- * running, ~83 s timeout). Runs after board file (core_initcall) so
- * the omap-wdt platform_device is already on the bus. */
+/* arch_initcall: must fire before ~83s ROM timeout. */
 static int __init omap_wdt_driver_init(void)
 {
     return platform_driver_register(&omap_wdt_driver);

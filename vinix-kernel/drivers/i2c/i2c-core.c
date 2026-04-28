@@ -1,13 +1,10 @@
-/* ============================================================
- * i2c-core.c
- * ------------------------------------------------------------
- * Generic I2C bus core — host controller drivers register an
- * i2c_adapter; client code calls i2c_transfer to send a sequence
- * of i2c_msgs over a named bus.
+/*
+ * drivers/i2c/i2c-core.c — generic I2C bus core
  *
- * MVP single-bus: a flat array indexed by adapter->nr. Switch to
- * a registered list once a second I2C controller appears.
- * ============================================================ */
+ * Host controller drivers register an i2c_adapter; client code calls
+ * i2c_transfer() to send a sequence of i2c_msgs over a named bus.
+ * Adapters are stored in a flat array indexed by adapter->nr.
+ */
 
 #include "vinix/i2c.h"
 #include "vinix/errno.h"

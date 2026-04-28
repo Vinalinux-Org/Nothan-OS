@@ -1,8 +1,6 @@
-/* ============================================================
- * device.h
- * ------------------------------------------------------------
- * Generic device / driver / bus model.
- * ============================================================ */
+/*
+ * include/device.h — Generic bus, device, and driver abstractions
+ */
 
 #ifndef DEVICE_H
 #define DEVICE_H

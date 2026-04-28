@@ -1,21 +1,6 @@
-/* ============================================================
- * vinix/netdevice.h
- * ------------------------------------------------------------
- * Network device subsystem — net_device_ops vtable any
- * ethernet/wifi driver implements.
- *
- * Driver writes:
- *   1. Allocate net_device via alloc_etherdev(sizeof_priv)
- *   2. Fill ndev->netdev_ops with its struct net_device_ops
- *   3. Set MAC address (dev_addr), MTU, flags
- *   4. Call register_netdev(ndev) — kernel assigns name
- *
- * Driver IRQ pushes received frames via netif_rx(skb).
- * TX path: kernel calls ndo_start_xmit(skb, ndev).
- *
- * MVP: frame-level framework. No IP/TCP/UDP yet — netif_rx
- * just queues. IP stack lands when ethernet driver works.
- * ============================================================ */
+/*
+ * include/vinix/netdevice.h — Network device abstraction
+ */
 
 #ifndef VINIX_NETDEVICE_H
 #define VINIX_NETDEVICE_H

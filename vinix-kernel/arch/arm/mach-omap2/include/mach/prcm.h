@@ -1,12 +1,8 @@
 /*
- * AM335x PRCM (Power, Reset, Clock Manager) register map.
+ * arch/arm/mach-omap2/include/mach/prcm.h
  *
- * Cross-cutting register set: every peripheral driver must enable its
- * module clock here before touching the peripheral's own registers.
- * Lives in arch/ per VinixOS rule §13 — drivers include this header,
- * not their own copy of CM_*_BASE.
- *
- * AM335x TRM Ch.08.
+ * AM335x PRCM register map — every driver must enable its module clock
+ * here before accessing the peripheral's own registers.
  */
 
 #ifndef _MACH_PRCM_H

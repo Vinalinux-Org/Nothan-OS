@@ -1,22 +1,20 @@
-/* ============================================================
- * mmu_enable.S
- * ------------------------------------------------------------
- * MMU enable trampoline — runs at PA, activates id + high maps.
- * ============================================================ */
+/*
+ * arch/arm/mm/mmu_enable.S — ARMv7-A MMU activation sequence
+ *
+ * Runs at physical address (called from the boot trampoline before the
+ * MMU is on).  Sets TTBR0, TTBCR, and DACR, flushes the TLB, then
+ * enables the MMU, D-cache, branch prediction, and I-cache in SCTLR
+ * with a single MCR.  The identity map installed by
+ * mmu_build_page_table_boot() keeps the fetch pipeline valid for the
+ * few instructions between the SCTLR write and the ISB.
+ */
 
     .section .text.mmu_trampoline, "ax"
     .align 4
     .global mmu_enable
 
-/* ------------------------------------------------------------
- * mmu_enable(uint32_t *pgd_base)
- * ------------------------------------------------------------
- * r0 = physical address of L1 page table (16KB aligned)
- * Clobbers: r0, r1
- * ------------------------------------------------------------ */
+/* mmu_enable(uint32_t *pgd_base) — r0: L1 table PA (16KB aligned). Clobbers r0, r1. */
 mmu_enable:
-
-    /* Drain pending writes before touching MMU config */
     dsb
 
     /* Invalidate I-Cache — stale entries from MMU-off state
@@ -41,14 +39,12 @@ mmu_enable:
     mov     r1, #0x5
     mcr     p15, 0, r1, c3, c0, 0      /* Write DACR */
 
-    /* Flush TLB — no stale translations before first use */
     mov     r1, #0
     mcr     p15, 0, r1, c8, c7, 0      /* TLBIALL */
     dsb
     isb
 
-    /* Enable MMU + D-Cache + I-Cache + branch prediction
-     * M+C must be set together — C without M is UNPREDICTABLE */
+    /* M+C must be set together — C without M is UNPREDICTABLE. */
     mrc     p15, 0, r1, c1, c0, 0      /* Read SCTLR */
     orr     r1, r1, #(1 << 0)          /* M — MMU */
     orr     r1, r1, #(1 << 2)          /* C — D-Cache */

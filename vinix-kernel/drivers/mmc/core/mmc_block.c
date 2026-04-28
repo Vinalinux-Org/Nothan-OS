@@ -1,15 +1,11 @@
-/* ============================================================
- * mmc/block.c
- * ------------------------------------------------------------
- * MMC -> block bridge. Wraps an mmc_host's sector I/O in a
- * gendisk + block_device_operations and registers it with the
- * block layer (add_disk).
+/*
+ * drivers/mmc/core/mmc_block.c — MMC block device bridge
  *
- * Linux's mmc_block builds struct mmc_request from each block
- * I/O and calls host->ops->request. MVP shortcut: host driver
- * passes plain read/write callbacks (no request object) which
- * mmc_block stores and trampolines via the gendisk fops.
- * ============================================================ */
+ * Wraps an mmc_host's sector I/O in a gendisk and registers it
+ * with the block layer via add_disk().  The host driver passes
+ * plain read/write function pointers which are stored here and
+ * called through the gendisk fops.
+ */
 
 #include "vinix/mmc/host.h"
 #include "vinix/blkdev.h"

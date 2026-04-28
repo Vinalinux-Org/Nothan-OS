@@ -1,17 +1,12 @@
-/* ============================================================
- * intc.h
- * ------------------------------------------------------------
- * AM335x INTC interrupt-controller driver interface.
- * ============================================================ */
+/*
+ * include/intc.h — AM335x INTC interrupt-controller driver interface
+ */
 
 #ifndef INTC_H
 #define INTC_H
 
 #include "types.h"
 
-/* ============================================================
- * INTC Hardware Definitions
- * ============================================================ */
 
 /* INTC Base Address */
 #define INTC_BASE           0x48200000
@@ -50,17 +45,14 @@
 #define NEWIRQAGR           (1 << 0)
 #define NEWFIQAGR           (1 << 1)
 
-/* ============================================================
- * INTC Driver API
- * ============================================================ */
 
 void intc_init(void);
 
 /* Returns 128 for a spurious IRQ. */
 uint32_t intc_get_active_irq(void);
 
-/* CRITICAL: must be called for EVERY IRQ — valid, spurious, or
- * unhandled — otherwise INTC keeps the line asserted. */
+/* EOI must be sent for every IRQ — valid, spurious, or unhandled —
+ * otherwise the INTC keeps the interrupt line asserted. */
 void intc_eoi(void);
 
 /* Precondition: handler must be registered before enabling. */

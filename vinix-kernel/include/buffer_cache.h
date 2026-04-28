@@ -1,8 +1,6 @@
-/* ============================================================
- * buffer_cache.h
- * ------------------------------------------------------------
- * 64 × 512B sector cache — LRU eviction, write-back on bsync().
- * ============================================================ */
+/*
+ * include/buffer_cache.h — Block buffer cache interface
+ */
 
 #ifndef BUFFER_CACHE_H
 #define BUFFER_CACHE_H

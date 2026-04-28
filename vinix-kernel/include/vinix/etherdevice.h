@@ -1,11 +1,6 @@
-/* ============================================================
- * vinix/etherdevice.h
- * ------------------------------------------------------------
- * Ethernet helpers built on top of net_device. Drivers use
- * alloc_etherdev to get a net_device pre-sized for ETH_ALEN
- * and L2 framing; eth_type_trans pulls the L2 header off an
- * RX skb to set protocol + advance data pointer.
- * ============================================================ */
+/*
+ * include/vinix/etherdevice.h — Ethernet device helpers
+ */
 
 #ifndef VINIX_ETHERDEVICE_H
 #define VINIX_ETHERDEVICE_H

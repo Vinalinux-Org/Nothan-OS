@@ -1,7 +1,6 @@
-/* ============================================================
- * fb.h — Framebuffer Graphics API
- * Target: 800x600 @ 60Hz, RGB565
- * ============================================================ */
+/*
+ * include/fb.h — Framebuffer pixel and console primitives
+ */
 
 #ifndef FB_H
 #define FB_H
@@ -74,9 +73,7 @@ uint16_t  fb_get_console_bg(void);
 /** Returns 16 bytes of bitmap data for ASCII char (32-126); '?' fallback. */
 const uint8_t *font_8x16_glyph(char c);
 
-/* ============================================================
- * Console mode — auto cursor, newline, scroll
- * ============================================================ */
+
 
 /** Start console mode (gray bg, white text) */
 void fb_console_init(uint16_t fg, uint16_t bg);

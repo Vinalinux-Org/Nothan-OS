@@ -1,15 +1,6 @@
-/* ============================================================
- * clockevents.c
- * ------------------------------------------------------------
- * Generic tick-source registry. Timer drivers register a
- * clock_event_device with set_state_periodic + an event_handler
- * slot; clockevents_register_device wires the device's handler
- * to the kernel scheduler tick.
- *
- * MVP: single device, periodic tick only. Highest rating wins
- * if multiple chips probe; second-place is left as the backup
- * for a future tickless / oneshot path.
- * ============================================================ */
+/*
+ * kernel/time/clockevents.c — tick-source registry
+ */
 
 #include "vinix/clocksource.h"
 #include "vinix/printk.h"

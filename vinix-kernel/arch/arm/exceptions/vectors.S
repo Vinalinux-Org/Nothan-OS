@@ -1,23 +1,22 @@
-/* ============================================================
- * vectors.S
- * ------------------------------------------------------------
- * ARM Exception Vector Table
- * ============================================================
+/*
+ * arch/arm/exceptions/vectors.S — ARM exception vector table
  *
- * LDR PC pattern — loads full 32-bit handler address from a
- * literal pool placed immediately after the 8 vector slots.
- * This allows handlers to be anywhere in the 4GB address space,
- * which is required because exception_entry stubs live at
- * kernel VA (0xC0xxxxxx) while this table is at PA 0x80000000.
+ * The ARM vector table consists of eight 4-byte slots at fixed offsets
+ * from VBAR.  Each slot holds a single instruction; only a branch or
+ * LDR PC is practical here.  This file uses the LDR PC pattern, which
+ * loads the handler address from a literal pool placed immediately after
+ * the eight vector slots.  This allows handlers anywhere in the 32-bit
+ * address space, which is required here because the exception_entry stubs
+ * linked at kernel VA (0xC0xxxxxx) are not reachable with a 24-bit
+ * branch-offset from the vector table's physical address.
  *
- * Layout (16 words = 64 bytes total):
- *   +0x00 – +0x1C : 8 × LDR PC instructions  (vector table)
- *   +0x20 – +0x3C : 8 × address words         (literal pool)
+ * Table layout (16 words = 64 bytes):
+ *   offset 0x00–0x1C : 8 × LDR PC instructions
+ *   offset 0x20–0x3C : 8 × handler address words (literal pool)
  *
- * VBAR (Vector Base Address Register) points here.
- *   Boot:    VBAR = PA 0x80000000 (identity / MMU off)
- *   Runtime: VBAR = VA 0xC0000000 (high map, same physical memory)
- * ============================================================ */
+ * VBAR points at _start.  reset.S sets VBAR to this physical address
+ * at boot; mmu_init() updates it to the corresponding virtual address.
+ */
 
 .section .vectors, "ax"
 .global _start
@@ -32,7 +31,6 @@ _start:
     ldr     pc, _vec_irq             /* +0x18: IRQ */
     ldr     pc, _vec_fiq             /* +0x1C: FIQ */
 
-/* Literal pool — handler addresses filled by linker */
 _vec_reset:     .word reset_handler
 _vec_undef:     .word exception_entry_undefined
 _vec_svc:       .word exception_entry_svc

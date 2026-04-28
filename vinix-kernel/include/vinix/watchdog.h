@@ -1,14 +1,6 @@
-/* ============================================================
- * vinix/watchdog.h
- * ------------------------------------------------------------
- * Watchdog subsystem — drivers fill struct watchdog_device with
- * an ops vtable, call watchdog_register_device. Userspace pings
- * via /dev/watchdog (cdev backed by the registered device).
- *
- * Today omap_wdt.c only disables the IPC watchdog at boot and
- * exposes nothing further. The core defined here is the contract
- * for Phase 2.9 if/when a userspace watchdog ping path is needed.
- * ============================================================ */
+/*
+ * include/vinix/watchdog.h — Watchdog device interface
+ */
 
 #ifndef VINIX_WATCHDOG_H
 #define VINIX_WATCHDOG_H

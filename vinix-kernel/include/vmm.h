@@ -1,8 +1,6 @@
-/* ============================================================
- * vmm.h
- * ------------------------------------------------------------
- * Per-process address space descriptor + VMA list.
- * ============================================================ */
+/*
+ * include/vmm.h — Virtual memory manager interface
+ */
 
 #ifndef VMM_H
 #define VMM_H

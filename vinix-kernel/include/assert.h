@@ -1,8 +1,6 @@
-/* ============================================================
- * assert.h
- * ------------------------------------------------------------
- * Simple assertion logic for VinixOS Kernel
- * ============================================================ */
+/*
+ * include/assert.h — Kernel assert macro.
+ */
 
 #ifndef ASSERT_H
 #define ASSERT_H

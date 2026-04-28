@@ -1,17 +1,17 @@
-/* ============================================================
- * exception.h
- * ------------------------------------------------------------
- * ARMv7-A exception handling interface.
- * ============================================================ */
+/*
+ * include/exception.h — ARMv7-A exception handling interface
+ *
+ * struct exception_context field order must match the STMFD push
+ * sequence in exception_entry.S: r0-r12 then LR first, SPSR last
+ * (at lowest address, where SP points on entry).
+ */
 
 #ifndef EXCEPTION_H
 #define EXCEPTION_H
 
 #include "types.h"
 
-/* CRITICAL: layout matches exception_entry stubs — STMFD pushes
- * r0-r12,LR first, then SPSR last. SPSR ends up at the lowest
- * address (SP points here). */
+
 struct exception_context {
     uint32_t spsr;
     uint32_t r0;
@@ -30,9 +30,7 @@ struct exception_context {
     uint32_t lr;
 };
 
-/* ============================================================
- * Exception Handler Prototypes — must NOT return (fatal).
- * ============================================================ */
+
 
 void handle_undefined_instruction(struct exception_context *ctx);
 void handle_svc(struct exception_context *ctx);

@@ -1,17 +1,9 @@
-/* ============================================================
- * vinix/serial_core.h
- * ------------------------------------------------------------
- * Serial port framework — uart_driver wraps tty_driver, drivers
- * implement uart_ops.
+/*
+ * include/vinix/serial_core.h — serial port framework
  *
- * Driver writers add a struct uart_port (mmio base, irq, fifo
- * size) and an uart_ops vtable, then call uart_add_one_port to
- * plug into serial_core. The core handles ring buffers, RX wait
- * queue, and tty layer wiring.
- *
- * Migration of omap_serial.c on top of this header is part of
- * Phase 2.5 (TTY/serial subsystem core build-out).
- * ============================================================ */
+ * Drivers implement uart_ops and call uart_add_one_port().
+ * The core handles ring buffers, RX wait queue, and tty layer wiring.
+ */
 
 #ifndef VINIX_SERIAL_CORE_H
 #define VINIX_SERIAL_CORE_H

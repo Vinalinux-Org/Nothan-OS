@@ -1,8 +1,6 @@
-/* ============================================================
- * spinlock.c
- * ------------------------------------------------------------
- * Uniprocessor spinlock — IRQ-disable for exclusivity.
- * ============================================================ */
+/*
+ * kernel/locking/spinlock.c — spinlock implementation
+ */
 
 #include "spinlock.h"
 

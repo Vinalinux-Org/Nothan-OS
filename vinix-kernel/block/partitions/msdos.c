@@ -1,8 +1,10 @@
-/* ============================================================
- * mbr.c
- * ------------------------------------------------------------
- * MBR partition table parser.
- * ============================================================ */
+/*
+ * block/partitions/msdos.c — MBR partition table parser
+ *
+ * Reads sector 0, validates the 0xAA55 signature, and scans the four
+ * primary partition entries for a FAT32 partition (type 0x0B or 0x0C).
+ * Returns the LBA start and sector count of the first FAT32 partition found.
+ */
 
 #include "types.h"
 #include "mbr.h"

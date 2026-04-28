@@ -1,11 +1,10 @@
-/* ============================================================
- * vinix/cdev.h
- * ------------------------------------------------------------
- * Character device — vtable-backed device exposed under /dev.
- * Linux-style: driver fills struct cdev (name + fops + priv),
- * calls cdev_register(); devfs walks the registry and dispatches
+/*
+ * include/vinix/cdev.h — character device descriptor
+ *
+ * A driver fills struct cdev (name, fops, priv) and calls
+ * cdev_register(); devfs enumerates the registry and dispatches
  * read/write/ioctl through fops with an ephemeral struct file.
- * ============================================================ */
+ */
 
 #ifndef VINIX_CDEV_H
 #define VINIX_CDEV_H

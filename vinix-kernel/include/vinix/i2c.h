@@ -1,14 +1,6 @@
-/* ============================================================
- * vinix/i2c.h
- * ------------------------------------------------------------
- * I2C subsystem — adapter (host controller), algorithm (xfer
- * function), client (slave attached on the bus).
- *
- * Adapter drivers (i2c-omap) fill struct i2c_adapter with an
- * i2c_algorithm and call i2c_add_adapter(). Client drivers
- * (tda998x) call i2c_transfer(adapter, msgs, count) instead of
- * touching the host registers directly.
- * ============================================================ */
+/*
+ * include/vinix/i2c.h — I2C adapter and algorithm interface
+ */
 
 #ifndef VINIX_I2C_H
 #define VINIX_I2C_H

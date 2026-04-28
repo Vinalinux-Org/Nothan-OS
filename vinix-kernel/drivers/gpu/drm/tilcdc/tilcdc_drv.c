@@ -1,8 +1,10 @@
 /*
- * AM335x LCDC raster driver — 800x600@60Hz, RGB565.
+ * AM335x LCDC raster driver.
  *
- * Pattern reference: U-Boot am335x-fb.c — re-implemented.
- * AM335x TRM Ch.13.
+ * Manages the display controller hardware to output an 800x600@60Hz
+ * signal using RGB565 pixel format. This driver handles the configuration
+ * of pin multiplexing, the Display PLL (DPLL), and the LCD controller
+ * raster mode to drive an external TDA19988 HDMI transmitter.
  */
 
 #include "types.h"
@@ -49,7 +51,7 @@ static void lcd_pinmux_setup(void)
     pr_info("[LCDC] LCD pinmux configured (20 pins, 16-bit RGB565)\n");
 }
 
-/* LCDC pixel clock source select — TRM 8.1.6.21 */
+/* LCDC pixel clock source selection register */
 #define CLKSEL_LCDC_PIXEL_CLK   (CM_DPLL_BASE + 0x34)
 
 /* DPLL mode bits */
@@ -112,9 +114,10 @@ static void lcd_pinmux_setup(void)
  * PPL encoding: pixels_per_line = 16 × (ppl_field + 1)
  * ppl_field = (width / 16) - 1, split across PPLLSB [9:4] and PPLMSB [bit 3]
  *
- * HARDWARE VERIFIED: bit 2 is reserved (write ignored on real AM335x).
- * TRM 13.5.1.11 confirms PPLMSB at bit 3. U-Boot >>4 targets bit 2 and
- * only works by accident for resolutions ≤ 1024 where MSB is not needed. */
+ * HARDWARE VERIFIED: bit 2 is reserved and ignored by the hardware.
+ * The PPLMSB field resides at bit 3. We shift by 3 (>> 3) to correctly
+ * align the bits, allowing support for higher resolutions.
+ */
 #define LCD_HORLSB(x)   (((((x) >> 4) - 1) & 0x3F) << 4)
 #define LCD_HORMSB(x)    (((((x) >> 4) - 1) & 0x40) >> 3)
 #define LCD_HFPLSB(x)   ((((x) - 1) & 0xFF) << 16)
@@ -136,13 +139,11 @@ static void lcd_pinmux_setup(void)
 #define HSYNC_INVERT    (1 << 21)
 #define VSYNC_INVERT    (1 << 20)
 
-/* ============================================================
 /*
- * 800x600 @ 60Hz VESA DMT timing.
+ * 800x600 @ 60Hz VESA DMT Timing Configuration
  *
  * Pixel clock: 40 MHz
- * Sync: PHSYNC, PVSYNC (both positive)
- * Source: QNX drm_800x600 struct (hdmi.c line 157-172)
+ * Sync signals: PHSYNC, PVSYNC (both positive polarity)
  */
 
 #define DISPLAY_WIDTH   800
@@ -244,9 +245,12 @@ static void dpll_disp_setup(void)
                 (24 * DPLL_DISP_M) / (DPLL_DISP_N + 1));
 }
 
-/* ============================================================
- * LCDC Clock Enable
- * ============================================================ */
+/*
+ * lcdc_clock_enable - Power up the LCD controller
+ *
+ * Wakes up the LCDC clock domain and enables the module clock.
+ * Waits for the module to report functional status before proceeding.
+ */
 
 static void lcdc_clock_enable(void)
 {
@@ -273,9 +277,12 @@ static void lcdc_clock_enable(void)
     pr_err("[LCDC] ERROR: Clock enable timeout\n");
 }
 
-/* ============================================================
- * Framebuffer Setup
- * ============================================================ */
+/*
+ * framebuffer_setup - Initialize the display memory
+ *
+ * Configures the initial 32-byte palette header required by the hardware
+ * (even in raw RGB565 mode) and clears the visual area to black.
+ */
 
 static void framebuffer_setup(void)
 {
@@ -299,9 +306,14 @@ static void framebuffer_setup(void)
                 FB_PA_BASE, DISPLAY_WIDTH, DISPLAY_HEIGHT);
 }
 
-/* ============================================================
- * LCDC Initialization
- * ============================================================ */
+/*
+ * lcdc_init - Configure the LCD controller hardware
+ *
+ * Orchestrates the full initialization sequence: pinmux, clock generation,
+ * DMA setup, and raster timing configuration. The raster engine is left
+ * disabled at the end of this sequence so the external HDMI transmitter
+ * can be configured while the pixel clock is running.
+ */
 
 void lcdc_init(void)
 {
@@ -339,7 +351,6 @@ void lcdc_init(void)
     mmio_write32(LCDC_BASE + LCD_LCDDMA_CTRL,
                  LCD_DMA_BURST_16 | LCD_DMA_TH_FIFO(LCD_DMA_TH_FIFO_512));
 
-    /* Step 8: Configure raster timing for 640x480 @ 60Hz */
     mmio_write32(LCDC_BASE + LCD_RASTER_TIMING_0,
                  LCD_HORLSB(DISPLAY_WIDTH) |
                  LCD_HORMSB(DISPLAY_WIDTH) |
@@ -370,12 +381,13 @@ void lcdc_init(void)
                 (24 * DPLL_DISP_M) / (DPLL_DISP_N + 1) / LCDC_CLKDIV);
 }
 
-/* ============================================================
- * Start Raster Output
- * ============================================================
- * Must be called AFTER TDA19988 is fully configured.
- * QNX production driver: TDA config → LCDC config → raster enable (last).
- * ============================================================ */
+/*
+ * lcdc_start_raster - Enable the final video output
+ *
+ * Activates the raster engine. This must only be called AFTER the external
+ * HDMI transmitter (TDA19988) is fully configured, otherwise synchronization
+ * signals may be lost.
+ */
 
 void lcdc_start_raster(void)
 {
@@ -393,10 +405,12 @@ void lcdc_start_raster(void)
     pr_info("[LCDC] Raster active\n");
 }
 
-/* ============================================================
- * Public Accessors — legacy. New code reads from the
- * registered fb_info via fb_get_buffer() / fb_get_width().
- * ============================================================ */
+/*
+ * Legacy Accessors
+ *
+ * These functions provide direct access to the framebuffer geometry.
+ * Modern code should query these values via the fbdev subsystem.
+ */
 
 uint16_t *lcdc_get_framebuffer(void)
 {
@@ -418,11 +432,12 @@ uint32_t lcdc_get_pitch(void)
     return DISPLAY_WIDTH * (DISPLAY_BPP / 8);
 }
 
-/* ============================================================
- * fb_info wiring — register the LCDC framebuffer with fbdev so
- * fbmem can read geometry through the subsystem instead of via
- * direct lcdc_get_* accessors.
- * ============================================================ */
+/*
+ * Framebuffer Device Registration
+ *
+ * Exports the LCDC framebuffer to the generic fbdev subsystem,
+ * allowing standard tools to interact with the display.
+ */
 
 #include "vinix/fb.h"
 

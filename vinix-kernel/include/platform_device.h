@@ -1,8 +1,6 @@
-/* ============================================================
- * platform_device.h
- * ------------------------------------------------------------
- * Platform bus — non-discoverable memory-mapped peripherals.
- * ============================================================ */
+/*
+ * include/platform_device.h — Platform device and driver registration interface
+ */
 
 #ifndef PLATFORM_DEVICE_H
 #define PLATFORM_DEVICE_H

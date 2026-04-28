@@ -1,8 +1,9 @@
-/* ============================================================
- * intc.c
- * ------------------------------------------------------------
- * AM335x INTC interrupt-controller driver.
- * ============================================================ */
+/*
+ * AM335x Interrupt Controller (INTC) Driver
+ *
+ * Manages the top-level interrupt controller for the ARM Cortex-A8 core.
+ * Handles enabling, disabling, prioritizing, and acknowledging hardware IRQs.
+ */
 
 #include "intc.h"
 #include "mmio.h"
@@ -12,6 +13,12 @@
 #include "vinix/irqchip.h"
 #include "vinix/init.h"
 
+/*
+ * intc_init - Initialize the Interrupt Controller
+ *
+ * Masks all interrupts across all 4 banks (128 IRQs total) and
+ * resets the controller's threshold priority and control registers.
+ */
 void intc_init(void)
 {
     mmio_write32(INTC_BASE + INTC_MIR_SET(0), 0xFFFFFFFF);
@@ -23,6 +30,12 @@ void intc_init(void)
     mmio_write32(INTC_BASE + INTC_CONTROL, NEWIRQAGR);
 }
 
+/*
+ * intc_get_active_irq - Retrieve the highest priority pending IRQ
+ *
+ * Reads the Source IRQ (SIR) register. If a spurious interrupt is
+ * detected, returns an invalid IRQ number (128) to ignore it.
+ */
 uint32_t intc_get_active_irq(void)
 {
     uint32_t sir = mmio_read32(INTC_BASE + INTC_SIR_IRQ);
@@ -34,6 +47,12 @@ uint32_t intc_get_active_irq(void)
     return sir & ACTIVEIRQ_MASK;
 }
 
+/*
+ * intc_eoi - End of Interrupt acknowledgment
+ *
+ * Signals to the INTC that the current interrupt processing is complete,
+ * allowing the controller to evaluate and assert new pending interrupts.
+ */
 void intc_eoi(void)
 {
     mmio_write32(INTC_BASE + INTC_CONTROL, NEWIRQAGR);
@@ -75,10 +94,12 @@ void intc_set_priority(uint32_t irq_num, uint32_t priority)
     mmio_write32(INTC_BASE + INTC_ILR(irq_num), ilr);
 }
 
-/* irq_chip vtable — kernel's enable_irq/disable_irq dispatch
- * here once irqchip_register has run. ack/eoi go through the
- * existing intc_eoi path; intc_get_active_irq feeds the IRQ
- * dispatcher. */
+/*
+ * irq_chip vtable — integrates the AM335x INTC with the generic IRQ core
+ *
+ * Maps the generic enable_irq/disable_irq calls to the hardware-specific
+ * intc_enable_irq/intc_disable_irq functions. The EOI path uses intc_eoi.
+ */
 static void omap_intc_irq_mask(struct irq_data *d)
 {
     intc_disable_irq(d->irq);

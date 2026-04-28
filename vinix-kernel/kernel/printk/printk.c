@@ -1,14 +1,10 @@
-/* ============================================================
- * printk.c
- * ------------------------------------------------------------
- * Linux-style kernel log entry point. Formats arguments through
- * a tiny vsprintf-like parser and emits each byte via the UART
- * console. Supports %d %u %x %X %s %c %% with optional %0NN
- * width.
+/*
+ * kernel/printk/printk.c — kernel log formatter
  *
- * Today the only console backend is uart_putc; future
- * register_console() can route to multiple sinks.
- * ============================================================ */
+ * Formats arguments through a minimal vsprintf-like parser
+ * and emits each byte via uart_putc.  Supports %d %u %x %X
+ * %s %c %% with optional %0NN width.
+ */
 
 #include "uart.h"
 #include "vinix/printk.h"

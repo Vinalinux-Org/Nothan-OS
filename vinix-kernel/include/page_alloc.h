@@ -1,8 +1,6 @@
-/* ============================================================
- * page_alloc.h
- * ------------------------------------------------------------
- * Bitmap page allocator — 4 KB granularity, Linux-style API.
- * ============================================================ */
+/*
+ * include/page_alloc.h — bitmap page allocator, 4 KB granularity
+ */
 
 #ifndef PAGE_ALLOC_H
 #define PAGE_ALLOC_H

@@ -1,4 +1,14 @@
-/* Platform bus — name-match drv↔pdev, resource lookup. */
+/*
+ * drivers/base/platform.c — platform bus
+ *
+ * The platform bus matches devices to drivers by name string comparison.
+ * platform_device_register() creates MEM and IRQ resources from the
+ * platform_device's base and irq fields, then adds the device to the bus.
+ *
+ * platform_probe_thunk() and platform_remove_thunk() bridge the generic
+ * bus interface (struct device *) to the driver-level interface
+ * (struct platform_device *) using container_of.
+ */
 
 #include "platform_device.h"
 #include "string.h"

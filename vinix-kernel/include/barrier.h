@@ -1,8 +1,6 @@
-/* ============================================================
- * barrier.h
- * ------------------------------------------------------------
- * ARMv7 memory barrier + compiler-barrier wrappers.
- * ============================================================ */
+/*
+ * include/barrier.h — Memory barrier primitives
+ */
 
 #ifndef BARRIER_H
 #define BARRIER_H

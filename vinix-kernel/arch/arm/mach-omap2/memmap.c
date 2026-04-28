@@ -1,8 +1,10 @@
-/* ============================================================
- * memmap.c
- * ------------------------------------------------------------
- * AM3358 peripheral region table.
- * ============================================================ */
+/*
+ * arch/arm/mach-omap2/memmap.c — AM335x peripheral region table
+ *
+ * Defines platform_peripheral_map[], which lists the physical address
+ * ranges of L4_WKUP and L4_PER that the MMU maps as strongly-ordered
+ * identity sections during boot.
+ */
 
 #include "mach/memmap.h"
 

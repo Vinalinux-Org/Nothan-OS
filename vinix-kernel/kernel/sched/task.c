@@ -1,8 +1,6 @@
-/* ============================================================
- * task.c
- * ------------------------------------------------------------
- * Task management implementation
- * ============================================================ */
+/*
+ * kernel/sched/task.c — task context initialization
+ */
 
 #include "task.h"
 #include "cpu.h"
@@ -10,9 +8,6 @@
 #include "assert.h"
 #include "types.h"
 
-/* ============================================================
- * Task Stack Initialization
- * ============================================================ */
 
 /* Magic number for stack overflow detection */
 #define STACK_CANARY_VALUE  0xDEADBEEF
@@ -50,11 +45,9 @@ void task_stack_init(struct task_struct *task,
     
     stack_ptr = (uint32_t *)((char *)stack_base + stack_size);
     
-    /* ============================================================
-     * FRAME 1: USER CONTEXT (High Address)
-     * This frame simulates the state saved by SVC Handler logic.
-     * svc_exit_trampoline will pop this to return to User Mode.
-     * ============================================================ */
+    /* FRAME 1: USER CONTEXT (high address)
+     * Simulates the state saved by SVC handler logic.
+     * svc_exit_trampoline pops this to return to user mode. */
     
     /* Determine Mode based on Entry Point (Kernel vs User) */
     uint32_t spsr_mode = (uint32_t)entry_point >= 0xC0000000 ? 0x13 : 0x10;
@@ -77,12 +70,9 @@ void task_stack_init(struct task_struct *task,
     /* 1.4. Push SPSR (0x13=SVC for Kernel task, 0x10=USR for User Task) */
     *--stack_ptr = spsr_mode; 
     
-    /* ============================================================
-     * FRAME 2: KERNEL CONTEXT (Low Address)
-     * This frame simulates the state saved by context_switch().
-     * Structure: [LR] [R11] ... [R4] (Callee-Saved Only)
-     * start_first_task() will pop this to "return" to trampoline.
-     * ============================================================ */
+    /* FRAME 2: KERNEL CONTEXT (low address)
+     * Simulates the state saved by context_switch().
+     * start_first_task() pops this to jump to the trampoline. */
     
     /* 2.1. Push LR (Return address -> Trampoline) */
     *--stack_ptr = (uint32_t)svc_exit_trampoline;
@@ -93,26 +83,10 @@ void task_stack_init(struct task_struct *task,
         *--stack_ptr = 0;  /* Initial value 0 */
     }
     
-    /* ============================================================
-     * Finalize
-     * ============================================================ */
-     
-     /* 
-      * CRITICAL FIX: Reserve space for Kernel Stack (SVC/IRQ)
-      * We must split the stack area because a shared pointer model fails:
-      * - SP_svc is banked and stays at the top (empty).
-      * - SP_usr grows down from the top.
-      * - Exceptions using SP_svc would overwrite SP_usr data.
-      * 
-      * Layout:
-      * [TOP]
-      *   <-- Kernel Stack (Grow Down) -- SP_svc starts here
-      *   ... (Reserved 512 bytes) ...
-      * [BOUNDARY]
-      *   <-- User Stack (Grow Down)   -- SP_usr starts here
-      *   ...
-      * [BOTTOM]
-      */
+    /* SP_svc and SP_usr are banked registers on ARMv7-A.
+     * Reserve a 512-byte area at the top of the stack for the
+     * SVC/IRQ kernel stack, so exception handlers on SP_svc do
+     * not overwrite the user stack that grows down from SP_usr. */
      
     #define KERNEL_STACK_RESERVE 512
     

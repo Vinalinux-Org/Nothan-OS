@@ -1,8 +1,6 @@
-/* ============================================================
- * spinlock.h
- * ------------------------------------------------------------
- * ARMv7 spinlock + IRQ-safe variants.
- * ============================================================ */
+/*
+ * include/spinlock.h — Spinlock interface
+ */
 
 #ifndef SPINLOCK_H
 #define SPINLOCK_H

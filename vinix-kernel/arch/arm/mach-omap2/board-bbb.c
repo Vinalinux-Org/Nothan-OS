@@ -1,5 +1,16 @@
-/* BeagleBone Black platform bus table — registers omap-uart,
- * omap-intc, omap-dmtimer, omap-hsmmc with the platform bus. */
+/*
+ * arch/arm/mach-omap2/board-bbb.c — BeagleBone Black platform device table
+ *
+ * Registers the following platform devices with the platform bus:
+ *   omap-uart    @ 0x44E09000  (UART0 console)
+ *   omap-intc    @ 0x48200000  (interrupt controller)
+ *   omap-dmtimer @ 0x48040000  (DMTimer2)
+ *   omap-hsmmc   @ 0x48060000  (MMC0)
+ *   omap-wdt     @ 0x44E35000  (WDT1)
+ *
+ * Each driver's probe() function is called by the platform bus when its
+ * matching name is found in this table.
+ */
 
 #include "platform_device.h"
 #include "mach/irqs.h"

@@ -1,8 +1,10 @@
-/* ============================================================
- * device.c
- * ------------------------------------------------------------
- * Generic bus registry — synchronous match/probe on register.
- * ============================================================ */
+/*
+ * drivers/base/device.c — generic bus core
+ *
+ * Provides bus_register(), bus_add_device(), and bus_add_driver().
+ * When a device or driver is added, the bus immediately attempts to
+ * match and probe all unbound pairs on the same bus.
+ */
 
 #include "device.h"
 #include "uart.h"

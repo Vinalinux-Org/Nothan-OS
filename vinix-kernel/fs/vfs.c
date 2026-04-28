@@ -1,8 +1,10 @@
-/* ============================================================
- * vfs.c
- * ------------------------------------------------------------
- * Virtual File System — mount table + per-task fd table.
- * ============================================================ */
+/*
+ * fs/vfs.c — Virtual File System
+ *
+ * Implements a mount table (up to MAX_MOUNTS entries) and a per-task
+ * file descriptor table.  resolve() performs longest-prefix matching
+ * against the mount table and returns the mount-relative path.
+ */
 
 #include "vfs.h"
 #include "syscalls.h"

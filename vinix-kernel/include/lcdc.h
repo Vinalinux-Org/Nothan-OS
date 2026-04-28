@@ -1,8 +1,6 @@
-/* ============================================================
- * lcdc.h
- * ------------------------------------------------------------
- * AM335x LCDC raster-mode driver interface.
- * ============================================================ */
+/*
+ * include/lcdc.h — AM335x LCDC raster-mode driver interface
+ */
 
 #ifndef LCDC_H
 #define LCDC_H
@@ -10,18 +8,12 @@
 #include "types.h"
 #include "mmu.h"
 
-/* ============================================================
- * LCDC Configuration
- * ============================================================ */
 
 /* LCDC base address (L4_PER domain) */
 #define LCDC_BASE           0x4830E000
 
 /* FB_PA_BASE is defined in mmu.h as part of the platform memory map */
 
-/* ============================================================
- * Public API
- * ============================================================ */
 
 /* Configures raster but does NOT start output — call
  * lcdc_start_raster() afterward.

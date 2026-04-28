@@ -1,7 +1,6 @@
-/* ============================================================
- * boot_screen.h — Boot UI (boot log + splash)
- * Draws directly to framebuffer, independent of UART.
- * ============================================================ */
+/*
+ * include/boot_screen.h — Boot screen interface
+ */
 
 #ifndef BOOT_SCREEN_H
 #define BOOT_SCREEN_H

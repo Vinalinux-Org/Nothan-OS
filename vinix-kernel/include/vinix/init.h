@@ -1,8 +1,8 @@
-/* ============================================================
- * vinix/init.h
- * ------------------------------------------------------------
- * Boot-time initcall mechanism — Linux-style level dispatch.
- * ============================================================ */
+/*
+ * include/vinix/init.h — initcall mechanism
+ *
+ * Boot-time level dispatch via .initcall<N>.init linker sections.
+ */
 
 #ifndef VINIX_INIT_H
 #define VINIX_INIT_H

@@ -1,9 +1,9 @@
-/* ============================================================
- * selftest.c — one-shot test harness. Bundles existing
- * subsystem self-tests under a unified pass/fail counter and
- * adds a few integration checks for procfs + buffer cache.
- * Panics on first failure (Linux-style BUG_ON).
- * ============================================================ */
+/*
+ * lib/test/selftest.c — one-shot test harness
+ *
+ * Bundles subsystem self-tests under a unified pass/fail
+ * counter and adds integration checks for procfs + buffer cache.
+ */
 
 #include "selftest.h"
 #include "uart.h"
@@ -62,9 +62,7 @@ static int test_procfs_content(void)
     return 0;
 }
 
-/* ------------------------------------------------------------
- * Registry
- * ------------------------------------------------------------ */
+
 
 static const struct selftest tests[] = {
     { "bcache_hit",   test_bcache_hit   },

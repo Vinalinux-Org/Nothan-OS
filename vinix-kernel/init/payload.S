@@ -1,8 +1,9 @@
-/* ============================================================
- * payload.S
- * ------------------------------------------------------------
- * Embeds init — copied to USER_SPACE_VA and run as PID 1.
- * ============================================================ */
+/*
+ * init/payload.S — embedded user payload
+ *
+ * Includes the init binary as raw bytes in .rodata.
+ * main.c copies it to USER_SPACE_VA and launches it as PID 1.
+ */
 
 .syntax unified
 .section .rodata

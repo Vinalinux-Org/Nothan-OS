@@ -1,8 +1,6 @@
-/* ============================================================
- * uart.h
- * ------------------------------------------------------------
- * AM335x UART0 driver interface.
- * ============================================================ */
+/*
+ * include/uart.h — AM335x UART0 driver interface
+ */
 
 #ifndef UART_H
 #define UART_H
@@ -10,18 +8,12 @@
 #include "types.h"
 #include <stdarg.h>
 
-/* ============================================================
- * UART Configuration
- * ============================================================
- */
+
 
 /* Ring buffer size (must be power of 2 for efficient modulo) */
 #define UART_RX_BUFFER_SIZE     256
 
-/* ============================================================
- * Public API - Transmit
- * ============================================================
- */
+
 
 /* TX-only init — safe before IRQ framework. RX requires
  * a later uart_enable_rx_interrupt() call. */
@@ -42,10 +34,7 @@ void uart_puts(const char *s);
 #include "vinix/printk.h"
 #define uart_printf  printk
 
-/* ============================================================
- * Public API - Receive
- * ============================================================
- */
+
 
 /* Non-blocking — returns -1 if the ring buffer is empty.
  * NOT safe to call from IRQ context. */

@@ -1,8 +1,8 @@
-/* ============================================================
- * idle.c
- * ------------------------------------------------------------
- * Idle task — loops and yields when nothing else is runnable.
- * ============================================================ */
+/*
+ * kernel/sched/idle.c — idle task
+ *
+ * Loops and yields when no other task is runnable.
+ */
 
 #include "idle.h"
 #include "task.h"
@@ -30,10 +30,9 @@ static void idle_task(void)
         {
         }
 
-        /* CRITICAL: must arm need_reschedule before yielding —
-         * schedule() is gated on the flag, so without this
-         * idle returns immediately and busy-loops until the next
-         * tick (~10ms), producing visible shell I/O lag. */
+        /* schedule() is gated on need_reschedule; set it before calling
+         * so idle yields instead of returning immediately and busy-looping
+         * until the next timer tick (~10 ms). */
         extern volatile bool need_reschedule;
         need_reschedule = true;
         schedule();

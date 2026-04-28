@@ -1,8 +1,6 @@
-/* ============================================================
- * scheduler.c
- * ------------------------------------------------------------
- * Simple round-robin preemptive scheduler
- * ============================================================ */
+/*
+ * kernel/sched/scheduler.c — round-robin preemptive scheduler
+ */
 
 #include "scheduler.h"
 #include "task.h"
@@ -16,17 +14,10 @@
 #include "assert.h"
 #include "syscalls.h" /* For process_info_t */
 
-/* ============================================================
- * External Assembly Functions
- * ============================================================ */
-
 /* Defined in context_switch.S */
 extern void context_switch(struct task_struct *current, struct task_struct *next);
 extern void start_first_task(struct task_struct *first);
 
-/* ============================================================
- * Scheduler Data Structures
- * ============================================================ */
 
 /* Static task array */
 static struct task_struct *tasks[MAX_TASKS];
@@ -44,9 +35,6 @@ static uint32_t current_task_index = 0;
 /* Scheduler enabled flag */
 static bool scheduler_started = false;
 
-/* ============================================================
- * Scheduler Implementation
- * ============================================================ */
 
 /**
  * Initialize scheduler
@@ -146,20 +134,13 @@ void scheduler_start(void)
     while (1);
 }
 
-/* ============================================================
- * Global Reschedule Flag
- * ============================================================
- * 
- * Set by IRQ handler (scheduler_tick) when time slice expires.
- * Checked by tasks in their main loop.
- * Cleared when context switch completes.
- */
+/* Set by scheduler_tick() when a time slice expires.
+ * Checked by schedule(); cleared when context switch completes. */
 volatile bool need_reschedule = false;
 
-/* CRITICAL: runs in IRQ mode — cannot context_switch() here
- * because IRQ stack is shared and nested IRQs would corrupt it.
- * Set need_reschedule and let tasks yield voluntarily.
- */
+/* scheduler_tick() runs in IRQ mode and cannot call context_switch()
+ * because the IRQ stack is shared and nested IRQs would corrupt it.
+ * It only sets need_reschedule; tasks pick this up via schedule(). */
 void scheduler_tick(void)
 {
     if (!scheduler_started) {
@@ -173,12 +154,8 @@ void scheduler_tick(void)
     need_reschedule = true;
 }
 
-/* ============================================================
- * scheduler_terminate_task - Kill a task
- * ============================================================
- * 
- * Called when a task crashes (Data/Prefetch Abort)
- */
+/* scheduler_terminate_task — mark a task ZOMBIE and yield if self.
+ * Called when a task crashes (data/prefetch abort). */
 void scheduler_terminate_task(uint32_t id)
 {
     if (id >= MAX_TASKS || tasks[id] == NULL) {
@@ -196,18 +173,10 @@ void scheduler_terminate_task(uint32_t id)
     if (current_task == task) {
         pr_info("[SCHED] Task %d IS SUICIDE - Yielding...\n", task->id);
         
-        /* 
-         * CRITICAL: We are likely in ABT/UND Mode (Exception Context).
-         * We MUST switch to SVC Mode before calling schedule/context_switch.
-         * Otherwise, context_switch will use SP_abt/und which is wrong for the next task.
-         * 
-         * Logic:
-         * 1. Switch to SVC Mode (keeping IRQs disabled).
-         * 2. Call schedule().
-         * 
-         * Note: We don't care about saving the current ABT stack/regs because 
-         * this task is DEAD. We just need a safe environment to switch FROM.
-         */
+        /* We are in ABT/UND mode (exception context). Switch to SVC mode
+         * before calling schedule() so context_switch() uses SP_svc, not
+         * SP_abt/und.  Saving the current ABT registers is unnecessary
+         * because this task is already marked ZOMBIE. */
         
         /* Switch to SVC Mode (0x13) | IRQ Disabled (0x80) | FIQ Disabled (0x40) */
         __asm__ volatile (
@@ -219,13 +188,10 @@ void scheduler_terminate_task(uint32_t id)
     }
 }
 
-/* ============================================================
- * schedule - Voluntary Task Switch
- * ============================================================
- * 
- * Called by tasks when they detect need_reschedule flag.
- * Runs in SVC mode (task context), so safe to switch.
- */
+/* schedule — voluntary context switch
+ *
+ * Called by tasks that detect need_reschedule.  Runs in SVC mode
+ * (task context), safe to call context_switch() from here. */
 void schedule(void)
 {
     struct task_struct *prev_task;
@@ -311,9 +277,9 @@ void schedule(void)
     current_task_index = next_index;
     current_task = next_task;
 
-    /* CRITICAL: TTBR0 swap lives inside context_switch() asm, between
-     * saving prev's SP and loading next's — otherwise either stack VA
-     * may briefly resolve under the wrong pgd. */
+    /* TTBR0 swap lives inside context_switch() asm, between saving
+     * prev's SP and loading next's — otherwise either stack VA may
+     * briefly resolve under the wrong page table. */
     context_switch(prev_task, next_task);
 }
 

@@ -1,11 +1,10 @@
-/* ============================================================
- * svc_context.h
- * ------------------------------------------------------------
- * SVC exception frame layout.
- * ============================================================ */
-
-/* CRITICAL: field order must mirror exception_entry_svc in
- * exception_entry.S — keep in sync. */
+/*
+ * include/svc_context.h — SVC exception frame layout
+ *
+ * Field order must mirror the exception_entry_svc push sequence
+ * in exception_entry.S.  Changing either without updating the other
+ * will corrupt the restored register state.
+ */
 
 #ifndef SVC_CONTEXT_H
 #define SVC_CONTEXT_H

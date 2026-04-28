@@ -1,6 +1,6 @@
-/* ============================================================
- * procfs.h — virtual /proc filesystem.
- * ============================================================ */
+/*
+ * include/procfs.h — procfs interface
+ */
 
 #ifndef PROCFS_H
 #define PROCFS_H

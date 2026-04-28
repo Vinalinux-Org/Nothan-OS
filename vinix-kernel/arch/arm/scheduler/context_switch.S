@@ -1,148 +1,68 @@
-/* ============================================================
- * context_switch.S
- * ------------------------------------------------------------
- * Context switch — see ARMv7-A ARM Part B (Exception Handling).
- * ============================================================ */
+/*
+ * arch/arm/scheduler/context_switch.S — low-level context switch
+ *
+ * Saves and restores the callee-saved register set (r3–r11, lr) and
+ * the per-mode stack pointers (SP_svc and SP_usr/LR_usr) between two
+ * task_struct instances.  TTBR0 is also switched when the incoming
+ * task has its own page table (pgd_pa != 0).
+ */
 
 .global context_switch
 .global start_first_task
 
 .section .text
 
-/* ============================================================
- * context_switch - Switch from current task to next task
- * ============================================================
- * 
- * Standard Callee-Saved Context Switch (Cooperative)
- * 
- * Arguments:
- *   r0 = struct task_struct *current (pointer to current task)
- *   r1 = struct task_struct *next (pointer to next task)
- * 
- * Stack frame layout (40 bytes):
- *   [LR] [R11] [R10] ... [R4] [R3]
- *   (R3 is saved as padding for 8-byte stack alignment)
- * 
- * Note: R0-R3, R12 are caller-saved and handled by C compiler if needed.
- *       SPSR is NOT saved because we are staying in Kernel Mode (SVC).
- */
+/* context_switch(struct task_struct *current, struct task_struct *next)
+ * Saves r3–r11+lr (callee-saved) + SP to current, restores from next. */
 context_switch:
-    /* 
-     * 1. Save Callee-Saved Registers + R3 Pad + LR
-     * stmfd sp!, {r3-r11, lr}
-     */
     stmfd   sp!, {r3-r11, lr}
-    
-    /* 
-     * 2. Save Stack Pointer to current task structure
-     * current->context.sp is at offset 52 (13 * 4) 
-     * defined in existing task_struct layout matching r0-r12 placeholder
-     */
-    str     sp, [r0, #52]
-    
-    /* 
-     * 3. Memory barrier
-     */
+    str     sp, [r0, #52]      @ current->context.sp; offset matches task_struct layout
     dsb
-    
-    /*
-     * 3.5. CRITICAL: Save User Stack Pointer (SP_usr) AND Link Register (LR_usr)
-     * Switch to System Mode (0x1F) to access SP_usr and LR_usr
-     */
-    cps     #0x1F               @ Switch to System Mode
-    add     r2, r0, #64         @ Point to context.sp_usr
-    stmia   r2, {sp, lr}        @ Save SP_usr (r13) and LR_usr (r14)
-    cps     #0x13               @ Switch back to SVC Mode
 
-    /*
-     * 3.7. Switch TTBR0 to next->pgd_pa BEFORE loading next's SP.
-     * Offset 116 = struct task_struct::pgd_pa. If zero, skip (kept).
-     * Stack VAs on either side stay valid because prev's stack has
-     * already been written (SP saved) while prev's pgd was active,
-     * and next's stack is not touched until after TTBR0 flips.
-     */
-    ldr     r2, [r1, #116]
+    /* System Mode gives access to banked SP_usr and LR_usr. */
+    cps     #0x1F               @ System Mode
+    add     r2, r0, #64         @ context.sp_usr
+    stmia   r2, {sp, lr}        @ save SP_usr + LR_usr
+    cps     #0x13               @ SVC Mode
+
+    /* Switch TTBR0 before loading next's SP: next's stack VA is only valid
+     * in next's address space, and prev's stack is already saved. */
+    ldr     r2, [r1, #116]      @ next->pgd_pa; 0 = kernel task, keep current TTBR0
     cmp     r2, #0
     beq     1f
     orr     r2, r2, #0x4A       @ Inner/Outer WB-WA + Shareable
-    mcr     p15, 0, r2, c2, c0, 0     @ TTBR0
+    mcr     p15, 0, r2, c2, c0, 0
     dsb
     mov     r3, #0
-    mcr     p15, 0, r3, c8, c7, 0     @ TLBIALL
+    mcr     p15, 0, r3, c8, c7, 0
     dsb
     isb
 1:
 
-    /* ========================================
-     * LOAD NEXT TASK
-     * ======================================== */
-
-    /*
-     * 4. Load next task's SP (Kernel SP)
-     * r1 contains next task pointer
-     */
     ldr     sp, [r1, #52]
-    
-    /* 
-     * 4.5. CRITICAL: Restore User Stack Pointer (SP_usr) AND Link Register (LR_usr)
-     */
-    cps     #0x1F               @ Switch to System Mode
-    add     r2, r1, #64         @ Point to context.sp_usr
-    ldmia   r2, {sp, lr}        @ Restore SP_usr and LR_usr
-    cps     #0x13               @ Switch back to SVC Mode
-    
-    /* 
-     * 5. Restore next task's Registers (Frame 2: Kernel Context)
-     */
+
+    cps     #0x1F               @ System Mode
+    add     r2, r1, #64         @ context.sp_usr
+    ldmia   r2, {sp, lr}        @ restore SP_usr + LR_usr
+    cps     #0x13               @ SVC Mode
+
     ldmfd   sp!, {r3-r11, lr}
-    
-    /* 
-     * 6. Return to caller (svc_handler or scheduler)
-     * 
-     * IMPORTANT: Mode switching is NOT done here!
-     * - context_switch is called from SVC mode (inside svc_handler)
-     * - We return to svc_handler via bx lr
-     * - svc_handler returns through svc_exit_trampoline
-     * - svc_exit_trampoline performs the actual mode switch (SVC→USR)
-     * 
-     * Stack at this point contains the SVC exception frame that was
-     * pushed by exception_entry_svc. That frame will be restored when
-     * svc_handler returns.
-     */
+
+    /* Mode switch (SVC→USR) happens in svc_exit_trampoline, not here —
+     * we return to svc_handler which then returns through the trampoline. */
     bx      lr
-    
-/* ============================================================
- * start_first_task - Initialize first task execution
- * ============================================================
- * 
- * Called once at scheduler startup to load first task.
- * Does NOT save any context (no current task exists).
- * 
- * Arguments:
- *   r0 = struct task_struct *first (pointer to first task)
- */
+
+/* start_first_task(struct task_struct *first)
+ * No current task — only restore, do not save. */
 start_first_task:
-    /* 
-     * 1. Load task's SP (Kernel SP)
-     */
     ldr     sp, [r0, #52]
 
-    /* 
-     * 1.5. CRITICAL: Restore User Stack Pointer (SP_usr) AND LR_usr
-     */
-    cps     #0x1F               @ Switch to System Mode
-    add     r2, r0, #64         @ Point to context.sp_usr
-    ldmia   r2, {sp, lr}        @ Restore SP_usr and LR_usr
-    cps     #0x13               @ Switch back to SVC Mode
-    
-    /* 
-     * 2. Restore Registers (pop Frame 2: Kernel Context + R3 Pad)
-     */
+    cps     #0x1F               @ System Mode
+    add     r2, r0, #64         @ context.sp_usr
+    ldmia   r2, {sp, lr}        @ restore SP_usr + LR_usr
+    cps     #0x13               @ SVC Mode
+
     ldmfd   sp!, {r3-r11, lr}
-    
-    /* 
-     * 3. Jump to task (actually jumps to svc_exit_trampoline)
-     */
     bx      lr
 
 .end

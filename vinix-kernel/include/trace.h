@@ -1,8 +1,6 @@
-/* ============================================================
- * trace.h
- * ------------------------------------------------------------
- * Kernel execution-flow trace macros (distinct from logging).
- * ============================================================ */
+/*
+ * include/trace.h — Kernel trace/debug macros
+ */
 
 #ifndef TRACE_H
 #define TRACE_H

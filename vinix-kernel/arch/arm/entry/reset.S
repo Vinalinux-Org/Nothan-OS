@@ -1,93 +1,97 @@
-/* ============================================================
- * reset.S
- * ------------------------------------------------------------
- * Reset handler — first code after CPU reset
- * ============================================================
- * - MMU: OFF
- * - Cache: OFF
- * - No stack initially
+/*
+ * arch/arm/entry/reset.S — CPU reset handler
  *
- * IMPORTANT (3G/1G split):
- *   Stack symbols (_svc_stack_top etc.) are at kernel VA
- *   (0xC0xxxxxx) because the linker places .stack in the
- *   kernel VA region. At boot time MMU is OFF, so we must
- *   convert VA → PA by subtracting VA_OFFSET (0x40000000).
- *   After the MMU trampoline in entry.S, stack pointers are
- *   reloaded to the correct VA values.
- * ============================================================ */
+ * This is the first code executed when the CPU comes out of reset or is
+ * released from boot ROM.  The processor state on entry is undefined
+ * except for what the ARM architecture guarantees: supervisor mode,
+ * IRQ and FIQ are architecturally unmasked (CPSR.I and CPSR.F may be
+ * set or clear depending on the core revision), and neither the MMU
+ * nor the data cache are enabled.
+ *
+ * This handler performs the minimum safe pre-MMU initialization and
+ * hands off to the boot trampoline in entry.S.
+ */
+
+/*
+ * VA_OFFSET_BOOT — offset between kernel link VAs (0xC0000000) and the
+ * physical SDRAM base (0x80000000).  All linker symbols (_*_stack_top,
+ * _bss_start, etc.) are emitted as virtual addresses; subtracting this
+ * constant converts them to the physical addresses accessible before
+ * the MMU is on.  entry.S reloads the stacks to their VAs after the
+ * MMU has been enabled.
+ */
+.equ VA_OFFSET_BOOT, 0x40000000   @ 0x01 ROR 2 — valid ARM immediate
 
     .section .text.reset, "ax"
     .align 4
     .global reset_handler
 
-/* VA_OFFSET = KERNEL_VA_BASE - DDR_PA_BASE = 0x40000000
- * This is a valid ARM immediate: 0x01 ROR 2 */
-.equ VA_OFFSET_BOOT, 0x40000000
-
 reset_handler:
-    /* --------------------------------------------------------
-     * Mask IRQ and FIQ
-     * -------------------------------------------------------- */
+    /*
+     * Mask IRQ and FIQ unconditionally as the very first instruction.
+     * The ARM core can take an interrupt as soon as the vector table is
+     * set up; without masking, a spurious peripheral interrupt before
+     * any stack exists would cause an unrecoverable exception.
+     */
     cpsid   if
 
-    /* --------------------------------------------------------
-     * Ensure CPU is in SVC mode
-     * -------------------------------------------------------- */
+    /*
+     * Force the processor into SVC32 mode (mode field = 0x13).
+     * Writing CPSR via MRS/BIC/ORR/MSR preserves all other CPSR bits
+     * (endianness, IT state, interrupt masks) unchanged.
+     */
     mrs     r0, cpsr
     bic     r0, r0, #0x1F
     orr     r0, r0, #0x13
     msr     cpsr_c, r0
 
-    /* --------------------------------------------------------
-     * Setup stacks for ALL exception modes
-     * --------------------------------------------------------
-     * CRITICAL: Must setup ALL exception stacks BEFORE
-     * configuring VBAR, because once VBAR is set, any
-     * exception will use these stacks!
+    /*
+     * Set per-mode stack pointers to physical addresses.
+     * All linker-generated _*_stack_top symbols are virtual; subtract
+     * VA_OFFSET_BOOT to obtain the corresponding physical address while
+     * the MMU is still off.
      *
-     * Linker symbols are VA (0xC0xxxxxx). Subtract VA_OFFSET
-     * to get PA for pre-MMU execution.
-     * -------------------------------------------------------- */
-
-    /* FIQ mode stack */
+     * All mode stacks must be initialized before writing VBAR below.
+     * Once VBAR is set, any exception (including an IRQ caused by a
+     * stray peripheral) will immediately attempt to use whichever
+     * mode's stack was current — an uninitialized SP would cause a
+     * cascading data abort with no recovery path.
+     *
+     * CPS mode field encoding (ARMv7-A):
+     *   0x11 = FIQ   0x12 = IRQ   0x13 = SVC
+     *   0x17 = Abort 0x1B = Undefined
+     */
     cps     #0x11
     ldr     sp, =_fiq_stack_top
     sub     sp, sp, #VA_OFFSET_BOOT
 
-    /* IRQ mode stack */
     cps     #0x12
     ldr     sp, =_irq_stack_top
     sub     sp, sp, #VA_OFFSET_BOOT
 
-    /* ABT mode stack (for Data/Prefetch Abort) */
     cps     #0x17
     ldr     sp, =_abt_stack_top
     sub     sp, sp, #VA_OFFSET_BOOT
 
-    /* UND mode stack (for Undefined Instruction) */
     cps     #0x1B
     ldr     sp, =_und_stack_top
     sub     sp, sp, #VA_OFFSET_BOOT
 
-    /* Return to SVC mode and setup SVC stack */
     cps     #0x13
     ldr     sp, =_svc_stack_top
     sub     sp, sp, #VA_OFFSET_BOOT
 
-    /* --------------------------------------------------------
-     * Set VBAR to boot-time vector table (PA)
-     * --------------------------------------------------------
-     * _boot_start = PA 0x80000000 (in .text.boot, VMA == PA)
-     * This is correct for MMU-off execution.
-     * After the MMU trampoline, VBAR is updated to VA.
-     * -------------------------------------------------------- */
+    /*
+     * Point VBAR at the physical address of the boot vector table.
+     * _boot_start is placed in .text.boot (VMA == LMA == PA 0x80000000),
+     * so no VA-to-PA adjustment is needed here.  mmu_init() will update
+     * VBAR to the corresponding high virtual address after the permanent
+     * kernel page tables are installed.
+     */
     ldr     r0, =_boot_start
-    mcr     p15, 0, r0, c12, c0, 0     /* Write VBAR */
+    mcr     p15, 0, r0, c12, c0, 0
     isb
 
-    /* --------------------------------------------------------
-     * Jump to entry.S
-     * -------------------------------------------------------- */
     b       entry
 
     .extern _boot_start

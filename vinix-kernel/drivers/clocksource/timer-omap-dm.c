@@ -1,4 +1,8 @@
-/* AM335x DMTimer2 driver. */
+/*
+ * drivers/clocksource/timer-omap-dm.c
+ *
+ * AM335x DMTimer2 — 10 ms scheduler tick, sourced from 24 MHz M_OSC crystal.
+ */
 
 #include "types.h"
 #include "timer.h"
@@ -15,59 +19,41 @@
 
 /* CM_PER_L4LS_CLKSTCTRL bits */
 #define CLKTRCTRL_MASK          0x3
-#define CLKTRCTRL_SW_WKUP       0x2      /* Force wakeup */
+#define CLKTRCTRL_SW_WKUP       0x2
 
-/* ============================================================
- * DMTimer2 Register Offsets
- * ============================================================ */
+#define TIDR            0x00
+#define TIOCP_CFG       0x10
+#define TISTAT          0x14
+#define IRQSTATUS_RAW   0x24
+#define IRQSTATUS       0x28
+#define IRQENABLE_SET   0x2C
+#define IRQENABLE_CLR   0x30
+#define TCLR            0x38
+#define TCRR            0x3C
+#define TLDR            0x40
+#define TTGR            0x44
+#define TWPS            0x48
+#define TMAR            0x4C
+#define TCAR1           0x50
+#define TSICR           0x54
+#define TCAR2           0x58
 
-#define TIDR            0x00    /* Identification register */
-#define TIOCP_CFG       0x10    /* OCP interface configuration */
-#define TISTAT          0x14    /* Status (reset) */
-#define IRQSTATUS_RAW   0x24    /* IRQ raw status */
-#define IRQSTATUS       0x28    /* IRQ status (after mask) */
-#define IRQENABLE_SET   0x2C    /* IRQ enable set */
-#define IRQENABLE_CLR   0x30    /* IRQ enable clear */
-#define TCLR            0x38    /* Control register */
-#define TCRR            0x3C    /* Counter register */
-#define TLDR            0x40    /* Load register */
-#define TTGR            0x44    /* Trigger register */
-#define TWPS            0x48    /* Write-posted pending */
-#define TMAR            0x4C    /* Match register */
-#define TCAR1           0x50    /* Capture register 1 */
-#define TSICR           0x54    /* Synchronous interface control */
-#define TCAR2           0x58    /* Capture register 2 */
-
-/* TIOCP_CFG bits */
 #define TIOCP_SOFTRESET         (1 << 0)
-
-/* TISTAT bits */
 #define TISTAT_RESETDONE        (1 << 0)
-
-/* TSICR bits */
 #define TSICR_POSTED            (1 << 2)
-
-/* TWPS bits */
 #define TWPS_W_PEND_TCLR        (1 << 0)
 #define TWPS_W_PEND_TCRR        (1 << 1)
 #define TWPS_W_PEND_TLDR        (1 << 2)
-
-/* TCLR bits */
-#define TCLR_ST                 (1 << 0)    /* Start/stop timer */
+#define TCLR_ST                 (1 << 0)    /* Start/stop */
 #define TCLR_AR                 (1 << 1)    /* Auto-reload */
-
-/* IRQSTATUS bits */
-#define IRQ_MAT_IT_FLAG         (1 << 0)    /* Match interrupt */
-#define IRQ_OVF_IT_FLAG         (1 << 1)    /* Overflow interrupt */
-#define IRQ_TCAR_IT_FLAG        (1 << 2)    /* Capture interrupt */
-
-/* ============================================================
- * Timer State
- * ============================================================ */
+#define IRQ_MAT_IT_FLAG         (1 << 0)
+#define IRQ_OVF_IT_FLAG         (1 << 1)    /* Overflow — used for tick */
+#define IRQ_TCAR_IT_FLAG        (1 << 2)
 
 static volatile uint32_t timer_ticks = 0;
 
-/* CRITICAL: must run before any timer register access. */
+/* The module clock must be enabled before any DMTimer2 register access;
+ * accessing an unclocked peripheral causes a data abort. */
 static void timer2_clock_enable(void)
 {
     uint32_t val;
@@ -103,8 +89,6 @@ static struct clock_event_device omap_dmtimer_clkevt;
 static int omap_dmtimer_set_periodic(struct clock_event_device *dev)
 {
     (void)dev;
-    /* Hardware is configured for 10 ms periodic in timer_init();
-     * nothing to do here yet. Stub for future runtime mode switch. */
     return 0;
 }
 
@@ -152,9 +136,8 @@ void timer_init(void)
         return;
     }
 
-    /* Register the clockevent BEFORE enabling the IRQ + starting the
-     * timer. Otherwise an IRQ that fires in the gap finds
-     * clkevt.event_handler == NULL and drops the tick. */
+    /* Register clockevent BEFORE enable_irq + start: a tick firing in the
+     * gap would find event_handler == NULL and silently drop. */
     omap_dmtimer_clkevt.name                = "omap-dmtimer";
     omap_dmtimer_clkevt.rating              = 200;
     omap_dmtimer_clkevt.set_state_periodic  = omap_dmtimer_set_periodic;
@@ -178,13 +161,13 @@ uint32_t timer_get_ticks(void)
 #define TIMER_FCLK_HZ   24000000
 #define TICKS_PER_MS     (TIMER_FCLK_HZ / 1000)
 
-/* Free-running setup for delay_ms() before timer_init() takes over. */
+/* Pre-scheduler delay helper; uses DMTimer2 free-run, no overflow IRQ. */
 void timer_early_init(void)
 {
     if ((mmio_read32(CM_PER_L4LS_CLKSTCTRL) & CLKTRCTRL_MASK) != CLKTRCTRL_SW_WKUP)
         mmio_write32(CM_PER_L4LS_CLKSTCTRL, CLKTRCTRL_SW_WKUP);
 
-    /* DMTimer2 clock source = M_OSC (24 MHz crystal). TRM 8.1.6.7. */
+    /* 24 MHz crystal — stable reference independent of core PLL. */
     #define CLKSEL_CLK_M_OSC            0x1
     mmio_write32(CM_DPLL_CLKSEL_TIMER2_CLK, CLKSEL_CLK_M_OSC);
     while ((mmio_read32(CM_DPLL_CLKSEL_TIMER2_CLK) & 0x3) != CLKSEL_CLK_M_OSC)
@@ -209,8 +192,6 @@ void delay_ms(uint32_t ms)
     while ((mmio_read32(DMTIMER2_BASE + TCRR) - start) < ticks)
         ;
 }
-
-/* Platform driver wiring */
 
 static int omap_dmtimer_probe(struct platform_device *pdev)
 {

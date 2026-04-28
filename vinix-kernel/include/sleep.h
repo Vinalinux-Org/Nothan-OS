@@ -1,8 +1,6 @@
-/* ============================================================
- * sleep.h
- * ------------------------------------------------------------
- * Tick-granular sleep for kernel tasks.
- * ============================================================ */
+/*
+ * include/sleep.h — Sleep and msleep interface for task-blocking delays.
+ */
 
 #ifndef SLEEP_H
 #define SLEEP_H

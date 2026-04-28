@@ -1,8 +1,6 @@
-/* ============================================================
- * slab.c
- * ------------------------------------------------------------
- * Fixed size-class slab + kmalloc/kfree.
- * ============================================================ */
+/*
+ * mm/slab.c — fixed size-class slab allocator and kmalloc/kfree
+ */
 
 #include "slab.h"
 #include "mmu.h"
@@ -176,9 +174,7 @@ void slab_init(void)
     pr_info("[SLAB] kmalloc classes 32..2048 ready\n");
 }
 
-/* ============================================================
- * Self-test
- * ============================================================ */
+
 
 void slab_selftest(void)
 {

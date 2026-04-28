@@ -1,8 +1,6 @@
-/* ============================================================
- * wait_queue.h
- * ------------------------------------------------------------
- * Blocking wait on a condition, woken by wake_up().
- * ============================================================ */
+/*
+ * include/wait_queue.h — Wait queue — block/wake tasks on a condition.
+ */
 
 #ifndef WAIT_QUEUE_H
 #define WAIT_QUEUE_H

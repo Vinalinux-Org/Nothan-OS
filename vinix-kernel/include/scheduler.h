@@ -1,8 +1,6 @@
-/* ============================================================
- * scheduler.h
- * ------------------------------------------------------------
- * Round-robin preemptive scheduler interface.
- * ============================================================ */
+/*
+ * include/scheduler.h — round-robin preemptive scheduler interface
+ */
 
 #ifndef SCHEDULER_H
 #define SCHEDULER_H
@@ -10,16 +8,10 @@
 #include "types.h"
 #include "task.h"
 
-/* ============================================================
- * Scheduler Configuration
- * ============================================================ */
 
 #define MAX_TASKS       5       /* idle + init + shell + 2 dynamic slots */
 #define IDLE_TASK_ID    0       /* Idle task always at index 0 */
 
-/* ============================================================
- * Scheduler API
- * ============================================================ */
 
 void scheduler_init(void);
 
@@ -42,7 +34,7 @@ void schedule(void);
 /* Returns NULL if the scheduler hasn't started. */
 struct task_struct *scheduler_current_task(void);
 
-/* Linux-style — `current` expands to the active task pointer. */
+/* `current` expands to the active task pointer. */
 #define current  scheduler_current_task()
 
 /* Raw slot access for fork/wait; returns NULL on empty slot. */

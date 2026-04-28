@@ -1,8 +1,6 @@
-/* ============================================================
- * mmu.h
- * ------------------------------------------------------------
- * MMU interface — 3G user / 1G kernel split.
- * ============================================================ */
+/*
+ * include/mmu.h — MMU interface, 3 GB user / 1 GB kernel split
+ */
 
 /* VA layout:
  *   User    : 0x00000000 – 0xBFFFFFFF  (3GB)
@@ -17,41 +15,27 @@
 #include "mach/memory.h"
 #include "mach/memmap.h"
 
-/* ============================================================
- * L1 Section Descriptor Bit Fields
- * ============================================================
- *
- * 31        20 19 18 17 16 15 14:12 11:10 9 8:5 4 3 2 1 0
- * [base addr ] NS  0  nG  S APX TEX  AP  imp Domain XN C B 1 0
- * ============================================================ */
+
 
 #define MMU_DESC_SECTION (0x2) /* bits[1:0] = 10 → Section */
 
-/* ============================================================
- * Access Permission (APX=0)
- * ============================================================ */
+
 #define MMU_AP_KERN_RW (0x1 << 10)     /* AP=01: Kernel RW, User no-access */
 #define MMU_AP_FULL_ACCESS (0x3 << 10) /* AP=11: Kernel RW, User RW */
 
-/* ============================================================
- * Domain — bits[8:5], 16 domains (0–15)
- * ============================================================ */
+
 #define MMU_DOMAIN(d) (((d) & 0xF) << 5)
 #define MMU_DOMAIN_KERNEL 0
 #define MMU_DOMAIN_USER 1
 
-/* ============================================================
- * TEX, C, B — Memory Attributes (no TEX remap)
- * ============================================================ */
+
 #define MMU_TEX(t) (((t) & 0x7) << 12)
 #define MMU_CACHED (1 << 3)     /* C bit */
 #define MMU_BUFFERED (1 << 2)   /* B bit */
 #define MMU_SHAREABLE (1 << 16) /* S bit */
 #define MMU_XN (1 << 4)         /* Execute-Never */
 
-/* ============================================================
- * Composite Section Attributes
- * ============================================================ */
+
 
 /* Strongly Ordered, Kernel-only, no execute (peripherals) */
 #define MMU_SECT_PERIPHERAL \
@@ -70,9 +54,7 @@
 #define MMU_SECT_FB_RAM \
     (MMU_DESC_SECTION | MMU_AP_KERN_RW | MMU_DOMAIN(MMU_DOMAIN_KERNEL) | MMU_TEX(1) | MMU_XN)
 
-/* ============================================================
- * DACR — Domain Access Control
- * ============================================================ */
+
 #define DACR_NO_ACCESS 0x0
 #define DACR_CLIENT 0x1  /* Enforce AP bits */
 #define DACR_MANAGER 0x3 /* Bypass AP checks */
@@ -81,26 +63,20 @@
 #define MMU_DACR_VALUE \
     ((DACR_CLIENT << (MMU_DOMAIN_KERNEL * 2)) | (DACR_CLIENT << (MMU_DOMAIN_USER * 2)))
 
-/* ============================================================
- * SCTLR Bits
- * ============================================================ */
+
 #define SCTLR_M (1 << 0)  /* MMU enable */
 #define SCTLR_A (1 << 1)  /* Alignment check */
 #define SCTLR_C (1 << 2)  /* D-Cache enable */
 #define SCTLR_Z (1 << 11) /* Branch prediction */
 #define SCTLR_I (1 << 12) /* I-Cache enable */
 
-/* ============================================================
- * Page Table Constants
- * ============================================================ */
+
 #define MMU_L1_ENTRIES 4096
 #define MMU_L1_ALIGN 16384        /* 16KB alignment */
 #define MMU_SECTION_SIZE 0x100000 /* 1MB */
 #define MMU_SECTION_SHIFT 20
 
-/* ============================================================
- * 3G/1G Virtual Memory Layout
- * ============================================================ */
+
 
 /* Kernel virtual address base (1GB kernel window) */
 #define KERNEL_VA_BASE 0xC0000000
@@ -144,35 +120,7 @@
 #define FB_PA_BASE   PLATFORM_FB_PA_BASE
 #define FB_SECTIONS  PLATFORM_FB_SIZE_MB
 
-/* ============================================================
- * Boot-time Temporary Identity Mapping
- * ============================================================
- * During the MMU trampoline, we need both identity (PA==VA)
- * and high (PA→VA 0xC0xxxxxx) mappings for the DDR range.
- * After jumping to high VA, the identity map is removed.
- */
-#define BOOT_IDENTITY_PA DDR_PA_BASE
-#define BOOT_IDENTITY_MB DDR_SIZE_MB /* 128MB temporary */
 
-/* ============================================================
- * L2 Small-Page Descriptor (4 KB page)
- * ============================================================
- *
- * 31..12 11 10  9  8..6 5..4  3 2 1 0
- * [PA  ] nG  S AP2 TEX  AP10  C B 1 XN
- *
- * Kernel RW cached WB/WA shareable: PA | 0x45E */
-#define MMU_L2_SMALL_PAGE_TYPE   0x2        /* bit 1 = 1 */
-#define MMU_L2_SMALL_KERN_RW     (MMU_L2_SMALL_PAGE_TYPE \
-                                  | (0x1 << 4)           /* AP[1:0]=01 */ \
-                                  | (0x1 << 6)           /* TEX=001   */ \
-                                  | (1 << 3)             /* C         */ \
-                                  | (1 << 2)             /* B         */ \
-                                  | (1 << 10))           /* S         */
-
-/* ============================================================
- * Public API
- * ============================================================ */
 
 /**
  * Build L1 page table and enable MMU + caches.

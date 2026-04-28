@@ -1,15 +1,9 @@
-/* ============================================================
- * vinix/mmc/host.h
- * ------------------------------------------------------------
- * MMC subsystem — host controller vtable. Drivers fill
- * struct mmc_host + struct mmc_host_ops, call mmc_add_host;
- * mmc-core handles card detection, identification, and the
- * gendisk wiring through mmc_block.
+/*
+ * include/vinix/mmc/host.h — MMC host controller interface
  *
- * omap_hsmmc currently does its own block_device registration —
- * Phase 2.7 will tease the generic core out so the driver only
- * exposes mmc_host_ops.
- * ============================================================ */
+ * Drivers fill struct mmc_host and struct mmc_host_ops,
+ * then call mmc_add_host() to register with the MMC core.
+ */
 
 #ifndef VINIX_MMC_HOST_H
 #define VINIX_MMC_HOST_H

@@ -1,8 +1,6 @@
-/* ============================================================
- * sync_selftest.c
- * ------------------------------------------------------------
- * Single-threaded mechanics check for atomic + spinlock.
- * ============================================================ */
+/*
+ * kernel/locking/sync_selftest.c — atomics and spinlock self-tests
+ */
 
 #include "atomic.h"
 #include "spinlock.h"

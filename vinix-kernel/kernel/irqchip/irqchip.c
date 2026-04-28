@@ -1,14 +1,6 @@
-/* ============================================================
- * irqchip.c
- * ------------------------------------------------------------
- * Generic IRQ chip registry. The kernel-side enable_irq /
- * disable_irq dispatch through whichever struct irq_chip the
- * platform's INTC driver registered here.
- *
- * Single-chip MVP: one global slot. When a second controller
- * (e.g., GPIO IRQ chip on top of INTC) lands, replace this
- * with a per-irq descriptor table mapping irq -> chip.
- * ============================================================ */
+/*
+ * kernel/irqchip/irqchip.c — IRQ chip registration
+ */
 
 #include "vinix/irqchip.h"
 #include "vinix/printk.h"

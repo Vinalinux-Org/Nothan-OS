@@ -1,15 +1,9 @@
-/* ============================================================
- * vinix/fb.h
- * ------------------------------------------------------------
- * Framebuffer subsystem — fb_info wraps a frame buffer and its
- * ops vtable. Drivers fill fb_info and call register_framebuffer;
- * fbdev/fbcon consume it for graphics + console rendering.
+/*
+ * include/vinix/fb.h — framebuffer subsystem interface
  *
- * Today drivers/video/fbdev/fbmem.c (was fb.c) provides putpixel,
- * fillrect, font, and console primitives directly. Phase 2.8 will
- * tease the LCDC driver away from these and have it own only an
- * fb_info that fbcon attaches to.
- * ============================================================ */
+ * fb_info wraps a framebuffer and its ops vtable.
+ * Drivers fill fb_info and call register_framebuffer().
+ */
 
 #ifndef VINIX_FB_H
 #define VINIX_FB_H

@@ -1,16 +1,10 @@
-/* ============================================================
- * serial_core.c
- * ------------------------------------------------------------
- * Generic serial framework — owns the RX ring buffer and the
- * wait queue that sys_read blocks on. UART hardware drivers
- * push received bytes via uart_serial_rx_push(); userspace path
- * (devfs /dev/tty, sys_read) consumes via uart_getc /
- * uart_rx_available.
+/*
+ * drivers/tty/serial/serial_core.c — generic serial RX framework
  *
- * Single-port for now (one circular buffer, one wait queue).
- * Multi-port support comes when struct uart_port from
- * vinix/serial_core.h gets a real registry.
- * ============================================================ */
+ * Owns the RX ring buffer and the wait queue that sys_read blocks on.
+ * UART hardware drivers push received bytes via uart_serial_rx_push();
+ * userspace (sys_read) consumes via uart_getc() / uart_rx_available().
+ */
 
 #include "uart.h"
 #include "irq.h"

@@ -1,8 +1,6 @@
-/* ============================================================
- * fork.c
- * ------------------------------------------------------------
- * do_fork: clone user process. Full memory copy (no COW).
- * ============================================================ */
+/*
+ * kernel/fork.c — fork() and process cloning
+ */
 
 #include "proc.h"
 #include "task.h"

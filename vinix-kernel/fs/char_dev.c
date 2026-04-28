@@ -1,8 +1,9 @@
-/* ============================================================
- * char_dev.c
- * ------------------------------------------------------------
- * Flat cdev registry — devfs walks this list to populate /dev.
- * ============================================================ */
+/*
+ * fs/char_dev.c — character device registry
+ *
+ * Maintains a flat array of registered cdevs indexed by slot number.
+ * devfs walks this list to populate /dev entries.
+ */
 
 #include "vinix/cdev.h"
 #include "string.h"

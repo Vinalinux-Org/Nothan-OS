@@ -1,8 +1,6 @@
-/* ============================================================
- * page_alloc.c
- * ------------------------------------------------------------
- * Bitmap page allocator.
- * ============================================================ */
+/*
+ * mm/page_alloc.c — bitmap page allocator, 4 KB granularity
+ */
 
 #include "page_alloc.h"
 #include "mach/memory.h"
@@ -108,9 +106,7 @@ void free_pages(uint32_t pa, unsigned int order)
 uint32_t page_alloc_total_pages(void) { return POOL_PAGES; }
 uint32_t page_alloc_free_pages(void)  { return free_count; }
 
-/* ============================================================
- * Self-test
- * ============================================================ */
+
 
 #define SELFTEST_ORDER0_N   100
 #define SELFTEST_ORDER3_MASK ((1u << (PAGE_SHIFT + PAGE_MAX_ORDER)) - 1u)

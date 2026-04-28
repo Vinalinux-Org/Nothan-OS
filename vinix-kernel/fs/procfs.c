@@ -1,13 +1,13 @@
-/* ============================================================
- * procfs.c — virtual /proc. Content is generated on read from
- * live kernel state; nothing is cached on disk.
+/*
+ * fs/procfs.c — virtual /proc filesystem
  *
- * File index encoding:
+ * Content is generated on read from live kernel state; nothing is
+ * cached on disk.  File index encoding:
  *   0              /proc/meminfo
  *   1              /proc/version
  *   2              /proc/mounts
- *   3..3+N-1       /proc/<slot>/status (N = MAX_TASKS)
- * ============================================================ */
+ *   3..3+N-1       /proc/<slot>/status  (N = MAX_TASKS)
+ */
 
 #include "procfs.h"
 #include "vfs.h"
@@ -32,10 +32,8 @@ extern uint8_t _bss_start[], _bss_end[];
 
 static char gen_buf[PROCFS_GEN_BUF];
 
-/* ------------------------------------------------------------
- * Generators — each writes into gen_buf and returns length.
- * Returning 0 means empty / no content; negative means error.
- * ------------------------------------------------------------ */
+/* Generators — each writes into gen_buf and returns length.
+ * Returning 0 means empty; negative means error. */
 
 static int gen_meminfo(void)
 {
@@ -125,9 +123,7 @@ static int regenerate(int file_index)
     return 0;
 }
 
-/* ------------------------------------------------------------
- * VFS adapter
- * ------------------------------------------------------------ */
+/* VFS adapter */
 
 /* Split "X/Y" into (X, Y). Returns Y or NULL if no slash. */
 static const char *split_component(const char *path, char *first, uint32_t cap)

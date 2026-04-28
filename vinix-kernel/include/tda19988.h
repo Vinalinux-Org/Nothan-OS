@@ -1,37 +1,26 @@
-/* ============================================================
- * tda19988.h
- * ------------------------------------------------------------
- * NXP TDA19988 HDMI transmitter driver interface.
- * ============================================================ */
+/*
+ * include/tda19988.h — NXP TDA19988 HDMI transmitter driver interface
+ */
 
 #ifndef TDA19988_H
 #define TDA19988_H
 
 #include "types.h"
 
-/* ============================================================
- * Register encoding: (page << 8) | addr
- * Page switch via CURPAGE register 0xFF at HDMI I2C addr
- * CEC has no page mechanism — direct register access
- * ============================================================ */
+
 
 #define TDA_MKREG(page, addr)   (((uint16_t)(page) << 8) | (addr))
 #define TDA_PAGE(reg)           (((reg) >> 8) & 0xFF)
 #define TDA_ADDR(reg)           ((reg) & 0xFF)
 
-/* ============================================================
- * I2C slave addresses (7-bit)
- * A1=0, A0=0 → HDMI=0x70, CEC=0x34
- * ============================================================ */
+
 #define TDA_HDMI_I2C_ADDR       0x70
 #define TDA_CEC_I2C_ADDR        0x34
 
 /* Page switch register (write at HDMI addr to select page) */
 #define TDA_CURPAGE_ADDR        0xFF
 
-/* ============================================================
- * CEC registers (no page; direct access via CEC addr 0x34)
- * ============================================================ */
+
 #define TDA_CEC_ENAMODS         0xFF    /* Module enable */
 #define   ENAMODS_RXSENS        (1 << 2)  /* Receiver sense */
 #define   ENAMODS_HDMI          (1 << 1)  /* HDMI core */
@@ -44,9 +33,7 @@
 #define   RXSHPDLEV_HPD          (1 << 0)  /* Hot plug detect level */
 #define   RXSHPDLEV_RXSENS      (1 << 1)  /* Receiver sense level */
 
-/* ============================================================
- * HDMI core — Page 0x00 (General Control)
- * ============================================================ */
+
 #define REG_VERSION         TDA_MKREG(0x00, 0x00)  /* R: chip version LSB */
 #define REG_MAIN_CNTRL0     TDA_MKREG(0x00, 0x01)  /* Main control */
 #define   MAIN_CNTRL0_SR    (1 << 0)                /* Soft reset */
@@ -192,10 +179,7 @@
 #define REG_TX33                TDA_MKREG(0x12, 0xB8)
 #define   TX33_HDMI             (1 << 1)
 
-/* ============================================================
- * HDMI core — Page 0x02 (PLL / Serializer / Analog)
- * Addresses verified against NXP BSL (tmbslTDA9989_local.h)
- * ============================================================ */
+
 #define REG_PLL_SERIAL_1        TDA_MKREG(0x02, 0x00)
 #define   PLL_SERIAL_1_SRL_FDN  (1 << 0)
 #define   PLL_SERIAL_1_SRL_IZ(x) (((x) & 0x3) << 1)
@@ -223,34 +207,25 @@
 #define   SEL_CLK_ENA_SC_CLK    (1 << 3)
 #define REG_ANA_GENERAL         TDA_MKREG(0x02, 0x12)
 
-/* ============================================================
- * HDMI core — Page 0x10 (InfoFrame / Packet)
- * ============================================================ */
+
 #define REG_AVI_IF              TDA_MKREG(0x10, 0x40)  /* AVI infoframe base */
 #define REG_IF2                 TDA_MKREG(0x10, 0x60)  /* InfoFrame slot 2 */
 #define REG_IF3                 TDA_MKREG(0x10, 0x80)
 #define REG_IF4                 TDA_MKREG(0x10, 0xA0)
 
-/* ============================================================
- * Expected chip version
- * ============================================================ */
+
 #define TDA19988_VERSION        0x0331
 
-/* ============================================================
- * Public API
- * ============================================================ */
+
 
 /**
  * Initialize TDA19988 HDMI transmitter for 800x600@60Hz RGB output
  *
- * Full init sequence matching QNX production driver order:
- * 1. CEC enable + soft reset
- * 2. PLL common config
- * 3. Version check + DDC/FRO setup
- * 4. Enable video/audio ports + VIP mux (dpms)
- * 5. Full video path config: timing, TBG, encoder (mode_set)
- *
  * Called after lcdc_start_raster() — TDA needs pixel clock from LCDC.
+ *
+ * Sequence: CEC enable + soft reset → PLL common config →
+ * version check + DDC/FRO setup → enable video/audio ports +
+ * VIP mux → full video path config: timing, TBG, encoder.
  *
  * CONTRACT:
  * - Must be called after i2c_init()

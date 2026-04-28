@@ -1,14 +1,9 @@
-/* ============================================================
- * vinix/fs.h
- * ------------------------------------------------------------
- * struct file + struct file_operations — Linux-style vtable
- * any character/block driver implements.
+/*
+ * include/vinix/fs.h — VFS file abstractions
  *
- * Today struct file is constructed ephemerally by devfs/procfs
- * on each read/write call (no inode → no persistent file table
- * outside per-process FDs in vfs_fd). Future inode work will
- * link f_inode and persist file across calls.
- * ============================================================ */
+ * struct file and struct file_operations vtable.
+ * struct file is constructed ephemerally by devfs/procfs on each call.
+ */
 
 #ifndef VINIX_FS_H
 #define VINIX_FS_H

@@ -1,8 +1,16 @@
-/* ============================================================
- * buffer_cache.c
- * ------------------------------------------------------------
- * Linear-scan block cache — 64 slots, no hash chaining.
- * ============================================================ */
+/*
+ * block/buffer_cache.c — write-back block cache
+ *
+ * Fixed-size array of BCACHE_BUFFERS slots.  On a miss, the least
+ * recently used valid slot is evicted (LRU by last_used tick).
+ * Dirty buffers are written back before eviction; bsync() flushes
+ * all dirty buffers on demand.
+ *
+ * No reference counting: a buffer_head pointer returned by bread()
+ * is valid only until the next bread() call that might evict the
+ * same slot.  Callers must finish using it before calling bread()
+ * again on the same device.
+ */
 
 #include "buffer_cache.h"
 #include "string.h"

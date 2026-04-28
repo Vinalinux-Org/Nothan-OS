@@ -1,8 +1,6 @@
-/* ============================================================
- * devfs.h
- * ------------------------------------------------------------
- * /dev filesystem — exposes registered char_devices as files.
- * ============================================================ */
+/*
+ * include/devfs.h — Device filesystem interface
+ */
 
 #ifndef DEVFS_H
 #define DEVFS_H

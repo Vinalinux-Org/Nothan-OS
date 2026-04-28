@@ -1,9 +1,6 @@
-/* ============================================================
- * irq_core.c
- * ------------------------------------------------------------
- * Generic IRQ dispatcher — request_irq / free_irq table backed
- * by the INTC driver (drivers/irqchip).
- * ============================================================ */
+/*
+ * kernel/irq/irq_core.c — IRQ handler dispatch table
+ */
 
 #include "irq.h"
 #include "intc.h"

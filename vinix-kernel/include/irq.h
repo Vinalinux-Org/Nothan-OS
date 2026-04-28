@@ -1,17 +1,12 @@
-/* ============================================================
- * irq.h
- * ------------------------------------------------------------
- * IRQ framework interface.
- * ============================================================ */
+/*
+ * include/irq.h — IRQ framework interface
+ */
 
 #ifndef IRQ_H
 #define IRQ_H
 
 #include "types.h"
 
-/* ============================================================
- * IRQ Configuration
- * ============================================================ */
 
 /* Maximum number of IRQ sources on AM335x */
 #define MAX_IRQS    128
@@ -42,15 +37,9 @@
 #define IRQ_GPIO3A      62
 #define IRQ_GPIO3B      63
 
-/* ============================================================
- * IRQ Handler Type
- * ============================================================ */
 
 typedef void (*irq_handler_t)(void *data);
 
-/* ============================================================
- * IRQ Framework API — Linux-aligned
- * ============================================================ */
 
 void irq_init(void);
 
@@ -68,7 +57,8 @@ void free_irq(unsigned int irq, void *dev);
 void enable_irq(unsigned int irq);
 void disable_irq(unsigned int irq);
 
-/* CRITICAL: always sends EOI — even for spurious/unhandled IRQs. */
+/* EOI must be sent for every IRQ — valid, spurious, and unhandled —
+ * otherwise the INTC keeps the line asserted. */
 void irq_dispatch(void *ctx);
 
 uint32_t irq_get_count(uint32_t irq);

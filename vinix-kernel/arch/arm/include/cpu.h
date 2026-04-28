@@ -1,17 +1,15 @@
-/* ============================================================
- * cpu.h
- * ------------------------------------------------------------
- * ARM CPU control interface
- * ============================================================ */
+/*
+ * arch/arm/include/cpu.h — ARM CPU control primitives
+ *
+ * Inline functions and macros for reading and writing CPSR,
+ * enabling/disabling IRQ, saving/restoring interrupt state,
+ * and issuing memory barrier instructions (DSB, DMB, ISB, WFI).
+ */
 
 #ifndef CPU_H
 #define CPU_H
 
 #include "types.h"
-
-/* ============================================================
- * CPSR Bit Definitions
- * ============================================================ */
 
 #define CPSR_MODE_MASK  0x1F    /* Mode bits [4:0] */
 #define CPSR_MODE_USR   0x10    /* User mode */
@@ -24,10 +22,6 @@
 
 #define CPSR_FIQ_BIT    (1 << 6)    /* F bit - FIQ mask */
 #define CPSR_IRQ_BIT    (1 << 7)    /* I bit - IRQ mask */
-
-/* ============================================================
- * IRQ Control Functions
- * ============================================================ */
 
 /* Precondition: intc_init() + irq_init() done, with at least one
  * handler registered (or willing to absorb spurious IRQs). */
@@ -83,10 +77,6 @@ static inline void irq_restore(uint32_t flags)
 {
     asm volatile("msr cpsr_c, %0" : : "r"(flags) : "memory");
 }
-
-/* ============================================================
- * Memory Barrier Functions
- * ============================================================ */
 
 static inline void dsb(void)
 {

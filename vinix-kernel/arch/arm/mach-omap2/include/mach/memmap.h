@@ -1,25 +1,20 @@
-/* ============================================================
- * platform/memmap.h
- * ------------------------------------------------------------
- * AM3358 peripheral memory map.
- * ============================================================ */
+/* arch/arm/mach-omap2/include/mach/memmap.h — AM3358 peripheral memory map. */
 
 #ifndef PLATFORM_MEMMAP_H
 #define PLATFORM_MEMMAP_H
 
 #include "types.h"
 
-/* AM335x TRM Ch.02 — peripheral bus base addresses. */
 #define PLATFORM_PERIPH_L4_WKUP_PA        0x44E00000
 #define PLATFORM_PERIPH_L4_WKUP_SECTIONS  1
 
 #define PLATFORM_PERIPH_L4_PER_PA         0x48000000
 #define PLATFORM_PERIPH_L4_PER_SECTIONS   4
 
-/* Individual peripheral bases — TRM Ch.02 memory map.
- * Drivers use these ONLY when platform_get_resource() is not yet
- * available (early console, pre-probe paths). Normal drivers get
- * their base from platform_get_resource() in probe(). */
+/* Individual peripheral base addresses.
+ * Drivers obtain their base from platform_get_resource() in probe().
+ * These constants are used only in early boot paths where the platform
+ * bus is not yet available (e.g. the early UART console). */
 #define OMAP_UART0_BASE     0x44E09000
 #define OMAP_WDT1_BASE      0x44E35000
 #define OMAP_MMC0_BASE      0x48060000

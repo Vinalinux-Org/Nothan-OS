@@ -1,15 +1,10 @@
-/* ============================================================
- * vinix/irqchip.h
- * ------------------------------------------------------------
- * struct irq_chip — interrupt controller vtable. Each IRQ chip
- * driver (intc, gic, ...) fills this and registers the chip with
- * the generic irq_core dispatcher.
+/*
+ * include/vinix/irqchip.h — interrupt controller vtable
  *
- * VinixOS today drives the single AM3358 INTC directly via
- * intc_enable_irq / intc_disable_irq; this header defines the
- * subsystem contract for the future when multiple controllers
- * (e.g., per-SoC INTC + GPIO IRQ chip) need to coexist.
- * ============================================================ */
+ * struct irq_chip defines the interface for IRQ chip drivers.
+ * Currently the AM335x INTC is driven directly; this header defines
+ * the contract for future multi-controller configurations.
+ */
 
 #ifndef VINIX_IRQCHIP_H
 #define VINIX_IRQCHIP_H

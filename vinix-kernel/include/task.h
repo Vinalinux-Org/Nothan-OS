@@ -1,8 +1,6 @@
-/* ============================================================
- * task.h
- * ------------------------------------------------------------
- * Task struct and task-management interface.
- * ============================================================ */
+/*
+ * include/task.h — task struct and management interface
+ */
 
 #ifndef TASK_H
 #define TASK_H
@@ -10,13 +8,10 @@
 #include "types.h"
 #include "vfs.h"
 
-/* ============================================================
- * Task Context Structure
- * ============================================================ */
 
-/* CRITICAL: field order must exactly match context_switch.S —
- * any mismatch corrupts registers.
- * PC is NOT stored separately: interrupted tasks use LR_irq;
+/* Field order must exactly match the register push sequence in
+ * context_switch.S.  Any mismatch corrupts the restored register state.
+ * PC is not stored separately: interrupted tasks resume via LR_irq;
  * new tasks load PC from their initial stack frame. */
 struct task_context {
     uint32_t r0;
@@ -41,20 +36,18 @@ struct task_context {
     uint32_t lr_usr;
 };
 
-/* ============================================================
- * Task Control Block
- * ============================================================ */
 
-/* Linux-aligned task states. RUNNING covers both "on CPU" and "on
- * runqueue waiting" — current task is identified by current pointer
- * comparison, not by separate state. */
+/* Task state values. RUNNING covers both "on CPU" and "on runqueue
+ * waiting" — the active task is identified by the current pointer,
+ * not by a separate state flag. */
 #define TASK_RUNNING         0x00
 #define TASK_INTERRUPTIBLE   0x01
 #define TASK_UNINTERRUPTIBLE 0x02
 #define TASK_ZOMBIE          0x20
 
-/* CRITICAL: fields up to `id` have frozen offsets — context_switch.S
- * reads context.sp / context.sp_usr by offset. Add new fields AFTER id. */
+/* Fields up to `id` have frozen offsets: context_switch.S reads
+ * context.sp and context.sp_usr by byte offset.  Add new fields
+ * after `id` to avoid breaking the assembly. */
 struct task_struct {
     struct task_context context;    /* Saved CPU state (72 bytes) */
     void *stack_base;               /* Pointer to stack bottom */
@@ -86,9 +79,6 @@ struct task_struct {
     struct vfs_fd       files[MAX_FDS];
 };
 
-/* ============================================================
- * Task Stack Initialization
- * ============================================================ */
 
 /* Builds the first stack frame so the inaugural context_switch()
  * resumes at entry_point with SPSR=SVC+IRQ-on and zeroed registers.

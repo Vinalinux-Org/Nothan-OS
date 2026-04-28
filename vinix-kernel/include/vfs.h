@@ -1,17 +1,13 @@
-/* ============================================================
- * vfs.h
- * ------------------------------------------------------------
- * Virtual File System Interface
- * ============================================================ */
+/*
+ * include/vfs.h — Virtual File System interface
+ */
 
 #ifndef VFS_H
 #define VFS_H
 
 #include "types.h"
 
-/* ============================================================
- * Constants
- * ============================================================ */
+
 #define MAX_FDS         16      /* Maximum open file descriptors */
 #define MAX_PATH        256     /* Maximum path length */
 
@@ -27,9 +23,7 @@ struct vfs_fd {
     struct vfs_operations *fs_ops;
 };
 
-/* ============================================================
- * VFS Operations Structure
- * ============================================================ */
+
 
 struct vfs_operations {
     /* Read path */
@@ -50,18 +44,14 @@ struct vfs_operations {
     int (*rename)(const char *old_name, const char *new_name);
 };
 
-/* ============================================================
- * VFS Initialization
- * ============================================================ */
+
 
 void vfs_init(void);
 
 /* All vfs_* return negative errno on failure. */
 int vfs_mount(const char *mount_point, struct vfs_operations *fs_ops);
 
-/* ============================================================
- * File Operations
- * ============================================================ */
+
 
 int vfs_open(const char *path, int flags);
 int vfs_read(int fd, void *buf, uint32_t len);

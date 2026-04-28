@@ -1,12 +1,11 @@
-/* ============================================================
- * block.c
- * ------------------------------------------------------------
- * Flat gendisk registry — Linux's add_disk pattern at minimal
- * scale. Single consumer per disk, no locking.
- * ============================================================ */
-
-/* INVARIANT: single consumer per disk — no locking. Add a
- * spinlock if concurrent mounts ever appear. */
+/*
+ * block/block.c — gendisk registry
+ *
+ * Maintains a flat array of registered block devices.  add_disk()
+ * registers a gendisk; blk_read()/blk_write() dispatch I/O through
+ * the disk's fops vtable.  A single consumer per disk is assumed;
+ * no locking is provided.
+ */
 
 #include "vinix/blkdev.h"
 #include "string.h"

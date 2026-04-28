@@ -1,8 +1,10 @@
-/* ============================================================
- * mmio.h
- * ------------------------------------------------------------
- * Memory-mapped I/O primitives.
- * ============================================================ */
+/*
+ * arch/arm/include/mmio.h — memory-mapped I/O accessors
+ *
+ * Volatile read/write wrappers for 8, 16, and 32-bit register accesses.
+ * The volatile qualifier prevents the compiler from caching or reordering
+ * peripheral register reads and writes.
+ */
 
 #ifndef MMIO_H
 #define MMIO_H

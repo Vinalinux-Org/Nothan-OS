@@ -1,11 +1,10 @@
-/* ============================================================
- * format.c — kernel snprintf. Smaller cousin of vinixlibc's
- * printf engine, but consumers are limited (procfs + selftest),
- * so no stream/fd sink — only buffer output.
+/*
+ * lib/format.c — kernel snprintf
  *
- * Grammar: %[-][0][width][l]{d,u,x,X,o,p,s,c,%}
- * No precision, no floating point.
- * ============================================================ */
+ * Buffer-only formatter for procfs and selftest output.
+ * Grammar: %[-][0][width][l]{d,u,x,X,o,p,s,c,%%}
+ * No precision, no floating point, no stream/fd sink.
+ */
 
 #include "format.h"
 #include "string.h"

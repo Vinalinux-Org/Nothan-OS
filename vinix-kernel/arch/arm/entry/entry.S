@@ -1,25 +1,37 @@
-/* ============================================================
- * entry.S
- * ------------------------------------------------------------
- * Boot trampoline — clears BSS at PA, enables MMU, jumps to high VA.
- * ============================================================ */
-
-/* CRITICAL preconditions on entry: SVC mode, IRQ/FIQ masked,
- * MMU + cache OFF, exception stacks pointing to PA (reset.S). */
+/*
+ * arch/arm/entry/entry.S — kernel boot trampoline
+ *
+ * Entered immediately after reset_handler completes its early-boot setup.
+ * At this point the CPU is in SVC mode with IRQ and FIQ masked, the MMU
+ * and data cache are both off, and all exception-mode stacks have been
+ * set to their physical addresses by reset.S.
+ *
+ * Responsibilities:
+ *   - Zero-fill .bss at physical address (C runtime requirement)
+ *   - Build the initial page table and activate the MMU
+ *   - Reload all per-mode stack pointers to their virtual addresses
+ *   - Branch to kernel_main in high virtual address space
+ */
 
     .section .text.boot_entry, "ax"
     .align  4
     .global entry
 
+/*
+ * VA_OFFSET_BOOT — the difference between the kernel virtual base
+ * (0xC0000000) and the physical load address (0x80000000).
+ * Used as an immediate subtraction operand to convert linker VAs to
+ * physical addresses before the MMU is active.
+ */
 .equ VA_OFFSET_BOOT, 0x40000000
 
 entry:
-    /* ========================================================
-     * 1. Clear .bss section
-     * ========================================================
-     * _bss_start / _bss_end are at kernel VA (0xC0xxxxxx).
-     * MMU is OFF → subtract VA_OFFSET to get PA.
-     * ======================================================== */
+    /*
+     * Zero .bss before any C code runs.  The linker emits _bss_start
+     * and _bss_end as virtual addresses (0xC0xxxxxx); the MMU is still
+     * off, so subtract VA_OFFSET_BOOT to obtain the physical addresses
+     * the SDRAM cells actually sit at.
+     */
     ldr     r0, =_bss_start
     sub     r0, r0, #VA_OFFSET_BOOT
     ldr     r1, =_bss_end
@@ -30,67 +42,63 @@ entry:
     strlo   r2, [r0], #4
     blo     1b
 
-    /* ========================================================
-     * 2. Build L1 page table (Phase A)
-     * ========================================================
-     * mmu_build_page_table_boot(uint32_t *pgd_pa) is a C
-     * function placed in .text.boot_entry (VMA == PA).
-     * Pass the physical address of the pgd array.
-     * ======================================================== */
+    /*
+     * Build the first-level page table at its physical address.
+     * mmu_build_page_table_boot() creates two mappings:
+     *   - identity map:  PA 0x80000000 → VA 0x80000000  (keeps PC valid
+     *                    for the few instructions after MCR TTBR0)
+     *   - kernel map:    PA 0x80000000 → VA 0xC0000000  (permanent high map)
+     *
+     * _pgd_start is a linker VA; subtract VA_OFFSET_BOOT for the PA.
+     */
     ldr     r0, =_pgd_start
-    sub     r0, r0, #VA_OFFSET_BOOT     /* pgd PA */
+    sub     r0, r0, #VA_OFFSET_BOOT
     bl      mmu_build_page_table_boot
 
-    /* ========================================================
-     * 3. Enable MMU
-     * ========================================================
-     * mmu_enable(uint32_t *pgd_base) is in .text.mmu_trampoline
-     * (VMA == PA, within .text.boot output section).
-     * After return: MMU ON, both identity map (PA→PA) and
-     * high map (PA→VA 0xC0xxxxxx) are active.
-     * We are still executing at PA (via identity map).
-     * ======================================================== */
     ldr     r0, =_pgd_start
-    sub     r0, r0, #VA_OFFSET_BOOT     /* pgd PA */
+    sub     r0, r0, #VA_OFFSET_BOOT
     bl      mmu_enable
+    /*
+     * MMU is now on.  Both the identity and high maps are live, so the
+     * CPU continues fetching from the physical address range via the
+     * identity map while addresses like stack symbols are already valid
+     * at their virtual equivalents.
+     */
 
-    /* ========================================================
-     * 4. Reload ALL stack pointers to VA
-     * ========================================================
-     * MMU is ON. Identity map keeps PA accessible.
-     * Load VA values from linker symbols so stacks work
-     * correctly after the identity map is removed.
-     * ======================================================== */
-    cps     #0x11                       /* FIQ mode */
+    /*
+     * Switch every ARM exception mode to its virtual-address stack.
+     * This must happen before mmu_init() tears down the identity map:
+     * once the identity mapping is removed, any SP that still holds a
+     * physical address will point into unmapped memory, causing an
+     * immediate data abort on the first stack access.
+     *
+     * CPS mode field encoding (ARMv7-A):
+     *   0x11 = FIQ   0x12 = IRQ   0x13 = SVC
+     *   0x17 = Abort 0x1B = Undefined
+     */
+    cps     #0x11
     ldr     sp, =_fiq_stack_top
 
-    cps     #0x12                       /* IRQ mode */
+    cps     #0x12
     ldr     sp, =_irq_stack_top
 
-    cps     #0x17                       /* ABT mode */
+    cps     #0x17
     ldr     sp, =_abt_stack_top
 
-    cps     #0x1B                       /* UND mode */
+    cps     #0x1B
     ldr     sp, =_und_stack_top
 
-    cps     #0x13                       /* SVC mode */
+    cps     #0x13
     ldr     sp, =_svc_stack_top
 
-    /* ========================================================
-     * 5. TRAMPOLINE — Jump to kernel_main at high VA
-     * ========================================================
-     * `ldr pc, =kernel_main` loads the VA (0xC0xxxxxx) from
-     * a literal pool in .text.boot_entry (accessible via
-     * identity map) and sets PC to that VA. The CPU then
-     * fetches from VA through the high mapping.
-     *
-     * After this instruction, we are running in kernel VA
-     * space. The identity map (PA→PA) is still active and
-     * will be removed by mmu_init() in kernel_main().
-     * ======================================================== */
+    /*
+     * Transfer control to kernel_main at its high virtual address.
+     * ldr pc loads the VA from the literal pool while the CPU is still
+     * at a physical PC; the instruction fetch for kernel_main then
+     * proceeds through the high map, completing the PA→VA switch.
+     */
     ldr     pc, =kernel_main
 
-    /* Should never reach here */
 halt:
     b       halt
 

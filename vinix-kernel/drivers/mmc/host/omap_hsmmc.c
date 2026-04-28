@@ -1,4 +1,10 @@
-/* AM335x MMC0 driver — 512B sector read (CMD17) / write (CMD24). */
+/*
+ * AM335x MMC0 Host Controller Driver
+ *
+ * Provides low-level access to the SD/MMC interface. It supports basic
+ * block I/O operations including card initialization, 512-byte sector
+ * reads (CMD17), and 512-byte sector writes (CMD24).
+ */
 
 #include "types.h"
 #include "mmio.h"
@@ -12,7 +18,7 @@
 #include "vinix/errno.h"
 #include "vinix/init.h"
 
-/* MMC0 pinmux pads — TRM 9.3.1 conf_<pin> registers */
+/* MMC0 pin multiplexing configuration registers */
 #define CONF_MMC0_DAT3          (CTRL_MODULE_BASE + 0x8F0)
 #define CONF_MMC0_DAT2          (CTRL_MODULE_BASE + 0x8F4)
 #define CONF_MMC0_DAT1          (CTRL_MODULE_BASE + 0x8F8)
@@ -22,7 +28,7 @@
 
 #define PIN_MODE_0              0
 
-/* MMC0 controller register offsets — TRM Ch.18. */
+/* MMC0 controller register offsets */
 #define MMC_SYSCONFIG           0x110
 #define MMC_SYSSTATUS           0x114
 #define MMC_CON                 0x12C
@@ -79,9 +85,9 @@ static uint32_t mmc_base;
 #define MMC_RSP_R6              (MMC_CMD_RSP_48 | MMC_CMD_CCCE | MMC_CMD_CICE)
 #define MMC_RSP_R7              (MMC_CMD_RSP_48 | MMC_CMD_CCCE | MMC_CMD_CICE)
 
-/* ============================================================
+/*
  * Driver State
- * ============================================================ */
+ */
 
 static int sdhc_card = 0;    /* 1 = SDHC (block addressing), 0 = SDSC (byte addr) */
 
@@ -93,8 +99,13 @@ static void mmc_delay(volatile uint32_t count)
     }
 }
 
-/* CRITICAL: Bootloader inherits MMC0 clock from ROM state; kernel must
- * enable PRCM explicitly, else MMC registers read all-ones and init hangs. */
+/*
+ * mmc_enable_clocks - Power up the MMC0 controller
+ *
+ * CRITICAL: The bootloader inherits the MMC0 clock state from the ROM.
+ * The kernel must enable the PRCM explicitly, otherwise MMC register
+ * reads will return all-ones and the initialization will hang.
+ */
 static int mmc_enable_clocks(void)
 {
     uint32_t val;
@@ -114,6 +125,16 @@ static int mmc_enable_clocks(void)
     return E_OK;
 }
 
+/*
+ * mmc_send_cmd - Issue a command to the SD card
+ * @cmd: The SD command index
+ * @arg: The 32-bit command argument
+ * @flags: Response and transfer direction flags
+ *
+ * Sends a command via the MMC controller and waits for completion.
+ * If an error occurs, it resets the command line to prevent the controller
+ * from deadlocking on subsequent commands.
+ */
 static int mmc_send_cmd(uint32_t cmd, uint32_t arg, uint32_t flags)
 {
     uint32_t status;
@@ -147,6 +168,14 @@ static int mmc_send_cmd(uint32_t cmd, uint32_t arg, uint32_t flags)
     return E_OK;
 }
 
+/*
+ * mmc_init - Initialize the host controller and probe the card
+ *
+ * This performs a full hardware reset, configures the pin multiplexing,
+ * sets the initial 400kHz clock, and walks through the SD card
+ * identification sequence (CMD8, ACMD41, CMD2, CMD3).
+ * Finally, it increases the clock speed to 24MHz for data transfers.
+ */
 int mmc_init(void)
 {
     uint32_t rsp, rca;
@@ -317,6 +346,14 @@ int mmc_init(void)
     return E_OK;
 }
 
+/*
+ * mmc_read_sectors - Read blocks from the SD card
+ * @lba: Logical Block Address (sector number)
+ * @count: Number of 512-byte sectors to read
+ * @dst: Destination buffer
+ *
+ * Uses CMD17 to sequentially read blocks from the SD card into memory.
+ */
 int mmc_read_sectors(uint32_t lba, uint32_t count, void *dst)
 {
     uint32_t *buf = (uint32_t *)dst;
@@ -363,6 +400,15 @@ int mmc_read_sectors(uint32_t lba, uint32_t count, void *dst)
     return E_OK;
 }
 
+/*
+ * mmc_write_sectors - Write blocks to the SD card
+ * @lba: Logical Block Address (sector number)
+ * @count: Number of 512-byte sectors to write
+ * @src: Source buffer
+ *
+ * Uses CMD24 to sequentially write blocks from memory to the SD card.
+ * Includes a mandatory controller reset sequence upon write failure.
+ */
 int mmc_write_sectors(uint32_t lba, uint32_t count, const void *src)
 {
     const uint32_t *buf = (const uint32_t *)src;
@@ -419,8 +465,11 @@ int mmc_write_sectors(uint32_t lba, uint32_t count, const void *src)
     return E_OK;
 }
 
-/* Platform driver wiring — registers as mmc_host, lets
- * kernel/mmc/block.c create the gendisk. */
+/*
+ * Platform driver wiring
+ * Registers this driver as an mmc_host, allowing the generic
+ * mmc/block.c core to construct the gendisk device.
+ */
 
 static int omap_hsmmc_probe(struct platform_device *pdev)
 {

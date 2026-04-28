@@ -1,8 +1,6 @@
-/* ============================================================
- * atomic.c
- * ------------------------------------------------------------
- * Uniprocessor atomics via IRQ-disable.
- * ============================================================ */
+/*
+ * kernel/locking/atomic.c — atomic read/modify/write primitives
+ */
 
 #include "atomic.h"
 

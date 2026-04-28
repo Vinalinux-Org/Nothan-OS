@@ -1,14 +1,6 @@
-/* ============================================================
- * vinix/clocksource.h
- * ------------------------------------------------------------
- * struct clock_event_device — periodic/oneshot timer abstraction
- * for the scheduler tick. A driver fills this with set_next_event
- * and set_state callbacks plus shift/mult for ns conversions.
- *
- * Today omap_dmtimer hardcodes a 10 ms autoreload. This header is
- * the contract for swapping in a different SoC timer without
- * rewriting kernel/sched/scheduler.c.
- * ============================================================ */
+/*
+ * include/vinix/clocksource.h — Clocksource registration interface
+ */
 
 #ifndef VINIX_CLOCKSOURCE_H
 #define VINIX_CLOCKSOURCE_H

@@ -1,15 +1,9 @@
-/* ============================================================
- * vinix/blkdev.h
- * ------------------------------------------------------------
- * Block layer — gendisk + block_device_operations vtable.
- * Drivers fill struct gendisk and call add_disk() to expose it.
+/*
+ * include/vinix/blkdev.h — block device interface
  *
- * Today gendisk holds both disk metadata and the fops vtable —
- * Linux splits this further (gendisk + struct block_device per
- * open). MVP collapses since there is no partition device model
- * yet; partitions/msdos.c still parses the MBR but produces
- * partition LBA offsets, not separate gendisks.
- * ============================================================ */
+ * gendisk descriptor and block_device_operations vtable.
+ * Drivers fill struct gendisk and call add_disk() to register a block device.
+ */
 
 #ifndef VINIX_BLKDEV_H
 #define VINIX_BLKDEV_H

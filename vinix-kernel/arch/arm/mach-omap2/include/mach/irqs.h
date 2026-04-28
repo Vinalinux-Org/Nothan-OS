@@ -1,8 +1,4 @@
-/* ============================================================
- * platform/irqs.h
- * ------------------------------------------------------------
- * AM335x IRQ numbers — AM335x TRM Ch.06, Table 6-1.
- * ============================================================ */
+/* arch/arm/mach-omap2/include/mach/irqs.h — AM335x interrupt numbers. */
 
 #ifndef PLATFORM_IRQS_H
 #define PLATFORM_IRQS_H

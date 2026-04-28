@@ -1,8 +1,8 @@
-/* ============================================================
+/*
  * boot_screen.c — Boot Log + Splash Screen
  * Draws directly to framebuffer via fb.h primitives.
  * Completely independent of UART — no serial dependency.
- * ============================================================ */
+ */
 
 #include "types.h"
 #include "boot_screen.h"
@@ -10,9 +10,9 @@
 #include "lcdc.h"
 #include "timer.h"
 
-/* ============================================================
+/*
  * Screen 1: Boot Log
- * ============================================================ */
+ */
 
 static void show_boot_log(void)
 {
@@ -79,9 +79,9 @@ static void show_boot_log(void)
     delay_ms(1000);
 }
 
-/* ============================================================
+/*
  * Screen 2: Splash
- * ============================================================ */
+ */
 
 static void show_splash(void)
 {
@@ -129,7 +129,7 @@ static void show_splash(void)
     }
 }
 
-/* ============================================================
+/*
  * Screen 3: Home — Professional App Launcher
  *
  * Layout (800x600):
@@ -142,7 +142,7 @@ static void show_splash(void)
  *   Row centers: y = 184, 407
  *
  * Colors: Material Design palette (lv_palette.c reference)
- * ============================================================ */
+ */
 
 /* App icon descriptor */
 struct app_icon {
@@ -160,7 +160,6 @@ static uint32_t icon_slen(const char *s)
     return n;
 }
 
-/* ---- Status bar widgets ----------------------------------------- */
 
 /* WiFi signal: 3 ascending vertical bars, 11×12px total
  *   Bar 1: w=3 h=4  (weak)
@@ -204,7 +203,6 @@ static void draw_page_dots(uint32_t cx, uint32_t cy,
     fb_fillcircle(cx + 16, cy, 4, inactive);  /* ○ page 3           */
 }
 
-/* ---- Icon renderer ---------------------------------------------- */
 
 /* Draw one app icon:
  *   1. Drop shadow (offset +2,+3, very dark) — gives depth
@@ -231,7 +229,6 @@ static void draw_app_icon(uint32_t cx, uint32_t cy, uint32_t r,
     fb_puts(cx - lbl_w / 2, cy + r + 12, icon->label, FB_WHITE, bg);
 }
 
-/* ---- Main home screen ------------------------------------------- */
 
 static void show_home(void)
 {
@@ -248,7 +245,7 @@ static void show_home(void)
     uint16_t sig_dim  = FB_RGB( 50,  60,  80);  /* wifi bar 1 dimmed      */
     uint16_t dot_dim  = FB_RGB( 55,  65,  90);  /* page dot inactive      */
 
-    /* ---- Icon data (Material Design palette, LVGL lv_palette.c) ---- */
+    /* Icon data */
     static const struct app_icon icons[8] = {
         { "Terminal", ">_", 2, FB_RGB(255, 193,   7) }, /* Amber      */
         { "Files",    "F",  3, FB_RGB( 76, 175,  80) }, /* Green      */
@@ -265,17 +262,15 @@ static void show_home(void)
     static const uint32_t cy_list[2] = { 184, 407 };
     uint32_t icon_r  = 55;
     uint32_t bar_h   = 44;   /* status bar height */
-    /* ================================================================
-     * Background
-     * ================================================================ */
+    /* Background */
     fb_clear(bg_main);
 
-    /* ================================================================
+    /*
      * Status bar  y = 0..43
      *   Left  : "00:00" (clock placeholder — no RTC)
      *   Center: "VINIX OS"
      *   Right : wifi bars + battery icon
-     * ================================================================ */
+     */
     fb_fillrect(0, 0, sw, bar_h, bar_bg);
     fb_fillrect(0, bar_h - 1, sw, 1, bar_sep);
 
@@ -300,10 +295,8 @@ static void show_home(void)
     draw_wifi(wifi_x, ind_y, sig_col, sig_dim);
     draw_battery(batt_x, ind_y, 80, sig_col, bar_bg);
 
-    /* ================================================================
-     * Footer  y = 576..599  (slim 24px bar, version only)
-     * ================================================================ */
-    /* ================================================================
+    /* Footer  y = 576..599  (slim 24px bar, version only) */
+    /*
      * Icon grid — 4 cols × 2 rows
      *
      * Grid area: y=44..599 (556px, no footer bar)
@@ -311,7 +304,7 @@ static void show_home(void)
      *   row 0 cy = 44 + 85 + 55 = 184
      *   row 1 cy = 184 + 110 + 28 + 85 + 55 ≈ 407 (label bottom ~490)
      *   page dots at cy = 582, gap above ~88px ✓
-     * ================================================================ */
+     */
     for (uint32_t row = 0; row < 2; row++) {
         for (uint32_t col = 0; col < 4; col++) {
             draw_app_icon(cx_list[col], cy_list[row], icon_r,
@@ -319,16 +312,16 @@ static void show_home(void)
         }
     }
 
-    /* ================================================================
+    /*
      * Page indicator dots — centered bottom  (● ○ ○)
      * cy = sh - 18 = 582, gap from last label ~88px
-     * ================================================================ */
+     */
     draw_page_dots(sw / 2, sh - 18, FB_WHITE, dot_dim);
 }
 
-/* ============================================================
+/*
  * Public API
- * ============================================================ */
+ */
 
 void boot_screen_run(void)
 {
