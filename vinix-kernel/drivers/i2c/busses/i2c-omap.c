@@ -8,32 +8,14 @@
 #include "i2c.h"
 #include "mmio.h"
 #include "uart.h"
+#include "mach/prcm.h"
+#include "mach/control.h"
 
-/* ============================================================
- * Pinmux (Control Module)
- * ============================================================ */
-
-/* Control module base for pad configuration */
-#define CTRL_MOD_BASE           0x44E10000
-/* Dedicated I2C0 pads — mode 0 = I2C0 directly (not muxed from UART) */
-#define CONF_I2C0_SDA           (CTRL_MOD_BASE + 0x988)
-#define CONF_I2C0_SCL           (CTRL_MOD_BASE + 0x98C)
+/* I2C0 pinmux pads — mode 0 selects native I2C0 (not muxed from UART). */
+#define CONF_I2C0_SDA           (CTRL_MODULE_BASE + 0x988)
+#define CONF_I2C0_SCL           (CTRL_MODULE_BASE + 0x98C)
 /* mode 0 | pullup enabled | RX active | slow slew */
 #define PAD_I2C0_MODE           0x70
-
-/* ============================================================
- * Clock Management
- * ============================================================ */
-
-/* I2C0 is in Wakeup domain — CM_WKUP */
-#define CM_WKUP_BASE            0x44E00400
-#define CM_WKUP_I2C0_CLKCTRL   (CM_WKUP_BASE + 0xB8)
-
-/* Module mode bits */
-#define MODULEMODE_ENABLE       0x2
-#define IDLEST_SHIFT            16
-#define IDLEST_MASK             0x3
-#define IDLEST_FUNC             0x0
 
 /* ============================================================
  * I2C0 Register Offsets
@@ -199,7 +181,7 @@ void i2c_init(void)
     timeout = I2C_TIMEOUT;
     while (timeout--) {
         val = mmio_read32(CM_WKUP_I2C0_CLKCTRL);
-        if (((val >> IDLEST_SHIFT) & IDLEST_MASK) == IDLEST_FUNC) {
+        if ((val & IDLEST_MASK) == IDLEST_FUNCTIONAL) {
             break;
         }
     }

@@ -1,76 +1,40 @@
-/* ============================================================
- * watchdog.c
- * ------------------------------------------------------------
- * Watchdog timer driver implementation
- * ============================================================ */
+/*
+ * AM335x WDT1 watchdog driver — disables the on-reset-running watchdog.
+ *
+ * AM335x TRM Ch.20.
+ */
 
 #include "watchdog.h"
 #include "mmio.h"
+#include "mach/prcm.h"
 
-/* ============================================================
- * Hardware definitions
- * ============================================================
+#define WDT1_BASE               0x44E35000
+
+#define WDT_WWPS                (WDT1_BASE + 0x34)
+#define WDT_WSPR                (WDT1_BASE + 0x48)
+
+#define WDT_DISABLE_SEQ1        0xAAAA
+#define WDT_DISABLE_SEQ2        0x5555
+
+/*
+ * The AM335x WDT1 starts running out of reset; if the kernel never
+ * services it the SoC reboots after ~83s. We disable it here because
+ * VinixOS does not yet implement a watchdog kicker.
+ *
+ * Sequence per TRM 20.4.3.8: enable clock → write SEQ1 → wait WWPS
+ * idle → write SEQ2 → wait WWPS idle.
  */
-#define WDT1_BASE       0x44E35000
-#define CM_WKUP_BASE    0x44E00400
-
-/* Watchdog registers (offsets from WDT1_BASE) */
-#define WDT_WSPR        0x48    /* Start/Stop Register */
-#define WDT_WWPS        0x34    /* Write Posting Status */
-
-/* Clock module registers */
-#define CM_WKUP_WDT1_CLKCTRL    0xD4
-
-/* Magic values for disable sequence */
-#define WDT_DISABLE_SEQ1    0xAAAA
-#define WDT_DISABLE_SEQ2    0x5555
-
-/* ============================================================
- * Driver implementation
- * ============================================================
- */
-
 void watchdog_disable(void)
 {
-    /*
-     * Watchdog disable sequence
-     * 
-     * CRITICAL: Must enable watchdog clock first before accessing registers!
-     * Without this, writes to WDT registers will hang or fail.
-     */
-    
-    /* Step 1: Enable watchdog module clock */
-    mmio_write32(CM_WKUP_BASE + CM_WKUP_WDT1_CLKCTRL, 0x2);
-    
-    /* Wait for clock to be enabled */
-    while ((mmio_read32(CM_WKUP_BASE + CM_WKUP_WDT1_CLKCTRL) & 0x3) != 0x2)
+    mmio_write32(CM_WKUP_WDT1_CLKCTRL, MODULEMODE_ENABLE);
+    while ((mmio_read32(CM_WKUP_WDT1_CLKCTRL) & MODULEMODE_MASK) != MODULEMODE_ENABLE)
         ;
-    
-    /* Step 2: First disable sequence */
-    mmio_write32(WDT1_BASE + WDT_WSPR, WDT_DISABLE_SEQ1);
-    
-    /* Wait for write to complete */
-    while (mmio_read32(WDT1_BASE + WDT_WWPS))
-        ;
-    
-    /* Step 3: Second disable sequence */
-    mmio_write32(WDT1_BASE + WDT_WSPR, WDT_DISABLE_SEQ2);
-    
-    /* Wait for write to complete */
-    while (mmio_read32(WDT1_BASE + WDT_WWPS))
-        ;
-    
-    /* Watchdog is now disabled */
-}
 
-/* Future implementations:
- * 
- * void watchdog_enable(void) {
- *     // Write enable sequence to WSPR
- *     // Configure timeout via WLDR (Load Register)
- * }
- * 
- * void watchdog_kick(void) {
- *     // Write trigger sequence to WTGR (Trigger Register)
- * }
- */
+    mmio_write32(WDT_WSPR, WDT_DISABLE_SEQ1);
+    while (mmio_read32(WDT_WWPS))
+        ;
+
+    mmio_write32(WDT_WSPR, WDT_DISABLE_SEQ2);
+    while (mmio_read32(WDT_WWPS))
+        ;
+}

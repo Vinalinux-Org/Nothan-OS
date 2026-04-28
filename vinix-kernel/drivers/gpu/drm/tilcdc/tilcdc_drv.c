@@ -10,27 +10,22 @@
 #include "lcdc.h"
 #include "mmio.h"
 #include "uart.h"
+#include "mach/prcm.h"
+#include "mach/control.h"
 
-/* ============================================================
- * LCD Pinmux (Control Module)
- * ============================================================
- *
- * BBB connects lcd_data[15:0] + sync signals to TDA19988.
- * These pins default to GPIO after reset — must be muxed to
- * LCD function (mode 0) before LCDC can drive them.
- *
- * All pins: mode 0, output, no pull, fast slew = 0x00
+/*
+ * BBB connects lcd_data[15:0] + sync signals to TDA19988. These pins
+ * default to GPIO after reset — must be muxed to LCD function (mode 0)
+ * before LCDC can drive them.
  */
+#define CONF_LCD_DATA0          (CTRL_MODULE_BASE + 0x8A0)
+#define CONF_LCD_VSYNC          (CTRL_MODULE_BASE + 0x8E0)
+#define CONF_LCD_HSYNC          (CTRL_MODULE_BASE + 0x8E4)
+#define CONF_LCD_PCLK           (CTRL_MODULE_BASE + 0x8E8)
+#define CONF_LCD_AC_BIAS_EN     (CTRL_MODULE_BASE + 0x8EC)  /* DE signal */
 
-#define CTRL_MOD_BASE           0x44E10000
-#define CONF_LCD_DATA0          (CTRL_MOD_BASE + 0x8A0)
-#define CONF_LCD_VSYNC          (CTRL_MOD_BASE + 0x8E0)
-#define CONF_LCD_HSYNC          (CTRL_MOD_BASE + 0x8E4)
-#define CONF_LCD_PCLK           (CTRL_MOD_BASE + 0x8E8)
-#define CONF_LCD_AC_BIAS_EN     (CTRL_MOD_BASE + 0x8EC)  /* DE signal */
-
-/* GPMC_AD pins for lcd_data[16:23] — 24-bit mode */
-#define CONF_GPMC_AD8           (CTRL_MOD_BASE + 0x820)
+/* GPMC_AD pins for lcd_data[16:23] — 24-bit mode (unused on BBB PCB). */
+#define CONF_GPMC_AD8           (CTRL_MODULE_BASE + 0x820)
 
 /* Pad config matching TI StarterWare: RXACTIVE for LCDC feedback */
 #define LCD_PAD_MODE0           0x28    /* mode 0, pull disabled, RX active */
@@ -55,29 +50,8 @@ static void lcd_pinmux_setup(void)
     pr_info("[LCDC] LCD pinmux configured (20 pins, 16-bit RGB565)\n");
 }
 
-/* ============================================================
- * Clock Management Registers
- * ============================================================ */
-
-#define CM_PER_BASE             0x44E00000
-#define CM_PER_LCDC_CLKCTRL    (CM_PER_BASE + 0x18)
-#define CM_PER_LCDC_CLKSTCTRL  (CM_PER_BASE + 0x148)
-
-/* CM_WKUP DPLL registers */
-#define CM_WKUP_BASE            0x44E00400
-#define CM_CLKMODE_DPLL_DISP   (CM_WKUP_BASE + 0x98)
-#define CM_IDLEST_DPLL_DISP    (CM_WKUP_BASE + 0x48)
-#define CM_CLKSEL_DPLL_DISP    (CM_WKUP_BASE + 0x54)
-#define CM_DIV_M2_DPLL_DISP    (CM_WKUP_BASE + 0xA4)
-
-/* LCDC pixel clock source select */
-#define CM_DPLL_BASE            0x44E00500
-#define CLKSEL_LCDC_PIXEL_CLK  (CM_DPLL_BASE + 0x34)
-
-/* Module control bits */
-#define MODULEMODE_ENABLE       0x2
-#define IDLEST_SHIFT            16
-#define IDLEST_MASK             0x3
+/* LCDC pixel clock source select — TRM 8.1.6.21 */
+#define CLKSEL_LCDC_PIXEL_CLK   (CM_DPLL_BASE + 0x34)
 
 /* DPLL mode bits */
 #define DPLL_EN_LOCK            0x7
@@ -299,7 +273,7 @@ static void lcdc_clock_enable(void)
     timeout = 100000;
     while (timeout--) {
         val = mmio_read32(CM_PER_LCDC_CLKCTRL);
-        if (((val >> IDLEST_SHIFT) & IDLEST_MASK) == 0) {
+        if ((val & IDLEST_MASK) == IDLEST_FUNCTIONAL) {
             pr_info("[LCDC] Module clock enabled\n");
             return;
         }

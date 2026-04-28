@@ -10,14 +10,11 @@
 #include "cpu.h"
 #include "irq.h"
 #include "intc.h"
+#include "mach/prcm.h"
 
 /* Hardware Definitions */
 #define UART0_BASE      0x44E09000
 #define UART0_IRQ       72
-
-/* Clock Module */
-#define CM_PER_BASE             0x44E00000
-#define CM_PER_UART0_CLKCTRL    (CM_PER_BASE + 0x6C)
 
 /* UART Register Offsets */
 #define UART_RHR        0x00

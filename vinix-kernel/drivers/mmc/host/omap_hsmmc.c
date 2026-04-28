@@ -9,34 +9,18 @@
 #include "mmc.h"
 #include "uart.h"
 #include "syscalls.h"
+#include "mach/prcm.h"
+#include "mach/control.h"
 
-/* ============================================================
- * Clock Management (PRCM)
- * ============================================================ */
-
-#define CM_PER_BASE             0x44E00000
-#define CM_PER_MMC0_CLKCTRL     (CM_PER_BASE + 0x3C)
-
-#define MODULEMODE_ENABLE       0x2
-#define MODULEMODE_MASK         0x3
-#define IDLEST_MASK             0x30000      /* bits [17:16] */
-#define IDLEST_FUNC             0x0          /* fully functional */
-
-/* ============================================================
- * Pin Mux (Control Module)
- * ============================================================ */
-
-#define CONTROL_MODULE_BASE     0x44E10000
-#define CONF_MMC0_DAT3          (CONTROL_MODULE_BASE + 0x8F0)
-#define CONF_MMC0_DAT2          (CONTROL_MODULE_BASE + 0x8F4)
-#define CONF_MMC0_DAT1          (CONTROL_MODULE_BASE + 0x8F8)
-#define CONF_MMC0_DAT0          (CONTROL_MODULE_BASE + 0x8FC)
-#define CONF_MMC0_CLK           (CONTROL_MODULE_BASE + 0x900)
-#define CONF_MMC0_CMD           (CONTROL_MODULE_BASE + 0x904)
+/* MMC0 pinmux pads — TRM 9.3.1 conf_<pin> registers */
+#define CONF_MMC0_DAT3          (CTRL_MODULE_BASE + 0x8F0)
+#define CONF_MMC0_DAT2          (CTRL_MODULE_BASE + 0x8F4)
+#define CONF_MMC0_DAT1          (CTRL_MODULE_BASE + 0x8F8)
+#define CONF_MMC0_DAT0          (CTRL_MODULE_BASE + 0x8FC)
+#define CONF_MMC0_CLK           (CTRL_MODULE_BASE + 0x900)
+#define CONF_MMC0_CMD           (CTRL_MODULE_BASE + 0x904)
 
 #define PIN_MODE_0              0
-#define PIN_INPUT_EN            (1 << 5)
-#define PIN_PULLUP_EN           (1 << 4)
 
 /* ============================================================
  * MMC0 Controller Registers
@@ -123,7 +107,7 @@ static int mmc_enable_clocks(void)
     val = (val & ~MODULEMODE_MASK) | MODULEMODE_ENABLE;
     mmio_write32(CM_PER_MMC0_CLKCTRL, val);
 
-    while ((mmio_read32(CM_PER_MMC0_CLKCTRL) & IDLEST_MASK) != IDLEST_FUNC) {
+    while ((mmio_read32(CM_PER_MMC0_CLKCTRL) & IDLEST_MASK) != IDLEST_FUNCTIONAL) {
         if (--timeout == 0) {
             pr_err("[MMC] ERROR: PRCM clock enable timeout\n");
             return E_FAIL;

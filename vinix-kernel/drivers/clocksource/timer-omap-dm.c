@@ -12,25 +12,11 @@
 #include "mmio.h"
 #include "uart.h"
 #include "trace.h"
-
-/* ============================================================
- * Clock Management Registers
- * ============================================================ */
-
-#define CM_PER_BASE             0x44E00000
-#define CM_PER_L4LS_CLKSTCTRL   (CM_PER_BASE + 0x00)
-#define CM_PER_TIMER2_CLKCTRL   (CM_PER_BASE + 0x80)
+#include "mach/prcm.h"
 
 /* CM_PER_L4LS_CLKSTCTRL bits */
 #define CLKTRCTRL_MASK          0x3
 #define CLKTRCTRL_SW_WKUP       0x2      /* Force wakeup */
-
-/* CM_PER_TIMER2_CLKCTRL bits */
-#define MODULEMODE_MASK         0x3
-#define MODULEMODE_ENABLE       0x2      /* Module explicitly enabled */
-#define IDLEST_MASK             0x3
-#define IDLEST_SHIFT            16
-#define IDLEST_FUNC             0x0      /* Fully functional */
 
 /* ============================================================
  * DMTimer2 Register Offsets
@@ -100,9 +86,9 @@ static void timer2_clock_enable(void)
     uint32_t timeout = 100000;
     while (timeout--) {
         val = mmio_read32(CM_PER_TIMER2_CLKCTRL);
-        uint32_t idlest = (val >> IDLEST_SHIFT) & IDLEST_MASK;
-        uint32_t modulemode = val & MODULEMODE_MASK;
-        if (idlest == IDLEST_FUNC && modulemode == MODULEMODE_ENABLE) return;
+        if ((val & IDLEST_MASK) == IDLEST_FUNCTIONAL &&
+            (val & MODULEMODE_MASK) == MODULEMODE_ENABLE)
+            return;
     }
 
     pr_err("[TIMER] clock enable timeout (TIMER2_CLKCTRL=0x%08x)\n",
@@ -200,16 +186,14 @@ void timer_early_init(void)
     if ((mmio_read32(CM_PER_L4LS_CLKSTCTRL) & CLKTRCTRL_MASK) != CLKTRCTRL_SW_WKUP)
         mmio_write32(CM_PER_L4LS_CLKSTCTRL, CLKTRCTRL_SW_WKUP);
 
-    #define CM_DPLL_BASE                0x44E00500
-    #define CM_DPLL_CLKSEL_TIMER2_CLK  (CM_DPLL_BASE + 0x08)
+    /* DMTimer2 clock source = M_OSC (24 MHz crystal). TRM 8.1.6.7. */
     #define CLKSEL_CLK_M_OSC            0x1
-
     mmio_write32(CM_DPLL_CLKSEL_TIMER2_CLK, CLKSEL_CLK_M_OSC);
     while ((mmio_read32(CM_DPLL_CLKSEL_TIMER2_CLK) & 0x3) != CLKSEL_CLK_M_OSC)
         ;
 
     mmio_write32(CM_PER_TIMER2_CLKCTRL, MODULEMODE_ENABLE);
-    while (((mmio_read32(CM_PER_TIMER2_CLKCTRL) >> IDLEST_SHIFT) & IDLEST_MASK) != IDLEST_FUNC)
+    while ((mmio_read32(CM_PER_TIMER2_CLKCTRL) & IDLEST_MASK) != IDLEST_FUNCTIONAL)
         ;
 
     mmio_write32(DMTIMER2_BASE + TIOCP_CFG, TIOCP_SOFTRESET);
