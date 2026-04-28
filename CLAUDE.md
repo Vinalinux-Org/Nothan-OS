@@ -189,6 +189,47 @@ LUÔN đọc `drivers/<name>/index.md` trước khi viết driver mới.
 
 Mọi abstraction (VFS, driver model, task/process, locking, memory) đi theo pattern Linux — naming, data structure, API shape. MVP nhưng ngữ nghĩa Linux.
 
+### Architecture model — 3 main device categories + class subsystems
+
+VinixOS theo Linux device model: userspace thấy thiết bị qua 1 trong 3 main category, drivers register qua **class subsystem** (nằm giữa driver và main category):
+
+```text
+Driver  →  Class subsystem  →  Main category  →  Userspace path
+─────────────────────────────────────────────────────────────────
+omap_serial → tty/serial → CHAR    → /dev/ttyS0
+omap_hsmmc  → mmc/host   → BLOCK   → /dev/mmcblk0
+tilcdc      → fbdev      → CHAR    → /dev/fb0
+omap_wdt    → watchdog   → CHAR    → /dev/watchdog
+i2c-omap    → i2c        → bus     → (no /dev — host)
+omap_intc   → irqchip    → kernel  → (no /dev — internal)
+omap_dmtimer→ clockevents→ kernel  → (no /dev — internal)
+cpsw (P7)   → net        → NET     → eth0
+```
+
+**Main categories**:
+
+- **Character** (`vinix/cdev.h` + `cdev_register` + `file_operations`)
+- **Block** (`vinix/blkdev.h` + `add_disk` + `block_device_operations`)
+- **Network** (`vinix/netdevice.h` + `register_netdev` + `net_device_ops`)
+
+**Class subsystems** (mọi driver register qua đây, không skip thẳng vào main category):
+
+- `tty/serial` (`vinix/serial_core.h`, `vinix/tty.h`)
+- `mmc` (`vinix/mmc/host.h`)
+- `i2c` (`vinix/i2c.h`)
+- `fbdev` (`vinix/fb.h`)
+- `irqchip` (`vinix/irqchip.h`)
+- `clocksource/clockevents` (`vinix/clocksource.h`)
+- `watchdog` (`vinix/watchdog.h`)
+
+**Device discovery (DT replacement)**: VinixOS KHÔNG dùng Device Tree. Pattern thay thế = static board file (như Linux `mach-omap1`, x86 platform):
+
+- Platform devices declared trong `arch/arm/mach-omap2/board-bbb.c::bbb_devices[]`
+- I2C clients declared trong `bbb_i2c0_devices[]` (`struct i2c_board_info`)
+- Core enumerate static arrays khi bus add → instantiate devices → match drivers
+
+**Inter-driver dependencies**: handle qua `-EPROBE_DEFER` mechanism (Linux modern feature, không phụ thuộc DT). Driver return `-EPROBE_DEFER` nếu dependency chưa ready, core retry sau.
+
 ### Naming + data structures bắt buộc
 
 **Memory:**
@@ -426,16 +467,47 @@ pr_err("[SCHED] No tasks to run!\n");
 
 ## 9. Driver Development Workflow
 
-### Sau P4.5 — BẮT BUỘC platform_driver model
+### THE CONVENTION — mọi HW driver tuân theo, không exception
 
-Driver mới PHẢI đăng ký qua `platform_driver_register`:
+**Rule 1**: Mọi HW driver PHẢI có 1 entry static trong board file:
+
+- Platform device → `bbb_devices[]` array trong `arch/arm/mach-omap2/board-bbb.c`
+- I2C client → `bbb_i2c0_devices[]` (`struct i2c_board_info`) cùng file
+
+**Rule 2**: Mọi HW driver PHẢI có `probe()` function:
+
+- Platform driver: `static int xxx_probe(struct platform_device *pdev)`
+- I2C driver: `static int xxx_probe(struct i2c_client *client)`
+
+**Rule 3**: Mọi HW init logic NẰM TRONG `probe()`. KHÔNG có public `xxx_init()` function exposed cho main.c gọi.
+
+**Rule 4**: Đăng ký qua `module_platform_driver(drv)` hoặc `module_i2c_driver(drv)` macro. Macro tự đặt fn pointer vào `.initcall<N>.init` section.
+
+**Rule 5**: Inter-driver dependencies handle qua `-EPROBE_DEFER`:
+
+- Driver depending on another HW: `if (!dep_ready) return -EPROBE_DEFER`
+- Provider sets global flag khi ready
+- Core retry deferred probes sau mọi initcall pass
+
+**Rule 6**: `init/main.c` CHỈ chứa `do_initcalls(N)` + core init (mmu, page_alloc, slab, vmm, vfs, scheduler) + VFS mount + `driver_deferred_probe_trigger()`. KHÔNG có `xxx_init()`/`xxx_register_adapter()`/`watchdog_disable()` driver-specific calls.
+
+**Documented exceptions** (chỉ 2):
+
+- `timer_early_init()` — pre-driver helper cho `delay_ms()` trước scheduler tick mode
+- `uart_enable_rx_interrupt()` — RX setup cần intc + irq_init xong
+
+### Driver template (mọi driver mới copy pattern này)
 
 ```c
 static int omap_xxx_probe(struct platform_device *pdev)
 {
     struct resource *mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
     int irq = platform_get_irq(pdev, 0);
-    /* ... init using mem->start, irq ... */
+
+    /* HW init using mem->start, irq.
+     * Register vào subsystem class (cdev_register / add_disk /
+     * i2c_add_adapter / mmc_add_host / register_framebuffer / ...). */
+    return 0;
 }
 
 static struct platform_driver omap_xxx_driver = {
@@ -446,7 +518,31 @@ static struct platform_driver omap_xxx_driver = {
 module_platform_driver(omap_xxx_driver);
 ```
 
-Device matching qua `pdev->name` vs `drv->name` — table ở `vinix-kernel/arch/arm/mach-omap2/board-bbb.c`.
+Plus thêm entry vào `bbb_devices[]` (board-bbb.c):
+
+```c
+static struct platform_device omap_xxx0 = {
+    .name = "omap-xxx",  /* match driver.name */
+    .base = 0xADDR,
+    .irq  = IRQ_NUM,
+};
+/* trong bbb_devices[]: ..., &omap_xxx0, ... */
+```
+
+Device matching qua `pdev->name == drv->name` (string compare).
+
+### Init order via initcall levels (deterministic)
+
+```text
+Level 1 (core_initcall):    bbb_platform_init — register all platform_devices + i2c_board_info
+Level 3 (arch_initcall):    early HW (uart, wdt)
+Level 4 (subsys_initcall):  IRQ controller, i2c host (auto-instantiates clients)
+Level 5 (fs_initcall):      block storage (mmc)
+Level 6 (device_initcall):  display, timer, i2c clients (defer-able)
+Level 7 (late_initcall):    selftest
+
+After do_initcalls(7): driver_deferred_probe_trigger() — final retry pass
+```
 
 ### Pre-requisite checklist
 
@@ -471,24 +567,29 @@ CRITICAL: Trước khi viết driver mới, verify TẤT CẢ item. THIẾU bấ
 
 **Platform data flow:** address + IRQ đi từ `vinix-kernel/arch/arm/mach-omap2/board-bbb.c` → `platform_device` → driver `probe()` qua `platform_get_resource`. Driver KHÔNG hardcode `UART0_BASE` nữa.
 
-### Subsystem class — driver mới phải dùng
+### Subsystem class registry — register fn theo loại
 
-Sau Phase 2 build-out, mọi driver mới phải register qua subsystem class thay vì tự gọi `add_disk` / `register_chrdev` thẳng:
+Mọi driver phải register qua đúng subsystem class (qua header tương ứng). KHÔNG được skip subsystem để gọi VFS / userspace path trực tiếp.
 
-| Driver loại | Subsystem header | Register fn |
-|---|---|---|
-| Serial / UART | `vinix/serial_core.h` | `uart_register_driver`, `uart_add_one_port` |
-| Char device | `vinix/cdev.h` | `cdev_register` (với `file_operations`) |
-| Block / disk | `vinix/blkdev.h` | `add_disk` (struct gendisk) |
-| I2C bus controller | `vinix/i2c.h` | `i2c_add_adapter` |
-| I2C client | `vinix/i2c.h` | dùng `i2c_transfer` |
-| MMC host | `vinix/mmc/host.h` | `mmc_alloc_host` + `mmc_add_host` |
-| Framebuffer | `vinix/fb.h` | `register_framebuffer` |
-| IRQ chip | `vinix/irqchip.h` | `irqchip_register` |
-| Clock event | `vinix/clocksource.h` | `clockevents_register_device` |
-| Network (P7) | `vinix/netdevice.h` (sẽ có) | `register_netdev` |
+| Driver loại | Subsystem header | Register fn | Status |
+| --- | --- | --- | --- |
+| Serial / UART | `vinix/serial_core.h` | `uart_register_driver`, `uart_add_one_port` | partial (ring buffer + RX done) |
+| Char device | `vinix/cdev.h` | `cdev_register` (với `file_operations`) | ✅ |
+| Block / disk | `vinix/blkdev.h` | `add_disk` (`struct gendisk`) | ✅ |
+| I2C bus host | `vinix/i2c.h` | `i2c_add_adapter` | ✅ |
+| I2C client | `vinix/i2c.h` | `module_i2c_driver` + `i2c_transfer` | ✅ |
+| MMC host | `vinix/mmc/host.h` | `mmc_alloc_host` + `mmc_add_host` | ✅ |
+| Framebuffer | `vinix/fb.h` | `register_framebuffer` | ✅ |
+| IRQ chip | `vinix/irqchip.h` | `irqchip_register` | ✅ |
+| Clock event | `vinix/clocksource.h` | `clockevents_register_device` | ✅ |
+| Watchdog | `vinix/watchdog.h` | `watchdog_register_device` | core build trong Phase 4 |
+| Network | `vinix/netdevice.h` + `vinix/etherdevice.h` + `vinix/skbuff.h` | `register_netdev` | core framework có (Phase 5), driver chờ |
 
-Driver KHÔNG được tự tạo `gendisk`/`cdev` rồi gọi VFS trực tiếp. Phải qua subsystem core.
+**Documents tham chiếu**:
+
+- [VinixOS/docs/driver-development-guide.md] — driver writer template (full ethernet skeleton)
+- [VinixOS/docs/10-subsystem-reference.md] — pattern + example cho mọi subsystem
+- Plan Phase 4 (deferred probe + i2c_board_info + driver migration): `~/.claude/plans/t-i-ngh-s-c-woolly-ember.md`
 
 ---
 
