@@ -30,12 +30,6 @@
 #define FB_COLS     (800 / FB_FONT_W)   /* 100 */
 #define FB_ROWS     (600 / FB_FONT_H)   /* 37  */
 
-/**
- * Initialize framebuffer subsystem.
- * Must be called after lcdc_init() + lcdc_start_raster().
- */
-void fb_init(void);
-
 /** Set a single pixel */
 void fb_putpixel(uint32_t x, uint32_t y, uint16_t color);
 

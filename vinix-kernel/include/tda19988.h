@@ -219,18 +219,11 @@
 
 
 /**
- * Initialize TDA19988 HDMI transmitter for 800x600@60Hz RGB output
+ * Initialize TDA19988 HDMI transmitter for 800x600@60Hz RGB output.
  *
- * Called after lcdc_start_raster() — TDA needs pixel clock from LCDC.
- *
- * Sequence: CEC enable + soft reset → PLL common config →
- * version check + DDC/FRO setup → enable video/audio ports +
- * VIP mux → full video path config: timing, TBG, encoder.
- *
- * CONTRACT:
- * - Must be called after i2c_init()
- * - I2C0 must be functional at 100kHz
- * - LCDC raster must NOT be running yet
+ * INTERNAL: invoked from tilcdc probe only; TDA is not a standalone
+ * driver — it sits on the LCDC pipeline and depends on the pixel clock
+ * already running. Do not call from outside the display driver.
  */
 void tda19988_init(void);
 

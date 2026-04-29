@@ -9,8 +9,12 @@
 
 #include "types.h"
 #include "lcdc.h"
+#include "tda19988.h"
 #include "mmio.h"
 #include "uart.h"
+#include "platform_device.h"
+#include "vinix/init.h"
+#include "vinix/fb.h"
 #include "mach/prcm.h"
 #include "mach/control.h"
 
@@ -307,15 +311,14 @@ static void framebuffer_setup(void)
 }
 
 /*
- * lcdc_init - Configure the LCD controller hardware
+ * tilcdc_hw_init - Configure the LCD controller hardware
  *
- * Orchestrates the full initialization sequence: pinmux, clock generation,
- * DMA setup, and raster timing configuration. The raster engine is left
- * disabled at the end of this sequence so the external HDMI transmitter
- * can be configured while the pixel clock is running.
+ * Pinmux, DPLL, module clock, framebuffer setup, DMA, raster timing.
+ * Raster engine remains disabled at the end so TDA19988 can be configured
+ * while the pixel clock is already running.
  */
 
-void lcdc_init(void)
+static void tilcdc_hw_init(void)
 {
     lcd_pinmux_setup();
     dpll_disp_setup();
@@ -382,14 +385,14 @@ void lcdc_init(void)
 }
 
 /*
- * lcdc_start_raster - Enable the final video output
+ * tilcdc_raster_start - Enable the final video output
  *
- * Activates the raster engine. This must only be called AFTER the external
- * HDMI transmitter (TDA19988) is fully configured, otherwise synchronization
- * signals may be lost.
+ * Activates the raster engine to start generating the pixel clock.
+ * This MUST run before TDA19988 setup so the HDMI transmitter can lock
+ * its TMDS PLL onto a stable pixel clock.
  */
 
-void lcdc_start_raster(void)
+static void tilcdc_raster_start(void)
 {
     mmio_write32(LCDC_BASE + LCD_RASTER_CTRL,
                  LCD_PALMODE_RAWDATA |
@@ -439,8 +442,6 @@ uint32_t lcdc_get_pitch(void)
  * allowing standard tools to interact with the display.
  */
 
-#include "vinix/fb.h"
-
 static struct fb_info tilcdc_fb_info = {
     .var = {
         .xres            = DISPLAY_WIDTH,
@@ -454,9 +455,32 @@ static struct fb_info tilcdc_fb_info = {
     },
 };
 
-void lcdc_register_fb(void)
+/*
+ * Probe sequence for the AM335x display chain. Ordering is dictated by
+ * hardware: the LCDC must drive a pixel clock before TDA19988 can lock
+ * its TMDS PLL, and the raster must remain off while TDA registers are
+ * programmed. Once TDA reports ready we start the raster and publish
+ * the framebuffer to fbdev so consumers (boot screen, fbcon) can draw.
+ */
+static int tilcdc_probe(struct platform_device *pdev)
 {
-    tilcdc_fb_info.screen_base       = fb_pixels;
-    tilcdc_fb_info.fix.smem_start    = (uint32_t)fb_pixels;
+    struct resource *mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+    pr_info("[LCDC] probing %s @ 0x%08x\n",
+                pdev->name, mem ? mem->start : 0);
+
+    tilcdc_hw_init();
+    tilcdc_raster_start();
+    tda19988_init();
+
+    tilcdc_fb_info.screen_base    = fb_pixels;
+    tilcdc_fb_info.fix.smem_start = (uint32_t)fb_pixels;
     register_framebuffer(&tilcdc_fb_info);
+    return 0;
 }
+
+static struct platform_driver tilcdc_driver = {
+    .drv   = { .name = "tilcdc" },
+    .probe = tilcdc_probe,
+};
+
+module_platform_driver(tilcdc_driver);

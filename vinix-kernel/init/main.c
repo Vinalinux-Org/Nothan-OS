@@ -32,9 +32,6 @@
 #include "selftest.h"
 #include "syscalls.h"
 #include "types.h"
-#include "lcdc.h"
-#include "tda19988.h"
-#include "fb.h"
 #include "boot_screen.h"
 
 extern void sync_selftest(void);
@@ -110,18 +107,6 @@ void kernel_main(void)
      * before the display chain because TDA19988 is reached over I2C.
      */
     do_initcalls(4);
-
-    /*
-     * Display bring-up — still direct-called pending Phase 3 conversion.
-     * The LCDC must generate the pixel clock before TDA HDMI config so
-     * the TMDS PLL can lock.
-     */
-    lcdc_init();                /* Configure LCDC + DPLL (raster NOT started yet) */
-    lcdc_start_raster();        /* Start pixel clock — TDA needs this for TMDS */
-    tda19988_init();            /* Full TDA config with pixel clock present */
-
-    lcdc_register_fb();         /* fb_info -> fbdev so fb_init reads via subsystem */
-    fb_init();
 
     /*
      * Virtual File System Bring-up

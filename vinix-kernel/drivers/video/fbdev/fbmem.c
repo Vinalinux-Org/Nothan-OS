@@ -8,7 +8,6 @@
  */
 
 #include "fb.h"
-#include "lcdc.h"
 #include "vinix/fb.h"
 #include "vinix/printk.h"
 
@@ -18,15 +17,20 @@ static uint32_t  g_height;
 static uint32_t  g_pitch;    /* bytes per row */
 
 /* Active fb_info — registered by the underlying display driver
- * (tilcdc) via register_framebuffer. fb_init copies geometry
- * out so the primitives below can run without dereferencing
- * fb_info on every pixel write. */
+ * (tilcdc) via register_framebuffer. Geometry is cached locally so
+ * primitives below run without dereferencing fb_info on every write. */
 static struct fb_info *active_fb;
 
 int register_framebuffer(struct fb_info *fb)
 {
     if (!fb) return -1;
     active_fb = fb;
+
+    g_fb     = (uint16_t *)fb->screen_base;
+    g_width  = fb->var.xres;
+    g_height = fb->var.yres;
+    g_pitch  = fb->fix.line_length;
+
     pr_info("[FBDEV] %s registered (%ux%u, %u bpp)\n",
             fb->fix.id[0] ? fb->fix.id : "fb0",
             fb->var.xres, fb->var.yres, fb->var.bits_per_pixel);
@@ -35,25 +39,12 @@ int register_framebuffer(struct fb_info *fb)
 
 int unregister_framebuffer(struct fb_info *fb)
 {
-    if (active_fb == fb) active_fb = 0;
-    return 0;
-}
-
-void fb_init(void)
-{
-    /* Pull geometry from the registered fb_info if present, else
-     * fall back to the legacy lcdc accessors during early bring-up. */
-    if (active_fb) {
-        g_fb     = (uint16_t *)active_fb->screen_base;
-        g_width  = active_fb->var.xres;
-        g_height = active_fb->var.yres;
-        g_pitch  = active_fb->fix.line_length;
-    } else {
-        g_fb     = lcdc_get_framebuffer();
-        g_width  = lcdc_get_width();
-        g_height = lcdc_get_height();
-        g_pitch  = lcdc_get_pitch();
+    if (active_fb == fb) {
+        active_fb = 0;
+        g_fb = 0;
+        g_width = g_height = g_pitch = 0;
     }
+    return 0;
 }
 
 /* Geometry accessors used by fbcon and other layers that need
