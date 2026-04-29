@@ -21,9 +21,15 @@ make -C "$TOPDIR/userspace"
 make -C "$TOPDIR/vinix-kernel"
 
 echo "==> deploy to $MOUNT"
-if [ ! -d "$MOUNT" ]; then
-    echo "error: SD not mounted at $MOUNT — mount it or run setup_sdcard.sh first"
-    exit 1
+MOUNTED_BY_US=0
+if ! mountpoint -q "$MOUNT" 2>/dev/null; then
+    if ! lsblk -no LABEL "$PART" 2>/dev/null | grep -q "^VINIX$"; then
+        echo "error: $PART is not a VINIX partition — run setup-sdcard.sh first"
+        exit 1
+    fi
+    mkdir -p "$MOUNT"
+    mount "$PART" "$MOUNT"
+    MOUNTED_BY_US=1
 fi
 
 mkdir -p "$MOUNT/bin" "$MOUNT/sbin" "$MOUNT/etc"
@@ -58,6 +64,7 @@ echo "==> flash $DEVICE"
 # Unmount FAT32 before raw-writing raw sectors.
 if mountpoint -q "$MOUNT"; then
     udisksctl unmount -b "$PART" 2>/dev/null || umount "$PART"
+    [ "$MOUNTED_BY_US" -eq 1 ] && rmdir "$MOUNT" 2>/dev/null || true
 fi
 
 if [ ! -f "$MLO" ]; then
