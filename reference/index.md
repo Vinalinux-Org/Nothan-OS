@@ -14,3 +14,11 @@ Tài liệu kỹ thuật phục vụ AI-assisted development cho VinixOS trên B
 ## Project Context
 
 Đọc [`project_context.md`](project_context.md) trước khi bắt đầu bất kỳ task nào — tóm tắt trạng thái project, conventions, và pointer đến tài liệu liên quan.
+
+## Coding Standards
+
+Deep-dive về style / naming / comment / commit — [`coding_standards.md`](coding_standards.md). [`CLAUDE.md`](../CLAUDE.md) là enforcer ngắn gọn (luôn được AI load); file này là rationale + ví dụ đúng/sai + edge case.
+
+## Driver Development Guide
+
+Hướng dẫn viết driver mới từ đầu đến cuối — [`driver-development-guide.md`](driver-development-guide.md). Standalone, self-contained: không cần biết project trước. Bao gồm kiến trúc platform bus, quy trình 5 bước, worked example (omap_serial), initcall decision tree, debug pattern, checklist.

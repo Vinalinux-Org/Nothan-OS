@@ -2,6 +2,8 @@
 
 **Trước mỗi task liên quan đến hardware hoặc driver**: đọc [reference/index.md](reference/index.md) để biết tài liệu nào có sẵn, sau đó đọc `reference/project_context.md` nếu cần context tổng quan.
 
+**Style / comment / commit deep-dive**: [reference/coding_standards.md](reference/coding_standards.md). File này (CLAUDE.md) là enforcer ngắn gọn, luôn được load. Khi cần rationale, ví dụ đúng/sai, edge case → đọc deep-dive. Khi xung đột: CLAUDE.md thắng.
+
 ---
 
 ## 1. Hard Rules
@@ -281,20 +283,36 @@ Bạn có thể cung cấp hoặc chỉ tôi đọc file nào không?
 
 **KHÔNG viết**: banner dài dòng, "imported from", "consumed by Y", giải thích WHAT, struct field trivial, phase marker `/* P1 */`, PR reference.
 
-**Banner** (1 dòng):
+**File header** — block 4-6 dòng, không separator:
 ```c
-/* ============================================================
- * filename.c — Mô tả 1 dòng
- * ============================================================ */
+/*
+ * drivers/path/file.c — One-line module description
+ *
+ * 1-2 dòng nói WHAT module provide hoặc constraint chính.
+ */
 ```
+KHÔNG: SPDX, Copyright, Author, Date, History, `====` separator. Git lo blame/log/license.
 
-**Javadoc** chỉ khi: precondition không hiển nhiên, side effect ẩn, return edge case.
+**Struct public trong header** — kernel-doc `/** */` cho VSCode hover:
+```c
+/**
+ * struct uart_port - serial port state
+ * @base: MMIO base address
+ * @irq:  hardware IRQ number
+ */
+struct uart_port { ... };
+```
+Struct internal trong .c → không cần.
+
+**Function header** — KHÔNG mặc định. Chỉ khi: precondition không hiển nhiên, side effect ẩn, return edge case, ordering/locking/IRQ constraint. Function tên không tự giải thích → đổi tên trước, không comment thay.
 
 **Debug print**: comment out bằng `//` khi bring-up. Xóa hẳn sau khi feature ổn định.
 
+→ Deep-dive: [reference/coding_standards.md §5 Comments](reference/coding_standards.md#5-comments)
+
 ---
 
-## 7. Coding Style
+## 8. Coding Style
 
 - 4 space, KHÔNG tab
 - `snake_case` variable/function, `UPPER_SNAKE` macro
@@ -313,9 +331,11 @@ Bạn có thể cung cấp hoặc chỉ tôi đọc file nào không?
 
 **Assembly**: inline comment dùng `@`. Banner giống C.
 
+→ Deep-dive: [reference/coding_standards.md §2 Coding Style](reference/coding_standards.md#2-coding-style) · [§3 Naming](reference/coding_standards.md#3-naming-convention) · [§4 File Layout](reference/coding_standards.md#4-file-layout)
+
 ---
 
-## 8. Debug Workflow
+## 9. Debug Workflow
 
 Không JTAG. **UART log là công cụ debug duy nhất.**
 
@@ -345,7 +365,7 @@ pr_info("[DRV] wrote 0x%08x, readback = 0x%08x\n",
 
 ---
 
-## 9. Definition of Done
+## 10. Definition of Done
 
 **KHÔNG bao giờ tuyên bố "complete" / "works" chỉ dựa compile.** Luôn nói "build sạch, bạn test trên hardware giúp" và chờ.
 
@@ -363,7 +383,7 @@ pr_info("[DRV] wrote 0x%08x, readback = 0x%08x\n",
 
 ---
 
-## 10. Commit Style
+## 11. Commit Style
 
 **Format**: `Type(scope): short description` — không có body bắt buộc.
 
@@ -380,5 +400,7 @@ Docs(driver): add platform_driver template skeleton
 **KHÔNG có** `Co-Authored-By: Claude` trailer trên bất kỳ commit VinixOS nào.
 **KHÔNG dùng** `git tag v0.PN-complete` — chỉ commit.
 **KHÔNG amend** commit đã push.
+
+→ Deep-dive: [reference/coding_standards.md §8 Commit Style](reference/coding_standards.md#8-commit-style) · [§10 Anti-patterns](reference/coding_standards.md#10-anti-patterns-catalog)
 
 ---
