@@ -32,7 +32,6 @@
 #include "selftest.h"
 #include "syscalls.h"
 #include "types.h"
-#include "i2c.h"
 #include "lcdc.h"
 #include "tda19988.h"
 #include "fb.h"
@@ -107,31 +106,22 @@ void kernel_main(void)
     sync_selftest();
 
     /*
-     * Initialize the graphics subsystem early to show the boot screen.
-     * The LCDC hardware must start generating the pixel clock before the
-     * TDA19988 HDMI transmitter is configured.
-     *
-     * Bring-up sequence:
-     * 1. Initialize I2C (required for TDA config)
-     * 2. Configure LCDC and start the raster to provide the pixel clock
-     * 3. Initialize the TDA19988 HDMI chip
+     * Subsystem Init: UART RX IRQ + I2C0 controller. I2C must come up
+     * before the display chain because TDA19988 is reached over I2C.
      */
-    i2c_init();
-    i2c_register_adapter();
-    i2c_scan();
+    do_initcalls(4);
+
+    /*
+     * Display bring-up — still direct-called pending Phase 3 conversion.
+     * The LCDC must generate the pixel clock before TDA HDMI config so
+     * the TMDS PLL can lock.
+     */
     lcdc_init();                /* Configure LCDC + DPLL (raster NOT started yet) */
     lcdc_start_raster();        /* Start pixel clock — TDA needs this for TMDS */
     tda19988_init();            /* Full TDA config with pixel clock present */
 
     lcdc_register_fb();         /* fb_info -> fbdev so fb_init reads via subsystem */
     fb_init();
-
-    /*
-     * Subsystem Init: bring up INTC (root irq_chip) and UART RX IRQ.
-     * INTC probes first (bbb_devices order), then UART probe registers
-     * its IRQ handler against the now-online irq_chip.
-     */
-    do_initcalls(4);
 
     /*
      * Virtual File System Bring-up

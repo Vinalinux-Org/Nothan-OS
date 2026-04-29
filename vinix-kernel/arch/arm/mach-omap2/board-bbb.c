@@ -7,6 +7,7 @@
  *   omap-dmtimer @ 0x48040000  (DMTimer2)
  *   omap-hsmmc   @ 0x48060000  (MMC0)
  *   omap-wdt     @ 0x44E35000  (WDT1)
+ *   omap-i2c     @ 0x44E0B000  (I2C0 — TDA19988 HDMI, PMIC, EEPROM)
  *
  * Each driver's probe() function is called by the platform bus when its
  * matching name is found in this table.
@@ -51,9 +52,17 @@ static struct platform_device omap_wdt = {
     .clk_id = "wdt1",
 };
 
+static struct platform_device omap_i2c0 = {
+    .name   = "omap-i2c",
+    .base   = 0x44E0B000,
+    .irq    = 0,                /* polling mode */
+    .clk_id = "i2c0",
+};
+
 static struct platform_device *bbb_devices[] = {
     &omap_intc,
     &omap_uart0,
+    &omap_i2c0,
     &omap_dmtimer2,
     &omap_hsmmc0,
     &omap_wdt,

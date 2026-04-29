@@ -10,6 +10,9 @@
 #include "i2c.h"
 #include "mmio.h"
 #include "uart.h"
+#include "platform_device.h"
+#include "vinix/init.h"
+#include "vinix/i2c.h"
 #include "mach/prcm.h"
 #include "mach/control.h"
 
@@ -147,14 +150,14 @@ static void i2c_flush(void)
 }
 
 /*
- * i2c_init - Initialize the I2C hardware
+ * omap_i2c_hw_init — bring up the I2C0 controller
  *
- * Configures the pin multiplexing, enables the Wakeup domain clock,
- * performs a soft reset, and configures the prescaler for 100kHz
- * standard mode operation.
+ * Configures pin multiplexing, enables the Wakeup-domain functional clock,
+ * performs a soft reset, and programs the prescaler for 100 kHz standard
+ * mode. Returns 0 on success, -1 on timeout.
  */
 
-void i2c_init(void)
+static int omap_i2c_hw_init(void)
 {
     uint32_t val;
     uint32_t timeout;
@@ -179,7 +182,7 @@ void i2c_init(void)
     }
     if (!timeout) {
         pr_err("[I2C] ERROR: Clock enable timeout\n");
-        return;
+        return -1;
     }
     pr_info("[I2C] Clock enabled\n");
 
@@ -193,7 +196,7 @@ void i2c_init(void)
     }
     if (!timeout) {
         pr_err("[I2C] ERROR: Soft reset timeout\n");
-        return;
+        return -1;
     }
     pr_info("[I2C] Soft reset complete\n");
 
@@ -228,6 +231,7 @@ void i2c_init(void)
                 val, (val >> 8) & 1, (val >> 6) & 1);
 
     pr_info("[I2C] I2C0 initialized (100kHz standard mode)\n");
+    return 0;
 }
 
 /*
@@ -448,14 +452,12 @@ int i2c_read_block(uint8_t slave_addr, uint8_t reg, uint8_t *buf, int len)
 }
 
 /*
- * i2c_scan - Probe the bus to detect connected devices
+ * omap_i2c_scan — diagnostic bus probe (0x08 .. 0x77)
  *
- * Iterates through standard 7-bit I2C addresses (0x08 to 0x77). For each
- * address, attempts a 1-byte write and monitors for an ACK or NACK response.
- * This is primarily used as a diagnostic tool to verify hardware connections
- * (e.g., verifying the presence of the TDA19988 HDMI transmitter).
+ * Sends a one-byte write to each address and reports every ACK. Used at
+ * boot to confirm TDA19988 HDMI, PMIC and EEPROM are reachable on I2C0.
  */
-void i2c_scan(void)
+static void omap_i2c_scan(void)
 {
     uint8_t addr;
     int found = 0;
@@ -504,16 +506,11 @@ void i2c_scan(void)
 }
 
 /*
- * I2C Adapter Wiring
- *
- * Integrates the AM335x I2C0 controller with the generic I2C subsystem.
- * The master_xfer function maps standard i2c_msg sequences onto the
- * underlying hardware-specific helpers. Currently supports:
- * 1. Single write msg (register address + data payload)
- * 2. Two-msg read sequence (write register pointer, then read data)
+ * I2C adapter wiring — bridges AM335x I2C0 to the generic i2c-core.
+ * master_xfer maps standard i2c_msg sequences onto hardware helpers:
+ *   1 msg  write  : register-pointer + payload
+ *   2 msgs: write (1 byte) then read — repeated-start register read
  */
-
-#include "vinix/i2c.h"
 
 static int omap_i2c_xfer(struct i2c_adapter *adap,
                          struct i2c_msg *msgs, int count)
@@ -550,7 +547,27 @@ static struct i2c_adapter omap_i2c_adapter = {
     .algo = &omap_i2c_algo,
 };
 
-void i2c_register_adapter(void)
+static int omap_i2c_probe(struct platform_device *pdev)
 {
+    struct resource *mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+    pr_info("[I2C] probing %s @ 0x%08x\n",
+                pdev->name, mem ? mem->start : 0);
+
+    if (omap_i2c_hw_init() != 0)
+        return -1;
+
     i2c_add_adapter(&omap_i2c_adapter);
+    omap_i2c_scan();
+    return 0;
 }
+
+static struct platform_driver omap_i2c_driver = {
+    .drv   = { .name = "omap-i2c" },
+    .probe = omap_i2c_probe,
+};
+
+static int __init omap_i2c_driver_init(void)
+{
+    return platform_driver_register(&omap_i2c_driver);
+}
+subsys_initcall(omap_i2c_driver_init);
