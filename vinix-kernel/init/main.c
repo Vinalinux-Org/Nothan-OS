@@ -69,9 +69,15 @@ static struct task_struct shell_task;
 void kernel_main(void)
 {
     /*
+     * IRQ dispatch table must be zero-initialized before any driver
+     * probe can call request_irq().
+     */
+    irq_init();
+
+    /*
      * Execute early initialization calls:
      * Level 1: Board file registers the platform bus and static devices.
-     * Level 3: Early hardware like UART for log output and Watchdog disable.
+     * Level 3: Early hardware like Watchdog disable.
      */
     do_initcalls(1);
     do_initcalls(3);
@@ -121,12 +127,11 @@ void kernel_main(void)
     fb_init();
 
     /*
-     * Subsystem Init: Initialize the interrupt controller before
-     * any timers or MMC storage devices are brought up.
+     * Subsystem Init: bring up INTC (root irq_chip) and UART RX IRQ.
+     * INTC probes first (bbb_devices order), then UART probe registers
+     * its IRQ handler against the now-online irq_chip.
      */
     do_initcalls(4);
-    irq_init();
-    uart_enable_rx_interrupt();
 
     /*
      * Virtual File System Bring-up
@@ -211,21 +216,15 @@ void kernel_main(void)
     if (scheduler_add_task(&shell_task) < 0)
         pr_info("[BOOT] Failed to add User App Task\n");
 
-    pr_info("[BOOT] UART init complete. Starting HDMI boot screen...\n");
-
     /*
-     * Display the HDMI Boot Screen.
-     * We use a temporary free-running timer for accurate delays during
-     * rendering. This must run before the final scheduler timer is set up.
-     */
-    timer_early_init();
-    boot_screen_run();
-
-    /*
-     * Device Init: Now reconfigure the timer for the scheduler and run
-     * all remaining device drivers.
+     * Device Init: bring up the scheduler timer and remaining drivers.
+     * timer_init() runs in the omap-dmtimer probe, which gives us
+     * a periodic IRQ source plus free-running TCRR for delay_ms().
      */
     do_initcalls(6);
+
+    pr_info("[BOOT] UART init complete. Starting HDMI boot screen...\n");
+    boot_screen_run();
 
     /*
      * Run the final system self-tests to ensure critical structures

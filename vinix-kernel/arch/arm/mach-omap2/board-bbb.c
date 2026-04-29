@@ -52,8 +52,8 @@ static struct platform_device omap_wdt = {
 };
 
 static struct platform_device *bbb_devices[] = {
-    &omap_uart0,
     &omap_intc,
+    &omap_uart0,
     &omap_dmtimer2,
     &omap_hsmmc0,
     &omap_wdt,

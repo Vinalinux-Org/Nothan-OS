@@ -22,11 +22,7 @@ void timer_init(void);
 
 uint32_t timer_get_ticks(void);
 
-/* Enables DMTimer2 clock + free-running mode for delay_ms().
- * timer_init() later reconfigures it for scheduler interrupts. */
-void timer_early_init(void);
-
-/* Polled delay; requires timer_early_init() or timer_init() first. */
+/* Polled delay; requires timer_init() (DMTimer2 free-run via TCRR) first. */
 void delay_ms(uint32_t ms);
 
 #endif /* TIMER_H */

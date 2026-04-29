@@ -161,29 +161,6 @@ uint32_t timer_get_ticks(void)
 #define TIMER_FCLK_HZ   24000000
 #define TICKS_PER_MS     (TIMER_FCLK_HZ / 1000)
 
-/* Pre-scheduler delay helper; uses DMTimer2 free-run, no overflow IRQ. */
-void timer_early_init(void)
-{
-    if ((mmio_read32(CM_PER_L4LS_CLKSTCTRL) & CLKTRCTRL_MASK) != CLKTRCTRL_SW_WKUP)
-        mmio_write32(CM_PER_L4LS_CLKSTCTRL, CLKTRCTRL_SW_WKUP);
-
-    /* 24 MHz crystal — stable reference independent of core PLL. */
-    #define CLKSEL_CLK_M_OSC            0x1
-    mmio_write32(CM_DPLL_CLKSEL_TIMER2_CLK, CLKSEL_CLK_M_OSC);
-    while ((mmio_read32(CM_DPLL_CLKSEL_TIMER2_CLK) & 0x3) != CLKSEL_CLK_M_OSC)
-        ;
-
-    mmio_write32(CM_PER_TIMER2_CLKCTRL, MODULEMODE_ENABLE);
-    while ((mmio_read32(CM_PER_TIMER2_CLKCTRL) & IDLEST_MASK) != IDLEST_FUNCTIONAL)
-        ;
-
-    mmio_write32(DMTIMER2_BASE + TIOCP_CFG, TIOCP_SOFTRESET);
-    while (mmio_read32(DMTIMER2_BASE + TIOCP_CFG) & TIOCP_SOFTRESET)
-        ;
-
-    mmio_write32(DMTIMER2_BASE + TCLR, TCLR_ST);
-}
-
 void delay_ms(uint32_t ms)
 {
     uint32_t start = mmio_read32(DMTIMER2_BASE + TCRR);

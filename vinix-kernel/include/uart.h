@@ -15,14 +15,6 @@
 
 
 
-/* TX-only init — safe before IRQ framework. RX requires
- * a later uart_enable_rx_interrupt() call. */
-void uart_init(void);
-
-/* Precondition: uart_init() + intc_init() + irq_init() done,
- * IRQ still masked in CPSR. Registers handler + enables IRQ 72. */
-void uart_enable_rx_interrupt(void);
-
 /* Blocks until TX FIFO ready. */
 void uart_putc(char c);
 

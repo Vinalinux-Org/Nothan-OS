@@ -13,6 +13,7 @@
 #include "intc.h"
 #include "platform_device.h"
 #include "vinix/init.h"
+#include "vinix/errno.h"
 #include "mach/prcm.h"
 #include "mach/memmap.h"
 #include "mach/irqs.h"
@@ -45,6 +46,7 @@
 #define LSR_FE          (1 << 3)
 #define LSR_BI          (1 << 4)
 #define LSR_THRE        (1 << 5)
+#define LSR_TEMT        (1 << 6)    /* TX shift register + FIFO empty */
 #define LSR_ERROR_MASK  (LSR_OE | LSR_PE | LSR_FE | LSR_BI)
 
 /* FCR bits */
@@ -86,39 +88,6 @@ static void uart_rx_irq_handler(void *data)
     }
 }
 
-/* UART initialization — ring buffer state owned by serial_core. */
-
-void uart_init(void)
-{
-    /* Hardware-side init runs in uart_enable_rx_interrupt(). */
-}
-
-void uart_enable_rx_interrupt(void)
-{
-    /* UART0 module clock must be enabled before any register access. */
-    mmio_write32(CM_PER_UART0_CLKCTRL, 0x2);
-    while ((mmio_read32(CM_PER_UART0_CLKCTRL) & 0x30000) != 0);
-
-    uint32_t lcr_save = mmio_read32(UART0_BASE + UART_LCR);
-    mmio_write32(UART0_BASE + UART_LCR, lcr_save & 0x7F);
-    mmio_write32(UART0_BASE + UART_IER, 0x00);
-
-    /* Enable FIFO, clear RX/TX FIFOs, set 8-char trigger level. */
-    mmio_write32(UART0_BASE + UART_FCR, 0x07);
-    for (volatile int i = 0; i < 1000; i++);
-
-    /* SCR 0xC0: 1-char granularity for RX DMA trigger. */
-    mmio_write32(UART0_BASE + UART_SCR, 0xC0);
-    mmio_write32(UART0_BASE + UART_LCR, lcr_save);
-    mmio_write32(UART0_BASE + UART_IER, IER_RHR_IT);
-
-    int ret = request_irq(PLATFORM_IRQ_UART0, uart_rx_irq_handler, 0, "omap-uart", NULL);
-    if (ret != 0)
-        return;
-
-    enable_irq(PLATFORM_IRQ_UART0);
-}
-
 void uart_putc(char c)
 {
     while (!(mmio_read32(UART0_BASE + UART_LSR) & LSR_THRE));
@@ -142,9 +111,35 @@ static int omap_uart_probe(struct platform_device *pdev)
 {
     struct resource *mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
     int irq = platform_get_irq(pdev, 0);
-    pr_info("[UART] probing %s @ 0x%08x irq %d\n",
-                pdev->name, mem ? mem->start : 0, irq);
-    uart_init();
+    uint32_t base = mem ? mem->start : UART0_BASE;
+
+    pr_info("[UART] probing %s @ 0x%08x irq %d\n", pdev->name, base, irq);
+
+    /* Wait for TX shift register idle before clock reconfiguration;
+     * touching PRCM while the shift register is transmitting drops bytes. */
+    while (!(mmio_read32(base + UART_LSR) & LSR_TEMT));
+
+    /* UART0 module clock must be enabled before any register access. */
+    mmio_write32(CM_PER_UART0_CLKCTRL, 0x2);
+    while ((mmio_read32(CM_PER_UART0_CLKCTRL) & 0x30000) != 0);
+
+    uint32_t lcr_save = mmio_read32(base + UART_LCR);
+    mmio_write32(base + UART_LCR, lcr_save & 0x7F);
+    mmio_write32(base + UART_IER, 0x00);
+
+    /* Enable FIFO, clear RX/TX FIFOs, set 8-char trigger level. */
+    mmio_write32(base + UART_FCR, 0x07);
+    for (volatile int i = 0; i < 1000; i++);
+
+    /* SCR 0xC0: 1-char granularity for RX DMA trigger. */
+    mmio_write32(base + UART_SCR, 0xC0);
+    mmio_write32(base + UART_LCR, lcr_save);
+    mmio_write32(base + UART_IER, IER_RHR_IT);
+
+    if (request_irq(irq, uart_rx_irq_handler, 0, "omap-uart", NULL) != 0)
+        return -EIO;
+
+    enable_irq(irq);
     return 0;
 }
 
@@ -157,4 +152,4 @@ static int __init omap_uart_driver_init(void)
 {
     return platform_driver_register(&omap_uart_driver);
 }
-arch_initcall(omap_uart_driver_init);
+subsys_initcall(omap_uart_driver_init);

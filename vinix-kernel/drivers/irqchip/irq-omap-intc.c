@@ -142,4 +142,4 @@ static int __init omap_intc_driver_init(void)
 {
     return platform_driver_register(&omap_intc_driver);
 }
-subsys_initcall(omap_intc_driver_init);
+arch_initcall(omap_intc_driver_init);
