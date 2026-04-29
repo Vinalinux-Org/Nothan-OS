@@ -21,6 +21,9 @@
 #define CLKTRCTRL_MASK          0x3
 #define CLKTRCTRL_SW_WKUP       0x2
 
+/* CM_DPLL_CLKSEL_TIMER2_CLK source selection */
+#define CLKSEL_CLK_M_OSC        0x1
+
 #define TIDR            0x00
 #define TIOCP_CFG       0x10
 #define TISTAT          0x14
@@ -65,6 +68,13 @@ static void timer2_clock_enable(void)
         while (((mmio_read32(CM_PER_L4LS_CLKSTCTRL) & CLKTRCTRL_MASK) != CLKTRCTRL_SW_WKUP) && timeout--);
         if (!timeout) { pr_err("[TIMER] L4LS wakeup timeout\n"); while (1); }
     }
+
+    /* Source DMTimer2 from the 24 MHz crystal so the period math below
+     * (and delay_ms()) match TIMER_FCLK_HZ. Reset default is not M_OSC,
+     * so omitting this leaves the timer ticking at ~32 kHz. */
+    mmio_write32(CM_DPLL_CLKSEL_TIMER2_CLK, CLKSEL_CLK_M_OSC);
+    while ((mmio_read32(CM_DPLL_CLKSEL_TIMER2_CLK) & 0x3) != CLKSEL_CLK_M_OSC)
+        ;
 
     mmio_write32(CM_PER_TIMER2_CLKCTRL, MODULEMODE_ENABLE);
 

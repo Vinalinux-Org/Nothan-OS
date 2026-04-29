@@ -1,10 +1,6 @@
-/*
- * AM335x I2C0 Driver
- *
- * Provides polling-mode I2C master functionality (7-bit addressing).
- * This driver handles the low-level register configuration required to
- * transmit and receive data over the I2C bus.
- */
+/* ============================================================
+ * drivers/i2c/busses/i2c-omap.c — AM335x I2C0 master driver (polling, 7-bit)
+ * ============================================================ */
 
 #include "types.h"
 #include "i2c.h"
@@ -79,12 +75,6 @@
 
 #define I2C_TIMEOUT     100000
 
-/* Internal helper functions */
-
-/**
- * Wait until bus is not busy.
- * Polls BB bit in IRQSTATUS_RAW.
- */
 static int i2c_wait_bus_free(void)
 {
     uint32_t timeout = I2C_TIMEOUT;
@@ -100,10 +90,7 @@ static int i2c_wait_bus_free(void)
     return 0;
 }
 
-/**
- * Wait for specific status flag(s) to be set.
- * Returns raw status on success, 0 on timeout.
- */
+/* Returns raw status on success, 0 on timeout. */
 static uint32_t i2c_wait_status(uint32_t mask)
 {
     uint32_t timeout = I2C_TIMEOUT;
@@ -118,19 +105,13 @@ static uint32_t i2c_wait_status(uint32_t mask)
     return 0;
 }
 
-/**
- * Clear all interrupt status flags.
- */
 static void i2c_clear_status(void)
 {
     mmio_write32(I2C0_BASE + I2C_IRQSTATUS, 0x7FFF);
 }
 
-/**
- * Flush FIFO and reset I2C state machine after a failed transaction.
- * Forces STOP on the bus before resetting the module to recover
- * from stuck-bus conditions (e.g. slave holding SDA low).
- */
+/* Recover from stuck bus (slave holding SDA low) — force STOP, then
+ * disable+re-enable the module to clear FIFO and state machine. */
 static void i2c_flush(void)
 {
     /* Force STOP condition to release any stuck slave */
@@ -148,14 +129,6 @@ static void i2c_flush(void)
 
     i2c_clear_status();
 }
-
-/*
- * omap_i2c_hw_init — bring up the I2C0 controller
- *
- * Configures pin multiplexing, enables the Wakeup-domain functional clock,
- * performs a soft reset, and programs the prescaler for 100 kHz standard
- * mode. Returns 0 on success, -1 on timeout.
- */
 
 static int omap_i2c_hw_init(void)
 {
@@ -234,15 +207,7 @@ static int omap_i2c_hw_init(void)
     return 0;
 }
 
-/*
- * i2c_write_reg - Write a single byte to an I2C device register
- * @slave_addr: The 7-bit I2C address of the target device
- * @reg: The register address to write to
- * @val: The value to write into the register
- *
- * Executes a master transmit transaction: [S] [slave_addr+W] [reg] [val] [P]
- */
-
+/* Master TX: [S] [addr+W] [reg] [val] [P] */
 int i2c_write_reg(uint8_t slave_addr, uint8_t reg, uint8_t val)
 {
     uint32_t stat;
@@ -299,17 +264,9 @@ int i2c_write_reg(uint8_t slave_addr, uint8_t reg, uint8_t val)
     return 0;
 }
 
-/*
- * i2c_read_reg - Read a single byte from an I2C device register
- * @slave_addr: The 7-bit I2C address of the target device
- * @reg: The register address to read from
- * @val: Pointer to store the read byte
- *
- * Executes a master receive transaction using a repeated start:
- * Phase 1: [S] [slave_addr+W] [reg]          (set register pointer)
- * Phase 2: [Sr] [slave_addr+R] [data] [P]    (read data)
- */
-
+/* Repeated-start read:
+ *   Phase 1: [S]  [addr+W] [reg]
+ *   Phase 2: [Sr] [addr+R] [data] [P] */
 int i2c_read_reg(uint8_t slave_addr, uint8_t reg, uint8_t *val)
 {
     uint32_t stat;
@@ -377,17 +334,7 @@ int i2c_read_reg(uint8_t slave_addr, uint8_t reg, uint8_t *val)
     return 0;
 }
 
-/*
- * i2c_read_block - Read multiple bytes from an I2C device
- * @slave_addr: The 7-bit I2C address of the target device
- * @reg: The starting register address
- * @buf: Pointer to the buffer to store the read bytes
- * @len: Number of bytes to read
- *
- * Similar to i2c_read_reg, but continues reading multiple bytes in phase 2.
- * Often used for retrieving large data blocks like EDID structures.
- */
-
+/* Same as i2c_read_reg but reads len bytes in phase 2. */
 int i2c_read_block(uint8_t slave_addr, uint8_t reg, uint8_t *buf, int len)
 {
     uint32_t stat;
@@ -451,12 +398,7 @@ int i2c_read_block(uint8_t slave_addr, uint8_t reg, uint8_t *buf, int len)
     return 0;
 }
 
-/*
- * omap_i2c_scan — diagnostic bus probe (0x08 .. 0x77)
- *
- * Sends a one-byte write to each address and reports every ACK. Used at
- * boot to confirm TDA19988 HDMI, PMIC and EEPROM are reachable on I2C0.
- */
+/* Bus scan 0x08-0x77 — write 1 dummy byte, log every ACK. */
 static void omap_i2c_scan(void)
 {
     uint8_t addr;
@@ -505,13 +447,9 @@ static void omap_i2c_scan(void)
         pr_info("[I2C] Bus scan complete: %d device(s)\n", found);
 }
 
-/*
- * I2C adapter wiring — bridges AM335x I2C0 to the generic i2c-core.
- * master_xfer maps standard i2c_msg sequences onto hardware helpers:
- *   1 msg  write  : register-pointer + payload
- *   2 msgs: write (1 byte) then read — repeated-start register read
- */
-
+/* i2c_msg → HW helper mapping:
+ *   1 write msg (>=2 bytes) : register-pointer + payload
+ *   2 msgs (write 1, read N): repeated-start register read */
 static int omap_i2c_xfer(struct i2c_adapter *adap,
                          struct i2c_msg *msgs, int count)
 {
