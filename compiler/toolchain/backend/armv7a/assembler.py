@@ -43,7 +43,7 @@ class Assembler:
         try:
             # Invoke assembler
             result = subprocess.run(
-                ['arm-linux-gnueabihf-as', '-mcpu=cortex-a8', '-o', output_file, temp_asm_file],
+                ['arm-none-eabi-as', '-mcpu=cortex-a8', '-o', output_file, temp_asm_file],
                 capture_output=True,
                 text=True
             )

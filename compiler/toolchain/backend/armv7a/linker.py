@@ -57,7 +57,7 @@ class Linker:
         
         # Build linker command
         cmd = [
-            'arm-linux-gnueabihf-ld',
+            'arm-none-eabi-ld',
             '-T', str(linker_script),
             str(crt0_obj),
             *object_files,
@@ -95,7 +95,7 @@ class Linker:
             True if successful, False if errors
         """
         result = subprocess.run(
-            ['arm-linux-gnueabihf-as', '-mcpu=cortex-a8', '-o', str(output), str(source)],
+            ['arm-none-eabi-as', '-mcpu=cortex-a8', '-o', str(output), str(source)],
             capture_output=True,
             text=True
         )
@@ -125,7 +125,7 @@ class Linker:
         """
         result = subprocess.run(
             [
-                'arm-linux-gnueabihf-gcc',
+                'arm-none-eabi-gcc',
                 '-c',                    # Compile only, don't link
                 '-mcpu=cortex-a8',       # Target Cortex-A8 (BeagleBone Black)
                 '-marm',                 # Use ARM instruction set (not Thumb)
