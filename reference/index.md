@@ -13,11 +13,20 @@ Tài liệu kỹ thuật phục vụ AI-assisted development cho VinixOS trên B
 
 ## Project Context
 
-Đọc [`project_context.md`](project_context.md) trước khi bắt đầu bất kỳ task nào — tóm tắt trạng thái project, conventions, và pointer đến tài liệu liên quan.
+Đọc [`project_context.md`](project_context.md) nếu cần context tổng quan — tóm tắt trạng thái project, conventions, và pointer đến tài liệu liên quan.
 
-## Coding Standards
+## Code Style
 
-Deep-dive về style / naming / comment / commit — [`coding_standards.md`](coding_standards.md). [`CLAUDE.md`](../CLAUDE.md) là enforcer ngắn gọn (luôn được AI load); file này là rationale + ví dụ đúng/sai + edge case.
+Naming convention, coding style, file layout, và logging rules — [`coding-style.md`](coding-style.md).
+[`CLAUDE.md`](../CLAUDE.md) là enforcer ngắn gọn; file này là rationale + ví dụ đúng/sai + edge case.
+
+## Comment Style
+
+Comment policy, 5 trường hợp được viết, anti-patterns — [`comment-style.md`](comment-style.md).
+
+## Commit Style
+
+Commit format, type taxonomy, scope selection, và cấm — [`commit-style.md`](commit-style.md).
 
 ## Driver Development Guide
 
