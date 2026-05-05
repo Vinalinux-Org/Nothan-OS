@@ -72,4 +72,9 @@ compiler/           ← Phase 2: Python cross compiler → ARMv7-A (HOÀN THÀNH
 - Phase 2: write support (lưu data người dùng)
 - Tài liệu: `reference/drivers/fat32/index.md`
 
+### Ethernet driver (CPSW)
+- Kết nối mạng 10/100 qua PHY LAN8710A (MII) trên AM3358 CPSW switch
+- Stack: MDIO bus → PHY → CPSW → `register_netdev`
+- Tài liệu: `reference/drivers/eth/index.md`
+
 
