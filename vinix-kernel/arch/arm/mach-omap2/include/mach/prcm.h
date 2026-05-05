@@ -12,10 +12,12 @@
 #define CM_PER_BASE                 0x44E00000UL
 
 #define CM_PER_L4LS_CLKSTCTRL       (CM_PER_BASE + 0x000)
+#define CM_PER_CPGMAC0_CLKCTRL      (CM_PER_BASE + 0x014)
 #define CM_PER_LCDC_CLKCTRL         (CM_PER_BASE + 0x018)
 #define CM_PER_MMC0_CLKCTRL         (CM_PER_BASE + 0x03C)
 #define CM_PER_UART0_CLKCTRL        (CM_PER_BASE + 0x06C)
 #define CM_PER_TIMER2_CLKCTRL       (CM_PER_BASE + 0x080)
+#define CM_PER_CPSW_CLKSTCTRL       (CM_PER_BASE + 0x144)
 #define CM_PER_LCDC_CLKSTCTRL       (CM_PER_BASE + 0x148)
 
 /* CM_DPLL — Clock Module DPLL (PLL clock selection) */
