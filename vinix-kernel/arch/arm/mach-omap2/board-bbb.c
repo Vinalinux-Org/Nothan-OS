@@ -67,6 +67,20 @@ static struct platform_device omap_tilcdc = {
     .clk_id = "lcdc",
 };
 
+static struct platform_device omap_mdio0 = {
+    .name   = "omap-mdio",
+    .base   = 0x4A101000,
+    .irq    = 0,
+    .clk_id = "cpgmac0",
+};
+
+static struct platform_device omap_cpsw0 = {
+    .name   = "omap-cpsw",
+    .base   = 0x4A100000,
+    .irq    = PLATFORM_IRQ_CPSW_RX,
+    .clk_id = "cpgmac0",
+};
+
 static struct platform_device *bbb_devices[] = {
     &omap_intc,
     &omap_uart0,
@@ -75,6 +89,8 @@ static struct platform_device *bbb_devices[] = {
     &omap_hsmmc0,
     &omap_wdt,
     &omap_tilcdc,
+    &omap_mdio0,
+    &omap_cpsw0,
 };
 
 static int __init bbb_platform_init(void)
