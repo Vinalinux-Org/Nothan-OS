@@ -53,9 +53,12 @@ Trước khi viết 1 dòng code, xác minh đủ 5 thứ này từ AM335x TRM:
 | IRQ number | TRM Ch.06 hoặc `mach/irqs.h` |
 | Clock enable sequence | TRM Ch.08 PRCM |
 | Init sequence / timing | `reference/drivers/<name>/index.md` nếu có |
+| Peripheral nằm trong vùng MMU nào | `include/mmu.h` — xem `PERIPH_L4_WKUP_PA`, `PERIPH_L4_PER_PA`, `PERIPH_L4_FAST_PA` |
 
 **Thiếu bất kỳ thứ nào → DỪNG. Hỏi trước, không đoán.**
 Sai base address = brick device. Sai IRQ = silent failure. Sai init sequence = undefined behavior.
+
+> **MMU trap:** VinixOS dùng static mapping — không có `ioremap()`. Nếu peripheral nằm trong vùng chưa được map trong `mmu_build_page_table_boot()`, driver sẽ DATA ABORT ngay lần `mmio_write32()` đầu tiên. Kiểm tra `arch/arm/mm/mmu.c` — nếu vùng chưa có (ví dụ L4_FAST cho CPSW/MDIO) → thêm vào `mmu_build_page_table_boot()`, `mmu_new_pgd()`, và `mmu_init()` trước khi viết bất kỳ dòng driver nào.
 
 ### Bước 1 — Thêm entry vào board-bbb.c
 
@@ -378,6 +381,7 @@ Hardware info
  [ ] Register offset + bit field từ TRM chapter của peripheral
  [ ] IRQ number từ mach/irqs.h hoặc TRM Ch.06
  [ ] Clock enable verified từ TRM Ch.08
+ [ ] Peripheral region (L4_WKUP/L4_PER/L4_FAST) đã có trong mmu_build_page_table_boot() — thêm nếu thiếu
 
 board-bbb.c
  [ ] Có entry trong bbb_devices[]

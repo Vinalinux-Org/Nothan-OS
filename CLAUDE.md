@@ -18,6 +18,8 @@
 - Register I/O: `mmio_read32(addr)` / `mmio_write32(addr, val)` — không raw pointer cast
 - Address + bit field: xác minh từ AM335x TRM, không đoán
 - Driver không hardcode peripheral base — lấy từ `platform_get_resource()` → `board-bbb.c` → `mach/`
+- Register có version/revision field: định nghĩa mask constant, dùng masked comparison — raw value chỉ biết sau khi đọc hardware thật
+- Peripheral region phải có trong `mmu_build_page_table_boot()` trước khi driver access — nếu thiếu → DATA ABORT ngay lần write đầu tiên
 
 ---
 
@@ -86,10 +88,11 @@ drivers/            — HW drivers theo Linux subsystem layout
     gpu/drm/        — tilcdc, tda998x
     video/fbdev/    — fbmem.c, fbcon.c
     watchdog/       — omap_wdt.c
+    net/ethernet/   — cpsw.c (CPSW switch), mdio.c (MDIO bus)
     base/           — device.c, platform.c
 fs/                 — VFS, FAT32, devfs, procfs
 mm/, block/, lib/
-include/vinix/      — cdev.h, blkdev.h, serial_core.h, fb.h, i2c.h, mmc/host.h, ...
+include/vinix/      — cdev.h, blkdev.h, serial_core.h, fb.h, i2c.h, mmc/host.h, netdevice.h, mdio.h, phy.h, ...
 ```
 
 **Port sang SoC khác** = viết `arch/arm/mach-<new>/` + driver mới. `kernel/` + `drivers/*/core/` không đổi dòng nào.
@@ -176,15 +179,15 @@ static struct platform_device omap_xxx0 = {
 | Framebuffer | `vinix/fb.h` | `register_framebuffer` |
 | IRQ chip | `vinix/irqchip.h` | `irqchip_register` |
 | Watchdog | `vinix/watchdog.h` | `watchdog_register_device` |
-| Network | `vinix/netdevice.h` | `register_netdev` |
+| Network (eth)  | `vinix/netdevice.h` | `alloc_netdev` + `register_netdev` |
 
 ### Initcall levels
 ```
 Level 1 core_initcall:   bbb_platform_init — register platform_devices
 Level 3 arch_initcall:   uart, wdt
-Level 4 subsys_initcall: IRQ controller, i2c host
+Level 4 subsys_initcall: IRQ controller, bus host (i2c, mdio, ...)
 Level 5 fs_initcall:     mmc
-Level 6 device_initcall: display, timer, i2c clients
+Level 6 device_initcall: display, timer, i2c clients, network, ...
 Level 7 late_initcall:   selftest
 → driver_deferred_probe_trigger()
 ```
