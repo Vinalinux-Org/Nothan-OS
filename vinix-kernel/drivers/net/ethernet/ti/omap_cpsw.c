@@ -174,10 +174,8 @@ static int cpsw_soft_reset(uint32_t reg)
 
 static int cpsw_hw_reset(struct cpsw_priv *priv)
 {
-    /* SL1 and CPDMA reset first, SS reset after both complete */
     if (cpsw_soft_reset(priv->sl1_base   + SL_SOFT_RESET))   return -EIO;
     if (cpsw_soft_reset(priv->cpdma_base + CPDMA_SOFT_RESET)) return -EIO;
-    if (cpsw_soft_reset(priv->ss_base    + SS_SOFT_RESET))    return -EIO;
     if (cpsw_soft_reset(priv->wr_base    + WR_SOFT_RESET))    return -EIO;
     pr_info("[CPSW] hw reset done\n");
     return 0;
@@ -206,9 +204,7 @@ static void cpsw_sl_init(struct cpsw_priv *priv)
     mmio_write32(priv->port_base + PORT_P1_SA_LO, sa_lo);
     mmio_write32(priv->port_base + PORT_P1_SA_HI, sa_hi);
 
-    int fullduplex = priv->phy ? priv->phy->duplex : 1;
-    mmio_write32(priv->sl1_base + SL_MACCONTROL,
-                 MAC_GMII_EN | (fullduplex ? MAC_FULLDUPLEX : 0));
+    mmio_write32(priv->sl1_base + SL_MACCONTROL, MAC_GMII_EN | MAC_FULLDUPLEX);
     pr_info("[CPSW] SL1 maccontrol=0x%08x mac=%02x:%02x:%02x:%02x:%02x:%02x\n",
             mmio_read32(priv->sl1_base + SL_MACCONTROL),
             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
@@ -358,12 +354,12 @@ static void cpsw_read_mac(unsigned char *addr)
     uint32_t lo = mmio_read32(CTRL_MAC_ID0_LO);
     uint32_t hi = mmio_read32(CTRL_MAC_ID0_HI);
 
-    addr[0] = (hi >> 8) & 0xFF;
-    addr[1] =  hi       & 0xFF;
-    addr[2] = (lo >> 24) & 0xFF;
-    addr[3] = (lo >> 16) & 0xFF;
-    addr[4] = (lo >>  8) & 0xFF;
-    addr[5] =  lo        & 0xFF;
+    addr[0] =  hi        & 0xFF;
+    addr[1] = (hi >>  8) & 0xFF;
+    addr[2] = (hi >> 16) & 0xFF;
+    addr[3] = (hi >> 24) & 0xFF;
+    addr[4] =  lo        & 0xFF;
+    addr[5] = (lo >>  8) & 0xFF;
 }
 
 static int omap_cpsw_probe(struct platform_device *pdev)
@@ -401,6 +397,7 @@ static int omap_cpsw_probe(struct platform_device *pdev)
 
     mbus = mdio_get_bus(0);
     if (mbus) {
+        mdio_enable(mbus);
         priv->phy = phy_probe(mbus, 0);
         if (priv->phy)
             phy_init(priv->phy);
@@ -429,15 +426,23 @@ static int omap_cpsw_probe(struct platform_device *pdev)
         return -ENODEV;
     }
 
+    /* Auto-up interface for immediate network functionality */
+    if (cpsw_ndo_open(ndev)) {
+        pr_err("[CPSW] auto-up interface failed\n");
+        return -EIO;
+    }
+
     if (request_irq(rx_irq, cpsw_rx_irq, 0, "cpsw-rx", priv) != 0) {
         pr_err("[CPSW] request_irq RX failed\n");
         return -EIO;
     }
+    enable_irq(rx_irq);
 
     if (request_irq(PLATFORM_IRQ_CPSW_TX, cpsw_tx_irq, 0, "cpsw-tx", priv) != 0) {
         pr_err("[CPSW] request_irq TX failed\n");
         return -EIO;
     }
+    enable_irq(PLATFORM_IRQ_CPSW_TX);
 
     pr_info("[CPSW] probe done, %s ready\n", ndev->name);
     return 0;

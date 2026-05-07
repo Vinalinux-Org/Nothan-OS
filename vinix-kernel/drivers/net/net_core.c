@@ -43,11 +43,11 @@ void free_netdev(struct net_device *ndev)
     (void)ndev;
 }
 
+extern void vnet_rx(struct sk_buff *skb);
+
 int netif_rx(struct sk_buff *skb)
 {
-    pr_info("[NET] rx %u bytes on %s\n", skb->len,
-            skb->dev ? skb->dev->name : "?");
-    kfree_skb(skb);
+    vnet_rx(skb);
     return 0;
 }
 

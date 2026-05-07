@@ -160,6 +160,14 @@ int phy_update_link(struct phy_device *phy)
 }
 
 
+void mdio_enable(struct mdio_bus *bus)
+{
+    mmio_write32(bus->base + MDIO_CONTROL, MDIO_CLKDIV | CTRL_ENABLE);
+    pr_info("[MDIO] re-enabled, CONTROL=0x%08x ALIVE=0x%08x\n",
+            mmio_read32(bus->base + MDIO_CONTROL),
+            mmio_read32(bus->base + MDIO_ALIVE));
+}
+
 static int omap_mdio_probe(struct platform_device *pdev)
 {
     struct resource *mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
