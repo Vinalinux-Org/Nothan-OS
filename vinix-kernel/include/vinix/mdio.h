@@ -17,5 +17,6 @@ int              mdio_add_bus(struct mdio_bus *bus);
 struct mdio_bus *mdio_get_bus(int nr);
 int              mdio_read  (struct mdio_bus *bus, uint8_t phy_addr, uint8_t reg);
 int              mdio_write (struct mdio_bus *bus, uint8_t phy_addr, uint8_t reg, uint16_t val);
+void             mdio_enable(struct mdio_bus *bus);
 
 #endif /* VINIX_MDIO_H */

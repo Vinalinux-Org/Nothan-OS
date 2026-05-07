@@ -55,6 +55,7 @@ C_SRC = arch/arm/kernel/exception_handlers.c \
         drivers/net/ethernet/ti/omap_cpsw.c \
         drivers/net/net_core.c \
         drivers/net/skbuff.c \
+        drivers/net/vnet.c \
         block/partitions/msdos.c \
         drivers/video/fbdev/fbmem.c \
         drivers/video/fbdev/fbcon.c \
