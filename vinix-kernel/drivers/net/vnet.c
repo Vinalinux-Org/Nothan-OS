@@ -70,9 +70,9 @@ static void icmp_reply(struct sk_buff *rxskb)
     unsigned char *p, *tip, *tic;
     uint16_t csum, total;
 
-    if (ip[9] != 1)                       return; /* not ICMP    */
-    if (memcmp(ip + 16, bbb_ip, 4) != 0) return; /* not our IP  */
-    if (icmp[0] != 8)                     return; /* not request */
+    if (ip[9] != 1)                       return;
+    if (memcmp(ip + 16, bbb_ip, 4) != 0) return;
+    if (icmp[0] != 8)                     return;
 
     tx = alloc_skb(ETH_HDR + IP_HDR + icmp_len);
     if (!tx) return;

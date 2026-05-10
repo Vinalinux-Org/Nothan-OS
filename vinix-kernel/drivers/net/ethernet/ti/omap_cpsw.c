@@ -23,6 +23,30 @@
 #include "mach/irqs.h"
 #include "string.h"
 
+/*
+ * MII1 pad mux — TRM Ch.9 §9.3.1.50 + Table 9-10.
+ * RXACTIVE=1, PUDEN=1, MMODE=0 → 0x28 (input pads + clocks).
+ * RXACTIVE=0, PUDEN=1, MMODE=0 → 0x08 (output-only pads).
+ */
+#define CONF_MII1_COL       (CTRL_MODULE_BASE + 0x908)
+#define CONF_MII1_CRS       (CTRL_MODULE_BASE + 0x90C)
+#define CONF_MII1_RX_ER     (CTRL_MODULE_BASE + 0x910)
+#define CONF_MII1_TX_EN     (CTRL_MODULE_BASE + 0x914)
+#define CONF_MII1_RX_DV     (CTRL_MODULE_BASE + 0x918)
+#define CONF_MII1_TXD3      (CTRL_MODULE_BASE + 0x91C)
+#define CONF_MII1_TXD2      (CTRL_MODULE_BASE + 0x920)
+#define CONF_MII1_TXD1      (CTRL_MODULE_BASE + 0x924)
+#define CONF_MII1_TXD0      (CTRL_MODULE_BASE + 0x928)
+#define CONF_MII1_TX_CLK    (CTRL_MODULE_BASE + 0x92C)
+#define CONF_MII1_RX_CLK    (CTRL_MODULE_BASE + 0x930)
+#define CONF_MII1_RXD3      (CTRL_MODULE_BASE + 0x934)
+#define CONF_MII1_RXD2      (CTRL_MODULE_BASE + 0x938)
+#define CONF_MII1_RXD1      (CTRL_MODULE_BASE + 0x93C)
+#define CONF_MII1_RXD0      (CTRL_MODULE_BASE + 0x940)
+
+#define MII1_PAD_INPUT      0x28
+#define MII1_PAD_OUTPUT     0x08
+
 /* CPSW_SS registers */
 #define SS_ID_VER            0x00
 #define SS_SOFT_RESET        0x08
@@ -79,6 +103,8 @@
 #define BD_EOP               (1 << 30)
 #define BD_OWNER             (1 << 29)
 #define BD_EOQ               (1 << 28)
+#define BD_TO_PORT_EN        (1 << 20)
+#define BD_TO_PORT1          (1 << 16)
 #define BD_PKT_LEN_MASK      0x7FF
 
 /* CPPI_RAM layout (8KB = 0x4A102000..0x4A103FFF):
@@ -163,6 +189,30 @@ static void cpsw_buf_read(unsigned char *dst, uint32_t addr, unsigned int len)
     }
 }
 
+static void cpsw_pinmux_setup(void)
+{
+    /* RX data + status + both clocks: input enabled */
+    mmio_write32(CONF_MII1_COL,    MII1_PAD_INPUT);
+    mmio_write32(CONF_MII1_CRS,    MII1_PAD_INPUT);
+    mmio_write32(CONF_MII1_RX_ER,  MII1_PAD_INPUT);
+    mmio_write32(CONF_MII1_RX_DV,  MII1_PAD_INPUT);
+    mmio_write32(CONF_MII1_TX_CLK, MII1_PAD_INPUT);  /* PHY drives TX_CLK in MII */
+    mmio_write32(CONF_MII1_RX_CLK, MII1_PAD_INPUT);
+    mmio_write32(CONF_MII1_RXD3,   MII1_PAD_INPUT);
+    mmio_write32(CONF_MII1_RXD2,   MII1_PAD_INPUT);
+    mmio_write32(CONF_MII1_RXD1,   MII1_PAD_INPUT);
+    mmio_write32(CONF_MII1_RXD0,   MII1_PAD_INPUT);
+
+    /* TX data + enable: output only */
+    mmio_write32(CONF_MII1_TX_EN, MII1_PAD_OUTPUT);
+    mmio_write32(CONF_MII1_TXD3,  MII1_PAD_OUTPUT);
+    mmio_write32(CONF_MII1_TXD2,  MII1_PAD_OUTPUT);
+    mmio_write32(CONF_MII1_TXD1,  MII1_PAD_OUTPUT);
+    mmio_write32(CONF_MII1_TXD0,  MII1_PAD_OUTPUT);
+
+    pr_info("[CPSW] MII1 pinmux configured (15 pads, mode 0)\n");
+}
+
 static int cpsw_soft_reset(uint32_t reg)
 {
     int timeout = CPSW_TIMEOUT;
@@ -177,6 +227,7 @@ static int cpsw_hw_reset(struct cpsw_priv *priv)
     if (cpsw_soft_reset(priv->sl1_base   + SL_SOFT_RESET))   return -EIO;
     if (cpsw_soft_reset(priv->cpdma_base + CPDMA_SOFT_RESET)) return -EIO;
     if (cpsw_soft_reset(priv->wr_base    + WR_SOFT_RESET))    return -EIO;
+    if (cpsw_soft_reset(priv->ss_base    + SS_SOFT_RESET))    return -EIO;
     pr_info("[CPSW] hw reset done\n");
     return 0;
 }
@@ -283,7 +334,8 @@ static int cpsw_ndo_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 
     cpsw_buf_write(CPPI_TX_BUF, skb->data, skb->len);
     cpsw_bd_init(CPPI_TX_BD, 0, CPPI_TX_BUF, skb->len,
-                 BD_SOP | BD_EOP | BD_OWNER | (skb->len & BD_PKT_LEN_MASK));
+                 BD_SOP | BD_EOP | BD_OWNER | BD_TO_PORT_EN | BD_TO_PORT1
+                 | (skb->len & BD_PKT_LEN_MASK));
 
     mmio_write32(priv->cpdma_sr_base + SR_TX0_HDP, CPPI_TX_BD);
 
@@ -331,12 +383,13 @@ static void cpsw_rx_irq(void *data)
 
     cpsw_bd_init(bd, 0, CPPI_RX_BUF(i), CPSW_BUF_SIZE, BD_OWNER);
 
-    /* If DMA stopped at EOQ, restart */
+    mmio_write32(priv->cpdma_sr_base + SR_RX0_CP, bd);
+
     if (flags & BD_EOQ)
         mmio_write32(priv->cpdma_sr_base + SR_RX0_HDP, bd);
+    else
+        priv->rx_idx = (i + 1) % CPSW_RX_COUNT;
 
-    mmio_write32(priv->cpdma_sr_base + SR_RX0_CP, bd);
-    priv->rx_idx = (i + 1) % CPSW_RX_COUNT;
     mmio_write32(priv->cpdma_base + CPDMA_EOI_VECTOR, CPDMA_EOI_RX);
 }
 
@@ -373,6 +426,8 @@ static int omap_cpsw_probe(struct platform_device *pdev)
 
     pr_info("[CPSW] probing %s\n", pdev->name);
 
+    cpsw_pinmux_setup();
+
     if (!mem) return -EINVAL;
 
     base = mem->start;
@@ -399,8 +454,11 @@ static int omap_cpsw_probe(struct platform_device *pdev)
     if (mbus) {
         mdio_enable(mbus);
         priv->phy = phy_probe(mbus, 0);
-        if (priv->phy)
+        if (priv->phy) {
             phy_init(priv->phy);
+            phy_update_link(priv->phy);
+            pr_info("[CPSW] PHY link=%d\n", priv->phy->link);
+        }
     }
 
     cpsw_ale_init(priv);
@@ -408,6 +466,7 @@ static int omap_cpsw_probe(struct platform_device *pdev)
 
     if (cpsw_cpdma_init(priv)) return -EIO;
     cpsw_rx_ring_init(priv);
+    cpsw_bd_init(CPPI_TX_BD, 0, CPPI_TX_BUF, 0, 0);
 
     /* Enable stats for CPU port and slave port 1 */
     mmio_write32(priv->ss_base + SS_STAT_PORT_EN, 0x3);
