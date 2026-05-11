@@ -324,18 +324,26 @@ static int cpsw_ndo_stop(struct net_device *ndev)
 static int cpsw_ndo_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 {
     struct cpsw_priv *priv = ndev->priv;
-    uint32_t flags;
+    int timeout = CPSW_TIMEOUT;
 
-    flags = BD_FLAGS(CPPI_TX_BD);
-    if (flags & BD_OWNER) {
-        netif_stop_queue(ndev);
+    while ((BD_FLAGS(CPPI_TX_BD) & BD_OWNER) && timeout--)
+        ;
+    if (BD_FLAGS(CPPI_TX_BD) & BD_OWNER) {
+        pr_err("[CPSW] TX timeout\n");
+        kfree_skb(skb);
         return -EBUSY;
     }
 
     cpsw_buf_write(CPPI_TX_BUF, skb->data, skb->len);
-    cpsw_bd_init(CPPI_TX_BD, 0, CPPI_TX_BUF, skb->len,
+
+    unsigned int tx_len = skb->len < 60 ? 60 : skb->len;
+    unsigned int pad;
+    for (pad = (skb->len + 3) & ~3u; pad < tx_len; pad += 4)
+        mmio_write32(CPPI_TX_BUF + pad, 0);
+
+    cpsw_bd_init(CPPI_TX_BD, 0, CPPI_TX_BUF, tx_len,
                  BD_SOP | BD_EOP | BD_OWNER | BD_TO_PORT_EN | BD_TO_PORT1
-                 | (skb->len & BD_PKT_LEN_MASK));
+                 | (tx_len & BD_PKT_LEN_MASK));
 
     mmio_write32(priv->cpdma_sr_base + SR_TX0_HDP, CPPI_TX_BD);
 
