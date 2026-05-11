@@ -10,6 +10,7 @@ Tài liệu kỹ thuật phục vụ AI-assisted development cho VinixOS trên B
 | `arm-arch/` | ARM architecture — instruction set, exception handling, assembly | [index](arm-arch/index.md) |
 | `hardware-beagleboneblack/` | BBB schematic, P8/P9 pinout | [index](hardware-beagleboneblack/index.md) |
 | `drivers/` | Tài liệu theo từng driver (sdcard, fat32, eth, ...) | [sdcard](drivers/sdcard/index.md) · [fat32](drivers/fat32/index.md) · [eth](drivers/eth/index.md) |
+| `software/` | Tài liệu cho pure-software subsystem (network stack, ...) | [network_stack](software/network_stack/index.md) |
 
 ## Project Context
 

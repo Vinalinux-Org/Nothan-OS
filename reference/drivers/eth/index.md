@@ -10,7 +10,6 @@ Tài liệu tham khảo cho việc phát triển Ethernet driver trong kernel Vi
 | PHY | ✅ Done — phy_probe/init/update_link OK, hardware confirmed (PHYID=0007:c0f1, link UP) | SS5 |
 | CPSW | ✅ Done — hardware confirmed, boot log OK, frame RX/TX path wired | SS6 |
 | Net Core | ✅ Done — register_netdev, netif_* helpers, skbuff alloc/free | SS6 |
-| IP Stack | ⬜ Chưa bắt đầu — cần để ping | — |
 
 **SS4:** `drivers/net/ethernet/ti/omap_mdio.c` + `include/vinix/mdio.h` + board entry + MMU L4_FAST mapping
 **SS5:** `include/vinix/phy.h` + phy_probe/init/update_link trong omap_mdio.c + PHYID2 mask fix

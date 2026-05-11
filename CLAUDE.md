@@ -88,7 +88,9 @@ drivers/            — HW drivers theo Linux subsystem layout
     gpu/drm/        — tilcdc, tda998x
     video/fbdev/    — fbmem.c, fbcon.c
     watchdog/       — omap_wdt.c
-    net/ethernet/   — cpsw.c (CPSW switch), mdio.c (MDIO bus)
+    net/ethernet/   — omap_cpsw.c, omap_mdio.c
+    net/ipv4/       — vnet.c, ip.c, tcp.c
+    net/app/        — http.c
     base/           — device.c, platform.c
 fs/                 — VFS, FAT32, devfs, procfs
 mm/, block/, lib/
@@ -214,9 +216,14 @@ THIẾU bất kỳ → DỪNG NGAY, KHÔNG ĐOÁN. Đọc `reference/drivers/<na
 
 ### Bước 0 — luôn làm trước khi viết
 
-**Hardware / driver**: đọc [reference/index.md](reference/index.md) để xác định tài liệu TRM nào liên quan, sau đó đọc đúng chapter đó. Không bỏ qua bước này.
-
 **Mọi loại code**: đọc file đang sửa và các header phụ thuộc trước khi gen. Nếu behavior chưa rõ → hỏi, không tự suy diễn.
+
+Loại code khác nhau, pre-requisite khác nhau:
+
+| Loại code | Pre-requisite bắt buộc |
+| --- | --- |
+| Hardware / driver | TRM verified: address, register offset, IRQ, clock. Đọc `reference/drivers/<name>/index.md` |
+| Pure software | Đọc interface hiện tại + `reference/software/<name>/index.md`. Không cần TRM |
 
 ### Thông tin bắt buộc trước khi viết driver
 
@@ -365,6 +372,8 @@ pr_info("[DRV] wrote 0x%08x, readback = 0x%08x\n",
 ```
 
 **Exception/Abort**: yêu cầu DFAR, DFSR, PC. Nếu handler chưa print → thêm vào `arch/arm/exceptions/` trước khi debug tiếp.
+
+**Pure software** (network stack, ...): không có register để readback. Debug bằng log tại boundary giữa các tầng — mỗi tầng phải log đủ để xác định frame/data đứt ở đâu mà không cần đoán tầng khác.
 
 ---
 

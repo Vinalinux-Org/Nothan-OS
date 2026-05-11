@@ -55,6 +55,7 @@ compiler/           ← Phase 2: Python cross compiler → ARMv7-A (HOÀN THÀNH
 | RAMFS | Read-only, files embed vào kernel image lúc build |
 | Shell (userspace) | ls, cat, ps, meminfo, help — chạy ở User Mode |
 | MMC driver (bootloader) | Đọc sector từ SD card — chỉ dùng trong bootloader |
+| Ethernet driver | Kết nối mạng 10/100 qua LAN8710A, hardware confirmed |
 
 ---
 
@@ -72,9 +73,10 @@ compiler/           ← Phase 2: Python cross compiler → ARMv7-A (HOÀN THÀNH
 - Phase 2: write support (lưu data người dùng)
 - Tài liệu: `reference/drivers/fat32/index.md`
 
-### Ethernet driver (CPSW)
-- Kết nối mạng 10/100 qua PHY LAN8710A (MII) trên AM3358 CPSW switch
-- Stack: MDIO bus → PHY → CPSW → `register_netdev`
-- Tài liệu: `reference/drivers/eth/index.md`
+### Network Stack (IP/TCP/HTTP)
+- Mục tiêu: BBB trả lời HTTP request từ browser tại `http://192.168.1.100`
+- ARP + ICMP: done (~10% network stack, stateless responder)
+- IP → TCP → HTTP: đang phát triển (~90% còn lại, ~850 LOC)
+- Tài liệu: `reference/software/network_stack/index.md`
 
 
