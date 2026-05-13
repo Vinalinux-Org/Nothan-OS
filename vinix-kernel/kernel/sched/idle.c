@@ -7,47 +7,36 @@
 #include "idle.h"
 #include "task.h"
 #include "scheduler.h"
+#include "cpu.h"
+#include "cpustat.h"
 #include "types.h"
 
-/* Idle task stack (4KB) */
 #define IDLE_STACK_SIZE 4096
-static uint8_t idle_stack[IDLE_STACK_SIZE] __attribute__((aligned(4096), section(".user_stack")));
 
-/* Idle task structure */
+static uint8_t            idle_stack[IDLE_STACK_SIZE] __attribute__((aligned(4096), section(".user_stack")));
 static struct task_struct idle_task_struct;
-
-#define PRINT_INTERVAL 100000 /* Reduced for visibility during frequent context switches */
 
 static void idle_task(void)
 {
-    uint32_t counter = 0;
+    uint32_t wfi_start;
 
-    while (1)
-    {
-        counter++;
-
-        if (counter % PRINT_INTERVAL == 0)
-        {
-        }
-
-        /* schedule() is gated on need_reschedule; set it before calling
-         * so idle yields instead of returning immediately and busy-looping
-         * until the next timer tick (~10 ms). */
-        extern volatile bool need_reschedule;
+    while (1) {
         need_reschedule = true;
         schedule();
 
-        /* WFI: sleep until next IRQ if yield didn't switch — keeps
-         * idle from burning CPU when nothing else is READY. */
-        __asm__ volatile("wfi");
+        /* WFI brackets measured so cpustat can compute real CPU%:
+         * cycles between begin and end are idle; everything else is busy. */
+        wfi_start = cpustat_wfi_begin();
+        wfi();
+        cpustat_wfi_end(wfi_start);
     }
 }
 
 struct task_struct *get_idle_task(void)
 {
-    idle_task_struct.name = "idle";
+    idle_task_struct.name  = "idle";
     idle_task_struct.state = TASK_RUNNING;
-    idle_task_struct.id = 0;
+    idle_task_struct.id    = 0;
 
     task_stack_init(&idle_task_struct, idle_task, idle_stack, IDLE_STACK_SIZE);
 
