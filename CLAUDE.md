@@ -20,6 +20,7 @@
 - Driver không hardcode peripheral base — lấy từ `platform_get_resource()` → `board-bbb.c` → `mach/`
 - Register có version/revision field: định nghĩa mask constant, dùng masked comparison — raw value chỉ biết sau khi đọc hardware thật
 - Peripheral region phải có trong `mmu_build_page_table_boot()` trước khi driver access — nếu thiếu → DATA ABORT ngay lần write đầu tiên
+- Driver dùng IRQ: gọi `enable_irq()` sau `request_irq()` — thiếu bước này INTC vẫn mask, IRQ không fire
 
 ---
 
