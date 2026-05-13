@@ -1,18 +1,17 @@
 /*
- * drivers/net/vnet.c — ARP responder + ICMP echo reply for 192.168.1.100
+ * drivers/net/vnet.c — ARP responder + ICMP echo reply for 192.168.2.100
  */
 
 #include "vinix/netdevice.h"
 #include "vinix/skbuff.h"
 #include "uart.h"
 #include "string.h"
+#include "ip.h"
 
-static const unsigned char bbb_ip[4] = {192, 168, 1, 100};
+static const unsigned char bbb_ip[4] = {192, 168, 2, 100};
 
 #define ETH_HDR  14
 #define ARP_LEN  28
-
-extern void ip_rx(struct sk_buff *skb);
 
 static void arp_reply(struct sk_buff *rxskb)
 {

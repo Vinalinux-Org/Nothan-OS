@@ -33,6 +33,7 @@
 #include "syscalls.h"
 #include "types.h"
 #include "boot_screen.h"
+#include "net_task.h"
 
 extern void sync_selftest(void);
 
@@ -190,6 +191,10 @@ void kernel_main(void)
 
     if (scheduler_add_task(&shell_task) < 0)
         pr_info("[BOOT] Failed to add User App Task\n");
+
+    struct task_struct *net_ptr = get_net_task();
+    if (scheduler_add_task(net_ptr) < 0)
+        pr_info("[BOOT] Failed to add net task\n");
 
     /*
      * Device Init: bring up the scheduler timer and remaining drivers.

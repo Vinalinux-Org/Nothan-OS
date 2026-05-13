@@ -19,6 +19,7 @@ ASM_SRC = arch/arm/entry/reset.S \
 
 C_SRC = arch/arm/kernel/exception_handlers.c \
         arch/arm/kernel/svc_handler.c \
+        arch/arm/kernel/cpustat.c \
         arch/arm/mm/mmu.c \
         arch/arm/mach-omap2/memmap.c \
         arch/arm/mach-omap2/board-bbb.c \
@@ -58,6 +59,7 @@ C_SRC = arch/arm/kernel/exception_handlers.c \
         drivers/net/ipv4/ip.c \
         drivers/net/ipv4/tcp.c \
         drivers/net/app/http.c \
+        drivers/net/app/net_task.c \
         drivers/net/vnet.c \
         block/partitions/msdos.c \
         drivers/video/fbdev/fbmem.c \

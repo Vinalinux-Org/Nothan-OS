@@ -9,11 +9,12 @@
 #include "vinix/skbuff.h"
 #include "uart.h"
 #include "string.h"
+#include "tcp.h"
 
 #define ETH_HDR  14
 #define IP_HDR   20
 
-static const unsigned char bbb_ip[4] = {192, 168, 1, 100};
+static const unsigned char bbb_ip[4] = {192, 168, 2, 100};
 
 static uint16_t net_checksum(const unsigned char *buf, unsigned int len)
 {
@@ -26,8 +27,6 @@ static uint16_t net_checksum(const unsigned char *buf, unsigned int len)
         s = (s & 0xFFFF) + (s >> 16);
     return (uint16_t)(~s);
 }
-
-extern void tcp_rx(struct sk_buff *skb, unsigned char *ip);
 
 void ip_tx(struct sk_buff *skb, const unsigned char *dst_mac,
            const unsigned char *dst_ip, uint8_t proto)
