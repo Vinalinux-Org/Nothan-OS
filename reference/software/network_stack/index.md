@@ -11,9 +11,9 @@ Tài liệu cho software networking stack của VinixOS — các tầng giao th�
 | Ethernet | `vnet.c` — dispatch EtherType | ✅ Done | SS11 |
 | ARP | `vnet.c::arp_reply()` — trả lời ARP request | ✅ Done — hardware confirmed | SS11/SS12 |
 | ICMP | `vnet.c::icmp_reply()` — echo reply | ✅ Done — ping 4/4, RTT ~9ms | SS11/SS12 |
-| IP | `ip.c` — ip_rx(), ip_tx() | ⬜ Planning | — |
-| TCP | `tcp.c` — tcp_rx(), tcp_syn_ack(), tcp_ack(), tcp_fin() | ⬜ Planning | — |
-| HTTP | `http.c` — http_rx(), http_tx() | ⬜ Planning | — |
+| IP | `ip.c` — ip_rx(), ip_tx() | ✅ Done — hardware confirmed | SS13 |
+| TCP | `tcp.c` — tcp_rx(), tcp_send() | ✅ Done — hardware confirmed | SS13 |
+| HTTP | `http.c` — http_rx(), http_sse_frame() | ✅ Done — hardware confirmed | SS15 |
 
 ---
 
@@ -22,10 +22,10 @@ Tài liệu cho software networking stack của VinixOS — các tầng giao th�
 ```
 vnet_rx(skb)
     ├── EtherType 0x0806 → arp_reply()       ✅
-    └── EtherType 0x0800 → ip_rx()           ⬜
+    └── EtherType 0x0800 → ip_rx()           ✅
                                ├── proto 1 ICMP → icmp_reply()   ✅
-                               └── proto 6 TCP  → tcp_rx()       ⬜
-                                                      └── port 80 → http_rx() ⬜
+                               └── proto 6 TCP  → tcp_rx()       ✅
+                                                      └── port 80 → http_rx() ✅
 ```
 
 ---
@@ -38,12 +38,12 @@ Tên file và function phản ánh đúng tầng giao thức và mục tiêu c�
 |------|------|----------|---------|
 | IP   | `ip.c`   | `ip_rx(skb)` | Nhận gói IP, đọc field `protocol`, dispatch xuống |
 |      |          | `ip_tx(skb, dst_ip, proto)` | Build IP header, gửi qua net_core |
-| TCP  | `tcp.c`  | `tcp_rx(skb)` | Nhận TCP segment, dispatch theo state hiện tại |
-|      |          | `tcp_syn_ack(conn)` | Gửi SYN-ACK trong handshake |
-|      |          | `tcp_ack(conn)` | Gửi ACK thuần |
-|      |          | `tcp_fin(conn)` | Gửi FIN để đóng connection |
-| HTTP | `http.c` | `http_rx(conn, data, len)` | Parse HTTP request |
-|      |          | `http_tx(conn)` | Gửi HTTP response HTML |
+| TCP  | `tcp.c`  | `tcp_rx(skb, ip)` | Nhận TCP segment, dispatch theo state machine |
+|      |          | `tcp_send(conn, seq, ack, flags, data, len)` | Gửi mọi loại TCP frame — SYN-ACK, ACK, FIN, data |
+|      |          | `tcp_poll()` | Đóng keep-alive connection idle quá 5s |
+|      |          | `tcp_sse_push(frame, len)` | Push SSE frame đến tất cả SSE connection |
+| HTTP | `http.c` | `http_rx(req, len, resp, max, ka, ctype)` | Parse request, build response, phân loại HTTP vs SSE |
+|      |          | `http_sse_frame(buf, max)` | Build SSE frame chứa metrics hiện tại |
 
 ### Struct và State
 
@@ -67,18 +67,23 @@ struct tcp_conn {
 
 ---
 
-## Files cần tạo
+## Files đã tạo
 
 ```
 vinix-kernel/drivers/net/ipv4/
-    ip.c      ← ip_rx, ip_tx
-    tcp.c     ← tcp_rx, tcp_syn_ack, tcp_ack, tcp_fin
+    ip.c      — ip_rx, ip_tx
+    tcp.c     — tcp_rx, tcp_send, tcp_poll, tcp_sse_push
 
 vinix-kernel/drivers/net/app/
-    http.c    ← http_rx, http_tx
-```
+    http.c    — http_rx, http_sse_frame
+    net_task.c — background task, SSE push mỗi giây
 
-Không cần header mới — dùng lại `include/vinix/skbuff.h` và `include/vinix/netdevice.h`.
+vinix-kernel/include/
+    ip.h      — public interface ip layer
+    tcp.h     — public interface tcp layer
+    http.h    — public interface http layer
+    net_task.h — get_net_task()
+```
 
 ---
 
@@ -130,9 +135,29 @@ Thứ tự viết code theo dependency — tầng dưới xong trước tầng t
 - Flow: overview để user quyết định hướng → drill down từng tầng khi user confirm
 - Show diff trước khi apply bất kỳ thay đổi nào, chờ confirm
 
-### Quyết định đã chốt — không reopen
+### Lịch sử kiến trúc
 
-- Folder: `net/ipv4/` cho ip+tcp, `net/app/` cho http
-- Naming: `ip_rx`, `ip_tx`, `tcp_rx`, `tcp_syn_ack`, `tcp_ack`, `tcp_fin`, `http_rx`, `http_tx`
-- 1 TCP connection tĩnh toàn cục (`g_conn`) — không alloc, không list
-- HTTP/1.0 only — connection-per-request, không keep-alive
+#### v0.1 — Plan ban đầu (Pull model)
+```
+Client ──request──▶ tcp_syn_ack()
+                    tcp_ack()          ← mỗi state = 1 hàm riêng
+                    http_rx()
+                    tcp_fin()
+       ◀──response─ (đóng connection)
+```
+- 1 connection tĩnh toàn cục `g_conn`
+- HTTP/1.0 — mỗi request mở/đóng connection
+- Client hỏi → server trả lời → xong
+
+#### v0.2 — Implemented (Push model)
+```
+conn_table[4]
+  ├── conn HTTP  — request/response, keep-alive 5s timeout
+  └── conn SSE  ── net_task ──▶ push mỗi giây ──▶ browser
+                    tcp_send(conn, flags, data, len)
+                         ↑ 1 hàm duy nhất cho mọi state
+```
+- Pool 4 connections đồng thời, 2 loại: `CONN_TYPE_HTTP` và `CONN_TYPE_SSE`
+- HTTP/1.1 keep-alive — connection tái sử dụng
+- `net_task` chạy ngầm, chủ động push data mỗi giây
+- Server tự gửi khi có data mới, không cần client hỏi

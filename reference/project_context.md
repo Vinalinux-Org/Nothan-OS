@@ -56,6 +56,11 @@ compiler/           ← Phase 2: Python cross compiler → ARMv7-A (HOÀN THÀNH
 | Shell (userspace) | ls, cat, ps, meminfo, help — chạy ở User Mode |
 | MMC driver (bootloader) | Đọc sector từ SD card — chỉ dùng trong bootloader |
 | Ethernet driver | Kết nối mạng 10/100 qua LAN8710A, hardware confirmed |
+| Network stack   | IP/TCP, HTTP server, keep-alive — hardware confirmed |
+| Web dashboard   | Hiển thị CPU%, RAM, uptime, task list — real-time qua SSE push |
+| CPU monitor     | Đo CPU% thực tế qua ARM cycle counter — bao gồm cả thời gian xử lý IRQ |
+| GPIO driver     | 4 GPIO banks (GPIO0-3), PRCM clock enable, output/input API |
+| LED control     | USR0-USR3 (GPIO1_21-24) điều khiển qua web dashboard |
 
 ---
 
@@ -72,11 +77,5 @@ compiler/           ← Phase 2: Python cross compiler → ARMv7-A (HOÀN THÀNH
 - Phase 1: read-only (mount, ls, cat)
 - Phase 2: write support (lưu data người dùng)
 - Tài liệu: `reference/drivers/fat32/index.md`
-
-### Network Stack (IP/TCP/HTTP)
-- Mục tiêu: BBB trả lời HTTP request từ browser tại `http://192.168.1.100`
-- ARP + ICMP: done (~10% network stack, stateless responder)
-- IP → TCP → HTTP: đang phát triển (~90% còn lại, ~850 LOC)
-- Tài liệu: `reference/software/network_stack/index.md`
 
 

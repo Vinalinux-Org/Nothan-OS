@@ -143,6 +143,7 @@ pr_err("[SCHED] No tasks to run!\n");
 3. Đăng ký qua `module_platform_driver(drv)` hoặc `module_i2c_driver(drv)`.
 4. Inter-driver dependency: `if (!dep_ready) return -EPROBE_DEFER`. Core retry sau `driver_deferred_probe_trigger()`.
 5. `init/main.c` CHỈ chứa `do_initcalls(N)` + core init + VFS mount + deferred probe trigger. KHÔNG gọi driver-specific init trực tiếp.
+6. Module không phải platform driver (arch subsystem, pure software): tự đăng ký qua initcall phù hợp — không để module khác gọi `xxx_init()`.
 
 ### Driver template
 ```c
@@ -218,6 +219,8 @@ THIẾU bất kỳ → DỪNG NGAY, KHÔNG ĐOÁN. Đọc `reference/drivers/<na
 ### Bước 0 — luôn làm trước khi viết
 
 **Mọi loại code**: đọc file đang sửa và các header phụ thuộc trước khi gen. Nếu behavior chưa rõ → hỏi, không tự suy diễn.
+
+**Khi thiết kế module mới hoặc thêm file .c mới**: đọc [reference/coding_standards.md](reference/coding_standards.md).
 
 Loại code khác nhau, pre-requisite khác nhau:
 
