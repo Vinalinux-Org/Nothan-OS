@@ -17,6 +17,9 @@
 #define CM_PER_MMC0_CLKCTRL         (CM_PER_BASE + 0x03C)
 #define CM_PER_UART0_CLKCTRL        (CM_PER_BASE + 0x06C)
 #define CM_PER_TIMER2_CLKCTRL       (CM_PER_BASE + 0x080)
+#define CM_PER_GPIO1_CLKCTRL        (CM_PER_BASE + 0x0AC)
+#define CM_PER_GPIO2_CLKCTRL        (CM_PER_BASE + 0x0B0)
+#define CM_PER_GPIO3_CLKCTRL        (CM_PER_BASE + 0x0B4)
 #define CM_PER_CPSW_CLKSTCTRL       (CM_PER_BASE + 0x144)
 #define CM_PER_LCDC_CLKSTCTRL       (CM_PER_BASE + 0x148)
 
@@ -28,6 +31,7 @@
 /* CM_WKUP — Clock Module Wakeup domain (L4_WKUP) */
 #define CM_WKUP_BASE                0x44E00400UL
 
+#define CM_WKUP_GPIO0_CLKCTRL       (CM_WKUP_BASE + 0x008)
 #define CM_IDLEST_DPLL_DISP         (CM_WKUP_BASE + 0x048)
 #define CM_CLKSEL_DPLL_DISP         (CM_WKUP_BASE + 0x054)
 #define CM_CLKMODE_DPLL_DISP        (CM_WKUP_BASE + 0x098)

@@ -25,15 +25,16 @@
 #define OMAP_DMTIMER2_BASE  0x48040000
 #define OMAP_INTC_BASE      0x48200000
 #define OMAP_LCDC_BASE      0x4830E000
+
+/* L4_FAST */
 #define OMAP_CPSW_SS_BASE   0x4A100000
 #define OMAP_CPSW_MDIO_BASE 0x4A101000
-#define OMAP_CPSW_PORT_BASE 0x4A100100
-#define OMAP_CPDMA_BASE     0x4A100800
-#define OMAP_CPDMA_SR_BASE  0x4A100A00
-#define OMAP_CPSW_ALE_BASE  0x4A100D00
-#define OMAP_CPSW_SL1_BASE  0x4A100D80
-#define OMAP_CPSW_WR_BASE   0x4A101200
-#define OMAP_CPPI_RAM_BASE  0x4A102000
+
+/* GPIO banks — 4 independent hardware instances */
+#define OMAP_GPIO0_BASE     0x44E07000
+#define OMAP_GPIO1_BASE     0x4804C000
+#define OMAP_GPIO2_BASE     0x481AC000
+#define OMAP_GPIO3_BASE     0x481AE000
 
 struct platform_peripheral_region {
     uint32_t pa;
