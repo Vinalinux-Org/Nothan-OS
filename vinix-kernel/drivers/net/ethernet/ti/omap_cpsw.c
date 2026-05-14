@@ -107,6 +107,8 @@
 #define BD_TO_PORT1          (1 << 16)
 #define BD_PKT_LEN_MASK      0x7FF
 
+#define OMAP_CPPI_RAM_BASE   0x4A102000
+
 /* CPPI_RAM layout (8KB = 0x4A102000..0x4A103FFF):
  *   0x0000: rx_bd[4]  — 4 × 16 bytes = 64 bytes
  *   0x0040: tx_bd     — 16 bytes

@@ -42,8 +42,6 @@ static void arp_reply(struct sk_buff *rxskb)
     memcpy(a + 22, rarp + 14,            4); /* TPA = requester IP     */
 
     tx->dev = rxskb->dev;
-    pr_info("[VNET] ARP reply -> %02x:%02x:%02x:%02x:%02x:%02x\n",
-            rx[6], rx[7], rx[8], rx[9], rx[10], rx[11]);
     rxskb->dev->netdev_ops->ndo_start_xmit(tx, rxskb->dev);
 }
 

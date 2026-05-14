@@ -51,7 +51,7 @@ struct tcp_conn {
 };
 
 static struct tcp_conn conn_table[MAX_CONN];
-static unsigned char   http_resp_buf[8192];
+static unsigned char   http_resp_buf[32768];
 
 static uint16_t tcp_checksum(const unsigned char *pseudo,
                               const unsigned char *seg, uint16_t len)
@@ -225,8 +225,6 @@ void tcp_rx(struct sk_buff *skb, unsigned char *ip)
         if (!(flags & TCP_FLAG_ACK)) break;
         conn->state = TCP_ESTABLISHED;
         conn->last_active = jiffies;
-        pr_info("[TCP] ESTABLISHED %d.%d.%d.%d:%d\n",
-                ip[12], ip[13], ip[14], ip[15], remote_port);
         if (data_len > 0) tcp_handle_data(conn, data, data_len);
         break;
 
@@ -243,8 +241,6 @@ void tcp_rx(struct sk_buff *skb, unsigned char *ip)
 
     case TCP_LAST_ACK:
         if (flags & TCP_FLAG_ACK) {
-            pr_info("[TCP] CLOSED %d.%d.%d.%d:%d\n",
-                    ip[12], ip[13], ip[14], ip[15], remote_port);
             conn->state = TCP_LISTEN;
         }
         break;
