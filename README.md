@@ -55,7 +55,7 @@ Project gồm 2 components chính:
 | **Syscalls** | 22 syscall qua SVC, AAPCS ABI, `copy_from/to_user`, negative errno |
 | **VFS** | Multi-FS: FAT32 rootfs (subdir/unlink/rename) + devfs (`/dev/tty`, `/dev/null`) + procfs (`/proc/...`) |
 | **Block** | `block_device` abstraction, LRU buffer cache 64×512 B write-back |
-| **Driver model** | Linux-style `platform_device/driver`, bus matching, `platform_get_resource` (4 drivers wired) |
+| **Driver model** | Linux-style `platform_device/driver`, bus matching, `platform_get_resource` |
 | **Userspace** | init (PID 1) + shell fork+exec + 10 external coreutils + vinixlibc POSIX subset (~1.4 KLOC) |
 | **HDMI Display** | 800×600 RGB565, TDA19988 HDMI transmitter qua I2C, LCDC framebuffer |
 
@@ -187,7 +187,7 @@ cd Vinix-OS
 #### Bước 2: Build VinixOS (bootloader + kernel + userspace)
 
 ```bash
-make -C vinix-kernel
+make 
 ```
 
 Output:
@@ -374,13 +374,24 @@ Vinix-OS/
 │   │   └── runtime/         ← crt0.S, syscalls.S, divmod.S, app.ld
 │   └── Documentation/       ← 5 tài liệu kỹ thuật
 │
+├── reference/               ← AM335x TRM, ARM arch, coding/comment/commit style, driver guide
+│   ├── am335x/              ← Register map, peripheral config, clock/power (TRM reference)
+│   ├── arm-arch/            ← ARM instruction set, exception handling, assembly
+│   ├── hardware-beagleboneblack/ ← BBB schematic, P8/P9 pinout
+│   ├── drivers/             ← Per-driver docs (SD card, FAT32, ...)
+│   ├── coding-style.md      ← Naming convention, file layout, hard rules
+│   ├── comment-style.md     ← Comment policy: when yes, when no
+│   ├── commit-style.md      ← Commit format, type taxonomy, scope
+│   ├── driver-development-guide.md ← 5-step driver writing process + template
+│   └── project_context.md   ← Project status, WIP, conventions overview
+│
 ├── scripts/
 │   ├── setup-environment.sh
 │   ├── install_compiler.sh
 │   ├── deploy_and_flash.sh    ← Build + deploy rootfs + flash MLO/kernel
 │   └── flash_sdcard.sh        ← Quick update MLO + kernel only
 │
-├── CLAUDE.md                ← Project guide cho AI-assisted development
+├── CLAUDE.md                ← AI enforcer: hard rules, debug workflow, code-gen protocol
 ├── Makefile
 └── README.md
 ```
@@ -424,6 +435,19 @@ Vinix-OS/
 | [06-syscall-mechanism.md](Documentation/06-syscall-mechanism.md) | SVC ABI, pointer validation |
 | [08-userspace-application.md](Documentation/08-userspace-application.md) | crt0.S, linker script, shell |
 | [99-system-overview.md](Documentation/99-system-overview.md) | Big picture, flows, memory map |
+
+### Hardware Reference (`reference/`)
+
+| File | Nội Dung |
+|------|---------|
+| [coding-style.md](reference/coding-style.md) | Naming convention, file layout, coding hard rules |
+| [comment-style.md](reference/comment-style.md) | Comment policy, 5 allowed cases, anti-patterns |
+| [commit-style.md](reference/commit-style.md) | Commit format, type taxonomy, scope selection |
+| [driver-development-guide.md](reference/driver-development-guide.md) | 5-step driver writing process, template, initcall levels |
+| [project_context.md](reference/project_context.md) | Project status, WIP, conventions overview |
+| [am335x/index.md](reference/am335x/index.md) | AM335x TRM register map, peripheral config, clock/power |
+| [arm-arch/index.md](reference/arm-arch/index.md) | ARM instruction set, exception handling, assembly |
+| [hardware-beagleboneblack/index.md](reference/hardware-beagleboneblack/index.md) | BBB schematic, P8/P9 pinout |
 
 ### Compiler (`compiler/Documentation/`)
 
