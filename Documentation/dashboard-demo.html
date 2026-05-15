@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VinixOS Dashboard</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0d1117;color:#e6edf3;display:flex;height:100vh;overflow:hidden}
+
+/* Sidebar */
+.sidebar{width:210px;background:#161b22;border-right:1px solid #30363d;display:flex;flex-direction:column}
+.dev-info{padding:20px 16px;border-bottom:1px solid #30363d}
+.dot{display:inline-block;width:8px;height:8px;background:#3fb950;border-radius:50%;margin-right:8px}
+.dev-name{font-size:14px;font-weight:600}
+.dev-sub{font-size:12px;color:#8b949e;margin-top:4px;padding-left:16px}
+.nav-grp{padding:14px 16px 6px;font-size:11px;font-weight:600;color:#8b949e;letter-spacing:.6px}
+.nav-item{display:flex;align-items:center;gap:9px;padding:8px 12px;margin:2px 8px;border-radius:6px;font-size:13px;color:#8b949e;cursor:pointer}
+.nav-item:hover{background:#21262d;color:#e6edf3}
+.nav-item.active{background:#1f3d2e;color:#3fb950;font-weight:500}
+.nav-item svg{flex-shrink:0}
+.sidebar-foot{margin-top:auto;padding:14px 16px;font-size:11px;color:#8b949e;border-top:1px solid #30363d}
+
+/* Main */
+.main{flex:1;overflow-y:auto;padding:24px}
+.hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}
+.hdr-title{font-size:20px;font-weight:600}
+.hdr-time{font-size:14px;color:#8b949e;font-variant-numeric:tabular-nums}
+
+/* Metrics */
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+.mc{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:16px}
+.mc-lbl{font-size:12px;color:#8b949e;margin-bottom:8px}
+.mc-val{font-size:28px;font-weight:700}
+.mc-val span{font-size:14px;font-weight:400}
+.mc-val.g{color:#3fb950}
+.mc-val.b{color:#58a6ff}
+.mc-val.ip{font-size:15px;color:#3fb950;margin-top:4px}
+.bar{height:3px;background:#21262d;border-radius:2px;margin-top:10px}
+.bar-fill{height:100%;border-radius:2px}
+.bar-fill.g{background:#3fb950}
+.bar-fill.b{background:#58a6ff}
+
+/* Cards */
+.card{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:20px;margin-bottom:14px}
+.card-title{font-size:14px;font-weight:600;margin-bottom:16px;display:flex;align-items:center;gap:8px;color:#e6edf3}
+
+/* GPIO */
+.gpio-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.gpio-item{background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:16px}
+.gpio-name{font-size:13px;font-weight:600;margin-bottom:3px}
+.gpio-pin{font-size:11px;color:#8b949e;margin-bottom:12px}
+.gpio-row{display:flex;justify-content:space-between;align-items:center}
+.gpio-st{font-size:12px;font-weight:600}
+.gpio-st.hi{color:#3fb950}
+.gpio-st.lo{color:#6e7681}
+.tgl{width:40px;height:22px;background:#21262d;border:none;border-radius:11px;position:relative;cursor:pointer;transition:background .2s;outline:none}
+.tgl.on{background:#3fb950}
+.tgl::after{content:'';position:absolute;width:18px;height:18px;background:#fff;border-radius:50%;top:2px;left:2px;transition:transform .2s}
+.tgl.on::after{transform:translateX(18px)}
+
+/* Info table */
+.tbl{width:100%;border-collapse:collapse}
+.tbl tr{border-bottom:1px solid #21262d}
+.tbl tr:last-child{border-bottom:none}
+.tbl td{padding:10px 0;font-size:13px}
+.tbl td:first-child{color:#8b949e;width:42%}
+.tbl td:last-child{text-align:right;font-weight:500}
+.badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:600}
+.badge.g{background:#1f3d2e;color:#3fb950}
+.badge.b{background:#1c2d3d;color:#58a6ff}
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+  <div class="dev-info">
+    <div><span class="dot"></span><span class="dev-name">BBB-Device-01</span></div>
+    <div class="dev-sub">BeagleBone Black</div>
+  </div>
+  <div class="nav-grp">MONITOR</div>
+  <div class="nav-item active">
+    <svg width="15" height="15" fill="currentColor" viewBox="0 0 16 16"><path d="M0 1.5A1.5 1.5 0 0 1 1.5 0h13A1.5 1.5 0 0 1 16 1.5v13A1.5 1.5 0 0 1 14.5 16h-13A1.5 1.5 0 0 1 0 14.5zm1.5-.5a.5.5 0 0 0-.5.5V7h6V1zM7 8H1v6.5a.5.5 0 0 0 .5.5H7zm1 0v7h6.5a.5.5 0 0 0 .5-.5V8zm0-1h7V1.5a.5.5 0 0 0-.5-.5H8z"/></svg>
+    Overview
+  </div>
+  <div class="nav-grp">CONFIG</div>
+  <div class="nav-item">
+    <svg width="15" height="15" fill="currentColor" viewBox="0 0 16 16"><path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492M5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0"/><path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.892 3.433-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.892-1.64-.901-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52z"/></svg>
+    Hardware
+  </div>
+  <div class="nav-item">
+    <svg width="15" height="15" fill="currentColor" viewBox="0 0 16 16"><path d="M0 4a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2zm2-1a1 1 0 0 0-1 1v.217l7 4.2 7-4.2V4a1 1 0 0 0-1-1zm13 2.383-4.708 2.825L15 11.105zm-.034 6.876-5.64-3.471L8 9.583l-1.326-.795-5.64 3.47A1 1 0 0 0 2 13h12a1 1 0 0 0 .966-.741zM1 11.105l4.708-2.897L1 5.383z"/></svg>
+    Network
+  </div>
+  <div class="nav-grp">SYSTEM</div>
+  <div class="nav-item">
+    <svg width="15" height="15" fill="currentColor" viewBox="0 0 16 16"><path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.892 3.433-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.892-1.64-.901-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52z"/></svg>
+    Settings
+  </div>
+  <div class="sidebar-foot">Bare Metal OS v1.0</div>
+</div>
+
+<div class="main">
+  <div class="hdr">
+    <div class="hdr-title">System overview</div>
+    <div class="hdr-time" id="clk"></div>
+  </div>
+
+  <div class="metrics">
+    <div class="mc">
+      <div class="mc-lbl">CPU usage</div>
+      <div class="mc-val g" id="cpu-val">35<span>%</span></div>
+      <div class="bar"><div class="bar-fill g" id="cpu-bar" style="width:35%"></div></div>
+    </div>
+    <div class="mc">
+      <div class="mc-lbl">Memory</div>
+      <div class="mc-val b">61<span>%</span></div>
+      <div class="bar"><div class="bar-fill b" style="width:61%"></div></div>
+    </div>
+    <div class="mc">
+      <div class="mc-lbl">Uptime</div>
+      <div class="mc-val" style="font-size:22px" id="uptime">00:00:00</div>
+    </div>
+    <div class="mc">
+      <div class="mc-lbl">IP address</div>
+      <div class="mc-val ip">192.168.2.100</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">
+      <svg width="16" height="16" fill="#3fb950" viewBox="0 0 16 16"><path d="M11.251.068a.5.5 0 0 1 .227.58L9.677 6.5H13a.5.5 0 0 1 .364.843l-8 8.5a.5.5 0 0 1-.842-.49L6.323 9.5H3a.5.5 0 0 1-.364-.843l8-8.5a.5.5 0 0 1 .615-.09z"/></svg>
+      GPIO control
+    </div>
+    <div class="gpio-grid">
+      <div class="gpio-item">
+        <div class="gpio-name">LED 1</div>
+        <div class="gpio-pin">GPIO P8_12</div>
+        <div class="gpio-row">
+          <span class="gpio-st hi" id="s0">HIGH</span>
+          <button class="tgl on" onclick="toggle(this,'s0')"></button>
+        </div>
+      </div>
+      <div class="gpio-item">
+        <div class="gpio-name">LED 2</div>
+        <div class="gpio-pin">GPIO P8_14</div>
+        <div class="gpio-row">
+          <span class="gpio-st lo" id="s1">LOW</span>
+          <button class="tgl" onclick="toggle(this,'s1')"></button>
+        </div>
+      </div>
+      <div class="gpio-item">
+        <div class="gpio-name">Relay</div>
+        <div class="gpio-pin">GPIO P9_15</div>
+        <div class="gpio-row">
+          <span class="gpio-st lo" id="s2">LOW</span>
+          <button class="tgl" onclick="toggle(this,'s2')"></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">
+      <svg width="16" height="16" fill="#8b949e" viewBox="0 0 16 16"><path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16m.93-9.412-1 4.705c-.07.34.029.533.304.533.194 0 .487-.07.686-.246l-.088.416c-.287.346-.92.598-1.465.598-.703 0-1.002-.422-.808-1.319l.738-3.468c.064-.293.006-.399-.287-.47l-.451-.081.082-.381 2.29-.287zM8 5.5a1 1 0 1 1 0-2 1 1 0 0 1 0 2"/></svg>
+      System info
+    </div>
+    <table class="tbl">
+      <tr><td>Board</td><td>BeagleBone Black Rev C</td></tr>
+      <tr><td>CPU</td><td>AM335x Cortex-A8 @ 1GHz</td></tr>
+      <tr><td>RAM total</td><td>256 MB DDR3</td></tr>
+      <tr><td>OS</td><td><span class="badge b">Bare Metal</span></td></tr>
+      <tr><td>Web server</td><td><span class="badge g">Running</span></td></tr>
+      <tr><td>MAC address</td><td>98:89:24:75:E6:3E</td></tr>
+    </table>
+  </div>
+</div>
+
+<script>
+var start = Date.now();
+function pad(n){return String(n).padStart(2,'0')}
+function tick(){
+  var n=new Date();
+  document.getElementById('clk').textContent=pad(n.getHours())+':'+pad(n.getMinutes())+':'+pad(n.getSeconds());
+  var s=Math.floor((Date.now()-start)/1000);
+  document.getElementById('uptime').textContent=pad(Math.floor(s/3600))+':'+pad(Math.floor(s%3600/60))+':'+pad(s%60);
+}
+setInterval(tick,1000);tick();
+function toggle(btn,sid){
+  btn.classList.toggle('on');
+  var on=btn.classList.contains('on');
+  var el=document.getElementById(sid);
+  el.textContent=on?'HIGH':'LOW';
+  el.className='gpio-st '+(on?'hi':'lo');
+}
+</script>
+</body>
+</html>

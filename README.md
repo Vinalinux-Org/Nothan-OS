@@ -187,7 +187,7 @@ cd Vinix-OS
 #### Bước 2: Build VinixOS (bootloader + kernel + userspace)
 
 ```bash
-make 
+make
 ```
 
 Output:

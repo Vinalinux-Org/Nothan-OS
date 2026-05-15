@@ -23,6 +23,9 @@ void scheduler_terminate_task(uint32_t id);
 /* Precondition: at least one task added, IRQ enabled in CPSR. */
 void scheduler_start(void) __attribute__((noreturn));
 
+/* Set by scheduler_tick(); checked by idle_task and schedule(). */
+extern volatile bool need_reschedule;
+
 /* IRQ context — sets need_reschedule, never context-switches. */
 void scheduler_tick(void);
 

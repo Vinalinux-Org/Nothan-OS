@@ -15,7 +15,7 @@
 #include "syscalls.h" /* For process_info_t */
 
 /* Defined in context_switch.S */
-extern void context_switch(struct task_struct *current, struct task_struct *next);
+extern void context_switch(struct task_struct *prev, struct task_struct *next);
 extern void start_first_task(struct task_struct *first);
 
 

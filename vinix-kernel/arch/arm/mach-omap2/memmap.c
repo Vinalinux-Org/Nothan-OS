@@ -9,8 +9,9 @@
 #include "mach/memmap.h"
 
 const struct platform_peripheral_region platform_peripheral_map[] = {
-    { PLATFORM_PERIPH_L4_WKUP_PA, PLATFORM_PERIPH_L4_WKUP_SECTIONS, "L4_WKUP" },
-    { PLATFORM_PERIPH_L4_PER_PA,  PLATFORM_PERIPH_L4_PER_SECTIONS,  "L4_PER"  },
+    { PLATFORM_PERIPH_L4_WKUP_PA,  PLATFORM_PERIPH_L4_WKUP_SECTIONS,  "L4_WKUP" },
+    { PLATFORM_PERIPH_L4_PER_PA,   PLATFORM_PERIPH_L4_PER_SECTIONS,   "L4_PER"  },
+    { PLATFORM_PERIPH_L4_FAST_PA,  PLATFORM_PERIPH_L4_FAST_SECTIONS,  "L4_FAST" },
 };
 
 const int platform_peripheral_map_count =

@@ -55,6 +55,12 @@ compiler/           ← Phase 2: Python cross compiler → ARMv7-A (HOÀN THÀNH
 | RAMFS | Read-only, files embed vào kernel image lúc build |
 | Shell (userspace) | ls, cat, ps, meminfo, help — chạy ở User Mode |
 | MMC driver (bootloader) | Đọc sector từ SD card — chỉ dùng trong bootloader |
+| Ethernet driver | Kết nối mạng 10/100 qua LAN8710A, hardware confirmed |
+| Network stack   | IP/TCP, HTTP server, keep-alive — hardware confirmed |
+| Web dashboard   | Hiển thị CPU%, RAM, uptime, task list — real-time qua SSE push |
+| CPU monitor     | Đo CPU% thực tế qua ARM cycle counter — bao gồm cả thời gian xử lý IRQ |
+| GPIO driver     | 4 GPIO banks (GPIO0-3), PRCM clock enable, output/input API |
+| LED control     | USR0-USR3 (GPIO1_21-24) điều khiển qua web dashboard |
 
 ---
 

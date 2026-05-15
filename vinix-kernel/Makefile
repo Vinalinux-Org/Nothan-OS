@@ -19,6 +19,7 @@ ASM_SRC = arch/arm/entry/reset.S \
 
 C_SRC = arch/arm/kernel/exception_handlers.c \
         arch/arm/kernel/svc_handler.c \
+        arch/arm/kernel/cpustat.c \
         arch/arm/mm/mmu.c \
         arch/arm/mach-omap2/memmap.c \
         arch/arm/mach-omap2/board-bbb.c \
@@ -51,6 +52,17 @@ C_SRC = arch/arm/kernel/exception_handlers.c \
         drivers/gpu/drm/tilcdc/tilcdc_drv.c \
         drivers/gpu/drm/i2c/tda998x.c \
         drivers/mmc/host/omap_hsmmc.c \
+        drivers/net/ethernet/ti/omap_mdio.c \
+        drivers/net/ethernet/ti/omap_cpsw.c \
+        drivers/net/net_core.c \
+        drivers/net/skbuff.c \
+        drivers/net/ipv4/ip.c \
+        drivers/net/ipv4/tcp.c \
+        drivers/net/app/http.c \
+        drivers/net/app/net_task.c \
+        drivers/gpio/omap_gpio.c \
+        drivers/gpio/leds.c \
+        drivers/net/vnet.c \
         block/partitions/msdos.c \
         drivers/video/fbdev/fbmem.c \
         drivers/video/fbdev/fbcon.c \
@@ -79,7 +91,7 @@ PAYLOAD_OBJ = $(BUILD_DIR)/payload.o
 OBJS        = $(ASM_OBJ) $(C_OBJ) $(PAYLOAD_OBJ)
 
 # VPATH lets Make find sources by basename across directory tree
-VPATH = arch/arm/entry:arch/arm/exceptions:arch/arm/scheduler:arch/arm/mm:arch/arm/kernel:arch/arm/mach-omap2:init:kernel:kernel/irq:kernel/irqchip:kernel/printk:kernel/time:kernel/sched:kernel/locking:drivers/base:drivers/video:drivers/video/fbdev:drivers/tty:drivers/tty/serial:drivers/irqchip:drivers/clocksource:drivers/i2c:drivers/i2c/busses:drivers/mmc/core:drivers/mmc/host:drivers/watchdog:drivers/gpu/drm/tilcdc:drivers/gpu/drm/i2c:fs:mm:block:block/partitions:lib:lib/fonts:lib/test
+VPATH = arch/arm/entry:arch/arm/exceptions:arch/arm/scheduler:arch/arm/mm:arch/arm/kernel:arch/arm/mach-omap2:init:kernel:kernel/irq:kernel/irqchip:kernel/printk:kernel/time:kernel/sched:kernel/locking:drivers/base:drivers/video:drivers/video/fbdev:drivers/tty:drivers/tty/serial:drivers/irqchip:drivers/clocksource:drivers/i2c:drivers/i2c/busses:drivers/mmc/core:drivers/mmc/host:drivers/watchdog:drivers/gpio:drivers/net:drivers/net/ipv4:drivers/net/app:drivers/net/ethernet/ti:drivers/gpu/drm/tilcdc:drivers/gpu/drm/i2c:fs:mm:block:block/partitions:lib:lib/fonts:lib/test
 
 CFLAGS = -Wall -nostdlib -nostartfiles -ffreestanding \
          -march=armv7-a -mtune=cortex-a8 \

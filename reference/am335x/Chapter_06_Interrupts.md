@@ -21,53 +21,6 @@ The interrupt controller processes incoming interrupts by masking and priority s
 
 > **NOTE:** FIQ is not available on general-purpose (GP) devices.
 
-### Figure 6-1. Interrupt Controller Block Diagram
-
-```
-                          IRQ_q
-                       Interrupt of
-                        bank p
-                          │
-    Software Interrupt    ▼
-    ┌──────────┐       ┌─────┐
-    │ ISR_SETp │──────►│ OR  │
-    └──────────┘       └──┬──┘
-                          │
-                          ├──────────────────► ┌────────┐
-                          │                    │  ITRp  │  Interrupt Input Status
-              Mask        │                    └────────┘
-           ┌───────┐      │
-           │ MIRp  │──►┌──┴───────────┐
-           └───────┘   │              │
-                       │   Priority   │
-    Priority Threshold │  Comparator  │
-    ┌───────────┐      │              │
-    │ THRESHOLD │─────►│ If(INT Prio  │
-    └───────────┘      │  >Threshold) │
-                       └──────┬───────┘
-                              │
-    Interrupt Priority        │
-    and FIQ/IRQ Steering      ▼
-    ┌───────┐          ┌─────────────────┐
-    │ ILRq  │          │  IRQ/FIQ        │
-    │PRIORITY│────────►│  Selector       │──►┌─────────────────┐
-    │FIQNIRQ │         └─────────────────┘   │ PENDING_IRQp    │
-    └───────┘                │               │ PENDING_FIQp    │
-                             │               └─────────────────┘
-    New Agreement Bits       ▼
-    ┌────────────────┐  ┌───────────────┐   ┌───────────────────────┐
-    │    Control     │  │Priority Sorting│   │Active Interrupt Nb,   │
-    │ NEWFIQAGR      │─►│               │──►│Spurious Flag & Priority│
-    │ NEWIRQAGR      │  │ IRQ    FIQ    │   │ SIR_FIQ  FIQ_PRIORITY │
-    └────────────────┘  │Priority Priority│  │ SIR_IRQ  IRQ_PRIORITY │
-                        │ Sorter  Sorter │   └───────────────────────┘
-                        └───┬───────┬───┘
-                            │       │
-                         IRQ Input FIQ Input
-                            └───┬───┘
-                             Processor
-```
-
 ### 6.1.1 Interrupt Processing
 
 #### 6.1.1.1 Input Selection
@@ -268,49 +221,6 @@ Figure 6-2 shows the IRQ/FIQ processing sequence from the originating device per
 
 The priority sorting mechanism is frozen during an interrupt processing sequence. If an interrupt condition occurs during this time, the interrupt is not lost. It is sorted when the NEWIRQAGR/NEWFIQAGR bit is set (priority sorting is reactivated).
 
-### Figure 6-2. IRQ/FIQ Processing Sequence
-
-```
-Hardware                                    Software
-┌─────────────────────────┐
-│  SOC Peripheral Module  │
-│  Step 1: M_IRQ_n Assert │
-└────────────┬────────────┘
-             ▼
-┌─────────────────────────┐
-│       MPU INTC          │
-│ If IRQ_n not masked and │            ┌──────────────────────┐
-│ configured as IRQ/FIQ,  │            │    Main Program      │
-│ MPU_INTC_IRQ/FIQ assert │            │ Exec instruction 1   │
-└────────────┬────────────┘            │ Exec instruction N   │
-  Step 2:    │                         └──────────┬───────────┘
-  MPU_INTC_IRQ/FIQ Asserted                      │
-             ▼                                    │
-┌─────────────────────────┐     Branch  ┌─────────▼──────────────┐
-│ ARM Host Processor (4)  │────────────►│ ISR in IRQ/FIQ Mode(5) │
-│ Finish current instr N  │             │ Save ARM context       │
-│ Store next addr to LR   │             │ Identify interrupt src │
-│ Save CPSR to SPSR       │             │ Branch to handler      │
-│ Enter IRQ/FIQ mode      │             └─────────┬──────────────┘
-│ Disable IRQs/FIQs       │                 Branch│
-│ Execute interrupt vector │                       ▼
-└─────────────────────────┘             ┌────────────────────────┐
-                                        │ Subroutine Handler (6) │
-                                        │ Handle the event       │
-                                        │ Deassert M_IRQ_n       │
-                                        └─────────┬──────────────┘
-                                             Branch│
-                                                   ▼
-                                        ┌────────────────────────┐
-┌─────────────────────────┐    Return   │ ISR in IRQ/FIQ Mode(7) │
-│ ARM Host Processor (8)  │◄────────────│ Set NEWIRQAGR/NEWFIQAGR│
-│ Restore CPSR            │             │ Restore ARM context    │
-│ Restore PC              │    Return   └────────────────────────┘
-└─────────────────────────┘────────────►┌────────────────────────┐
-                                        │    Main Program        │
-                                        │ Exec instruction N+1   │
-                                        └────────────────────────┘
-```
 
 ### 6.2.3 INTC Preemptive Processing Sequence
 
@@ -418,55 +328,6 @@ IRQ_ISR_end:
 
 Figure 6-3 shows the nested IRQ/FIQ processing sequence from the originating device peripheral module to the main program interruption.
 
-### Figure 6-3. Nested IRQ/FIQ Processing Sequence
-
-```
-Hardware                                    Software
-┌─────────────────────────┐
-│  SOC Peripheral Module  │
-│  Step 1: M_IRQ_n Assert │
-└────────────┬────────────┘
-             ▼
-┌─────────────────────────┐
-│       MPU INTC          │
-│ If IRQ_n not masked and │            ┌──────────────────────┐
-│ configured as IRQ/FIQ,  │            │    Main Program      │
-│ MPU_INTC_IRQ/FIQ assert │            │ Exec instruction 1   │
-└────────────┬────────────┘            │ Exec instruction N   │
-  Step 2:    │                         └──────────┬───────────┘
-  MPU_INTC_IRQ/FIQ Asserted                      │
-             ▼                                    │
-┌─────────────────────────┐     Branch  ┌─────────▼──────────────────┐
-│ ARM Host Processor      │────────────►│ ISR in IRQ/FIQ Mode (Step5)│
-│ Finish current instr N  │             │ Save ARM critical context  │
-│ Store next addr to LR   │             │ Save INTC priority thresh  │
-│ Save CPSR to SPSR       │             │ Get active IRQ priority    │
-│ Enter IRQ/FIQ mode      │             │ Set IRQ prio to threshold  │
-│ Disable IRQs/FIQs       │             │ Identify interrupt source  │
-│ Execute interrupt vector │             │ Set NEWIRQAGR/NEWFIQAGR   │
-└─────────────────────────┘             │ Enable IRQ/FIQ at ARM side │
-                                        │ Jump to ISR handler        │
-                                        └─────────┬──────────────────┘
-                                             Branch│
-                                                   ▼
-                                        ┌────────────────────────────┐
-                                        │ Subroutine Handler         │
-                                        │ Handle the event           │
-                                        │ Deassert M_IRQ_n           │
-                                        └─────────┬──────────────────┘
-                                             Branch│
-                                                   ▼
-                                        ┌────────────────────────────┐
-┌─────────────────────────┐    Return   │ ISR in IRQ/FIQ Mode        │
-│ ARM Host Processor (8)  │◄────────────│ Disable IRQ/FIQ at ARM side│
-│ Restore CPSR            │             │ Restore INTC priority thresh│
-│ Restore PC              │    Return   │ Restore ARM critical context│
-└─────────────────────────┘────────────►└────────────────────────────┘
-                                        ┌────────────────────────────┐
-                                        │    Main Program            │
-                                        │ Exec instruction N+1       │
-                                        └────────────────────────────┘
-```
 
 ### 6.2.4 Interrupt Preemption
 
