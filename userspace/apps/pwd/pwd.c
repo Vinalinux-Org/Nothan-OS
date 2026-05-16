@@ -1,6 +1,6 @@
 /* pwd — print working directory
  *
- * VinixOS has no chdir yet, so getcwd always returns "/". Kept
+ * NothanOS has no chdir yet, so getcwd always returns "/". Kept
  * for interface compatibility with future utilities. */
 
 #include "stdio.h"

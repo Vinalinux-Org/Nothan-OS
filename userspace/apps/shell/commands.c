@@ -45,8 +45,8 @@ static int cmd_info(int argc, char **argv)
 {
     (void)argc;
     (void)argv;
-    printf("\nVinixOS Info:\n");
-    printf("  OS Name  : VinixOS\n");
+    printf("\nNothanOS Info:\n");
+    printf("  OS Name  : NothanOS\n");
     printf("  Platform : BeagleBone Black (Cortex-A8)\n");
     printf("  Arch     : ARMv7-A\n");
     printf("  Developer: Vinalinux <vinalinux2022@gmail.com>\n");

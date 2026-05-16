@@ -1,4 +1,4 @@
-# VinixOS — Comment Style
+# NothanOS — Comment Style
 
 ## 1. Default: KHÔNG viết comment
 

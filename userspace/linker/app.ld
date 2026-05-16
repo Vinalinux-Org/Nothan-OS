@@ -1,7 +1,7 @@
 /* ============================================================
  * app.ld
  * ------------------------------------------------------------
- * Linker script for User Applications (VinixOS SDK)
+ * Linker script for User Applications (NothanOS SDK)
  * Target: ARMv7-A
  * 
  * VMA Concept: User applications are built to run at 

@@ -1,5 +1,5 @@
 # ==============================================================================
-# VinixOS Userspace Library (librefarm.a)
+# NothanOS Userspace Library (librefarm.a)
 # ==============================================================================
 
 include ../rules.mk
@@ -13,15 +13,15 @@ TARGET_CRT0   = $(LIB_BUILD_DIR)/crt0.o
 SRC_C = syscall.c
 SRC_S = crt0.S
 
-# vinixlibc modules — hand-written POSIX subset
-VINIXLIBC_SRC_DIR = ../vinixlibc/src
-VINIXLIBC_SRCS    = string.c ctype.c errno.c printf.c stdlib.c unistd.c \
+# nothanlibc modules — hand-written POSIX subset
+NOTHANLIBC_SRC_DIR = ../nothanlibc/src
+NOTHANLIBC_SRCS    = string.c ctype.c errno.c printf.c stdlib.c unistd.c \
                     signal.c stat.c file.c
 
 # Object files
 OBJ_C     = $(addprefix $(LIB_BUILD_DIR)/, $(SRC_C:.c=.o))
 OBJ_S     = $(addprefix $(LIB_BUILD_DIR)/, $(SRC_S:.S=.o))
-OBJ_LIBC  = $(addprefix $(LIB_BUILD_DIR)/vinixlibc_, $(VINIXLIBC_SRCS:.c=.o))
+OBJ_LIBC  = $(addprefix $(LIB_BUILD_DIR)/nothanlibc_, $(NOTHANLIBC_SRCS:.c=.o))
 OBJS      = $(OBJ_C) $(OBJ_S) $(OBJ_LIBC)
 
 all: $(TARGET_CRT0) $(TARGET_LIB)
@@ -38,8 +38,8 @@ $(LIB_BUILD_DIR)/%.o: %.c | $(LIB_BUILD_DIR)
 	@echo "  CC      lib/$<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
-$(LIB_BUILD_DIR)/vinixlibc_%.o: $(VINIXLIBC_SRC_DIR)/%.c | $(LIB_BUILD_DIR)
-	@echo "  CC      vinixlibc/src/$*.c"
+$(LIB_BUILD_DIR)/nothanlibc_%.o: $(NOTHANLIBC_SRC_DIR)/%.c | $(LIB_BUILD_DIR)
+	@echo "  CC      nothanlibc/src/$*.c"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
 $(TARGET_LIB): $(OBJ_C) $(OBJ_LIBC)

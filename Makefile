@@ -3,16 +3,16 @@
 
 MAKEFLAGS += --no-print-directory
 
-.PHONY: all clean vinixos bootloader userspace kernel compiler help test
+.PHONY: all clean nothanos bootloader userspace kernel compiler help test
 
 # Default target
-all: vinixos compiler
+all: nothanos compiler
 	@echo ""
 	@echo "========================================="
 	@echo "RefARM-OS Build Complete!"
 	@echo "========================================="
-	@echo "VinixOS kernel built successfully"
-	@echo "VinCC compiler ready to use"
+	@echo "NothanOS kernel built successfully"
+	@echo "NothCC compiler ready to use"
 	@echo ""
 	@echo "Next steps:"
 	@echo "  1. Install compiler: bash scripts/install_compiler.sh"
@@ -20,10 +20,10 @@ all: vinixos compiler
 	@echo "  3. Connect serial: screen /dev/ttyUSB0 115200"
 	@echo ""
 
-# VinixOS = bootloader + userspace + kernel (kernel embeds shell payload, so userspace must precede)
-vinixos: bootloader userspace kernel
+# NothanOS = bootloader + userspace + kernel (kernel embeds shell payload, so userspace must precede)
+nothanos: bootloader userspace kernel
 	@echo "========================================="
-	@echo " VinixOS Build Complete                  "
+	@echo " NothanOS Build Complete                  "
 	@echo "========================================="
 
 bootloader:
@@ -42,13 +42,13 @@ kernel: userspace
 	@echo "========================================="
 	@echo " Building Kernel                         "
 	@echo "========================================="
-	$(MAKE) -C vinix-kernel
+	$(MAKE) -C nothan-kernel
 
 # Build/verify compiler
 compiler:
 	@echo ""
 	@echo "========================================="
-	@echo "Verifying VinCC Compiler..."
+	@echo "Verifying NothCC Compiler..."
 	@echo "========================================="
 	@if [ ! -f compiler/toolchain/main.py ]; then \
 		echo "Error: Compiler source not found"; \
@@ -64,15 +64,15 @@ clean:
 	@echo "Cleaning Userspace..."
 	@$(MAKE) -C userspace clean
 	@echo "Cleaning Kernel..."
-	@$(MAKE) -C vinix-kernel clean
+	@$(MAKE) -C nothan-kernel clean
 	@echo "Cleaning Compiler..."
 	@$(MAKE) -C compiler clean
 	@echo "Clean complete"
 
 # Run tests
-test: vinixos
-	@echo "Running VinixOS tests..."
-	@$(MAKE) -C vinix-kernel test
+test: nothanos
+	@echo "Running NothanOS tests..."
+	@$(MAKE) -C nothan-kernel test
 	@echo ""
 	@echo "Running Compiler tests..."
 	@$(MAKE) -C compiler test
@@ -82,8 +82,8 @@ help:
 	@echo "RefARM-OS Build System"
 	@echo ""
 	@echo "Targets:"
-	@echo "  all        - Build VinixOS and verify compiler (default)"
-	@echo "  vinixos    - Build VinixOS (bootloader + userspace + kernel)"
+	@echo "  all        - Build NothanOS and verify compiler (default)"
+	@echo "  nothanos    - Build NothanOS (bootloader + userspace + kernel)"
 	@echo "  bootloader - Build bootloader only (MLO)"
 	@echo "  userspace  - Build userspace only (init, shell, coreutils)"
 	@echo "  kernel     - Build kernel only (depends on userspace for embedded shell)"

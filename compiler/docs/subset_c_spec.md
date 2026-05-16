@@ -1,6 +1,6 @@
 # Subset C — Language Specification
 
-> **Phạm vi:** Định nghĩa đầy đủ ngôn ngữ Subset C được VinCC compiler hỗ trợ — lexical elements, types, declarations, statements, expressions, và limitations.
+> **Phạm vi:** Định nghĩa đầy đủ ngôn ngữ Subset C được NothCC compiler hỗ trợ — lexical elements, types, declarations, statements, expressions, và limitations.
 > **Yêu cầu trước:** [architecture.md](architecture.md) — hiểu compiler pipeline.
 > **Files liên quan:** `toolchain/frontend/lexer/token.py`, `toolchain/frontend/parser/ast_nodes.py`, `toolchain/frontend/semantic/type_checker.py`
 
@@ -13,7 +13,7 @@ Subset C là một proper subset của C99, bao gồm:
 - Pointers và 1D arrays
 - Control flow: `if/else`, `while`, `for`, `return`
 - Functions với tối đa 4 parameters
-- VinixOS syscall interface
+- NothanOS syscall interface
 
 > **Không support:** `struct`, `union`, `typedef`, `enum`, `switch`, `goto`, `do-while`, `++/--`, `+=/-=`, hex literals, multi-dimensional arrays, function pointers, variadic functions.
 
@@ -327,7 +327,7 @@ int foo(int a) {
 
 ---
 
-## VinixOS Syscall Interface
+## NothanOS Syscall Interface
 
 Syscalls được gọi qua function declarations — compiler biết là syscall:
 
@@ -382,7 +382,7 @@ int main() {
 | 8 keywords | `int char void if else while for return` — minimal but sufficient |
 | 3 base types | `int` (32-bit), `char` (8-bit), `void` |
 | Max 4 params | AAPCS r0-r3 cho arguments |
-| No stdlib | Dùng VinixOS syscalls cho I/O |
+| No stdlib | Dùng NothanOS syscalls cho I/O |
 | Decimal only | Không có hex/octal literals |
 | Software div | `/` và `%` → `__aeabi_idiv` (chậm hơn native) |
 | Array decay | `arr[]` → `arr*` khi pass đến function |

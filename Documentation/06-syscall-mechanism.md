@@ -2,13 +2,13 @@
 
 > **Phạm vi:** Toàn bộ syscall path — từ user-side wrapper → SVC exception → kernel dispatcher → implementation → return về user.
 > **Yêu cầu trước:** [04-interrupt-and-exception.md](04-interrupt-and-exception.md) — SVC là 1 loại exception; [05-task-and-scheduler.md](05-task-and-scheduler.md) — `sys_yield()` gọi scheduler.
-> **Files liên quan:** `vinix-kernel/include/syscalls.h`, `vinix-kernel/arch/arm/kernel/svc_handler.c`, `vinix-kernel/arch/arm/exceptions/exception_entry.S`, `userspace/lib/syscall.c`
+> **Files liên quan:** `nothan-kernel/include/syscalls.h`, `nothan-kernel/arch/arm/kernel/svc_handler.c`, `nothan-kernel/arch/arm/exceptions/exception_entry.S`, `userspace/lib/syscall.c`
 
 ---
 
 ## Syscall ABI
 
-VinixOS dùng Linux ARM convention — syscall number trong `r7`, arguments trong `r0-r3`:
+NothanOS dùng Linux ARM convention — syscall number trong `r7`, arguments trong `r0-r3`:
 
 ```
 r7       = Syscall number
@@ -25,7 +25,7 @@ CPSR[I]  = clear (IRQ enabled) sau khi return
 
 ## Syscall Table
 
-File: `vinix-kernel/include/syscalls.h`
+File: `nothan-kernel/include/syscalls.h`
 
 | # | Tên | Arguments | Return | Mô Tả |
 |---|-----|-----------|--------|-------|
@@ -110,7 +110,7 @@ int read(void *buf, uint32_t len) {
 
 ## Kernel-side: SVC Entry
 
-File: `vinix-kernel/arch/arm/exceptions/exception_entry.S`
+File: `nothan-kernel/arch/arm/exceptions/exception_entry.S`
 
 ```asm
 svc_handler_entry:
@@ -142,7 +142,7 @@ svc_handler_entry:
 
 ### SVC Context Structure
 
-File: `vinix-kernel/arch/arm/kernel/svc_handler.c`
+File: `nothan-kernel/arch/arm/kernel/svc_handler.c`
 
 ```c
 struct svc_context {

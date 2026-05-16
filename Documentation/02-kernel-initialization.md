@@ -2,7 +2,7 @@
 
 > **Phạm vi:** `kernel_main()` step-by-step từ khi trampoline nhảy vào đến khi `scheduler_start()` — không bao giờ return.
 > **Yêu cầu trước:** [01-boot-and-bringup.md](01-boot-and-bringup.md) — hiểu entry.S trampoline.
-> **Files liên quan:** `vinix-kernel/init/main.c`, `vinix-kernel/arch/arm/mm/mmu.c`, `vinix-kernel/drivers/`
+> **Files liên quan:** `nothan-kernel/init/main.c`, `nothan-kernel/arch/arm/mm/mmu.c`, `nothan-kernel/drivers/`
 
 ---
 
@@ -34,7 +34,7 @@ graph TD
 ```c
 watchdog_disable();
 uart_init();
-uart_printf("VinixOS: Interactive Shell\n");
+uart_printf("NothanOS: Interactive Shell\n");
 ```
 
 > **Tại sao re-init:** Bootloader đã init nhưng kernel không assume bootloader state. Re-init đảm bảo consistent, known-good state.
@@ -47,7 +47,7 @@ uart_printf("VinixOS: Interactive Shell\n");
 mmu_init();
 ```
 
-File: `vinix-kernel/arch/arm/mm/mmu.c`
+File: `nothan-kernel/arch/arm/mm/mmu.c`
 
 ```c
 void mmu_init(void) {
@@ -97,7 +97,7 @@ fb_init();           /* Init framebuffer pointer từ LCDC          */
 > ⚠️ **Thứ tự graphics là bắt buộc:**
 > `lcdc_start_raster()` phải chạy **TRƯỚC** `tda19988_init()`.
 > TDA19988 cần pixel clock có sẵn trên chân `LCD_PCLK` để lock TMDS PLL.
-> Khác với U-Boot (đã start LCDC sẵn), VinixOS bare-metal phải tự quản lý thứ tự này.
+> Khác với U-Boot (đã start LCDC sẵn), NothanOS bare-metal phải tự quản lý thứ tự này.
 
 ---
 

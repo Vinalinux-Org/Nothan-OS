@@ -1,12 +1,12 @@
 """
-Syscall Support for VinixOS Platform
+Syscall Support for NothanOS Platform
 Defines syscall numbers and generates syscall invocations
 """
 
 from typing import Dict
 
 
-# Syscall numbers (must match vinix-kernel/include/syscalls.h)
+# Syscall numbers (must match nothan-kernel/include/syscalls.h)
 SYSCALL_NUMBERS: Dict[str, int] = {
     'write': 0,
     'exit': 1,

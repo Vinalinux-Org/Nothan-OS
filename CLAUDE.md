@@ -1,4 +1,4 @@
-# CLAUDE.md — VinixOS
+# CLAUDE.md — NothanOS
 
 **Trước mỗi task hardware/driver**: đọc [reference/index.md](reference/index.md).
 

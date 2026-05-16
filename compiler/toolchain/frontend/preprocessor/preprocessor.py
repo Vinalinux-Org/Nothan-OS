@@ -1,5 +1,5 @@
 """
-Simple Preprocessor for VinixOS Compiler
+Simple Preprocessor for NothanOS Compiler
 Handles #include directives
 """
 

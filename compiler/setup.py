@@ -14,7 +14,7 @@ with open("requirements.txt", "r", encoding="utf-8") as f:
 setup(
     name="phase2-compiler",
     version="0.1.0",
-    author="VinixOS Project",
+    author="NothanOS Project",
     description="Self-hosted Subset C compiler targeting ARMv7-A",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -23,7 +23,7 @@ setup(
     install_requires=requirements,
     entry_points={
         "console_scripts": [
-            "vincc=toolchain.main:main",
+            "nothcc=toolchain.main:main",
         ],
     },
     classifiers=[

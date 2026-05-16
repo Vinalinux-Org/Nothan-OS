@@ -1,6 +1,6 @@
-# VinCC Compiler — Usage Guide
+# NothCC Compiler — Usage Guide
 
-> **Phạm vi:** Hướng dẫn install, basic usage, compiler options, debug flags, example programs, và deploy lên VinixOS.
+> **Phạm vi:** Hướng dẫn install, basic usage, compiler options, debug flags, example programs, và deploy lên NothanOS.
 > **Yêu cầu trước:** [architecture.md](architecture.md) — hiểu pipeline compiler.
 > **Files liên quan:** `toolchain/main.py`, `scripts/install_compiler.sh`
 
@@ -42,7 +42,7 @@ arm-linux-gnueabihf-ld --version
 ```bash
 # Clone repo
 git clone <repository-url>
-cd vinix-kernel
+cd nothan-kernel
 
 # Install Python dependencies
 cd compiler
@@ -142,7 +142,7 @@ int write(int fd, char* buf, int count);
 void exit(int status);
 
 int main() {
-    char msg[] = "Hello, VinixOS!\n";
+    char msg[] = "Hello, NothanOS!\n";
     write(1, msg, 16);
     exit(0);
 }
@@ -196,7 +196,7 @@ int main() {
 ### String Output via UART
 
 ```c
-/* shell_hello.c — chạy trên VinixOS */
+/* shell_hello.c — chạy trên NothanOS */
 int write(int fd, char* buf, int count);
 void yield(void);
 void exit(int status);
@@ -208,7 +208,7 @@ int strlen(char* s) {
 }
 
 int main() {
-    char* msg = "Hello from VinCC!\n";
+    char* msg = "Hello from NothCC!\n";
     write(1, msg, strlen(msg));
     exit(0);
     return 0;
@@ -217,7 +217,7 @@ int main() {
 
 ---
 
-## Deploy lên VinixOS
+## Deploy lên NothanOS
 
 ### Automatic (via kernel embed)
 
@@ -226,10 +226,10 @@ int main() {
 python3 -m toolchain.main -o myapp myapp.c
 
 # 2. Copy binary vào initfs (sẽ có trong RAMFS)
-cp myapp vinix-kernel/initfs/myapp
+cp myapp nothan-kernel/initfs/myapp
 
 # 3. Build lại kernel (embed file mới)
-make -C vinix-kernel kernel
+make -C nothan-kernel kernel
 
 # 4. Flash lên SD card
 bash scripts/flash_sdcard.sh /dev/sdX
@@ -238,7 +238,7 @@ bash scripts/flash_sdcard.sh /dev/sdX
 ### Manual Deploy
 
 ```bash
-# Deploy qua serial/SSH nếu VinixOS đang chạy
+# Deploy qua serial/SSH nếu NothanOS đang chạy
 scp myapp user@beaglebone:/
 ```
 
@@ -274,17 +274,17 @@ hello.c:2:1: semantic error: duplicate declaration of 'foo'
 ### Makefile
 
 ```makefile
-VINCC = python3 -m toolchain.main
+NOTHCC = python3 -m toolchain.main
 CFLAGS =
 
 SRCS = main.c utils.c
 TARGET = myapp
 
 $(TARGET): $(SRCS)
-	$(VINCC) $(CFLAGS) -o $@ $<
+	$(NOTHCC) $(CFLAGS) -o $@ $<
 
 debug:
-	$(VINCC) --dump-ir --dump-ast -o $(TARGET) $(SRCS)
+	$(NOTHCC) --dump-ir --dump-ast -o $(TARGET) $(SRCS)
 
 clean:
 	rm -f $(TARGET) *.s *.o
@@ -302,7 +302,7 @@ clean:
 | `typedef` | Không hỗ trợ | — |
 | Hex/octal literals | Không hỗ trợ | Chỉ decimal |
 | `printf` | Không có | Dùng `write()` syscall |
-| Standard library | Không có | Dùng VinixOS syscalls |
+| Standard library | Không có | Dùng NothanOS syscalls |
 | Function pointers | Không hỗ trợ | — |
 | Variadic functions | Không hỗ trợ | — |
 
@@ -314,10 +314,10 @@ clean:
 |---------|---------|
 | `python3 -m toolchain.main` | Entry point — không cần install, chạy trực tiếp |
 | Runtime library | Link tự động — `crt0.S`, `syscalls.S`, `divmod.S` |
-| Base address `0x40000000` | Output ELF khớp với VinixOS user space |
+| Base address `0x40000000` | Output ELF khớp với NothanOS user space |
 | Software division | Mọi `/` và `%` đều dùng `__aeabi_idiv` |
 | `write(1, buf, len)` | Standard output qua UART syscall |
-| No stdlib | Phải implement hoặc dùng VinixOS syscalls |
+| No stdlib | Phải implement hoặc dùng NothanOS syscalls |
 
 ---
 

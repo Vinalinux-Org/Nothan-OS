@@ -1,4 +1,4 @@
-# VinixOS — Tính năng
+# NothanOS — Tính năng
 
 > Bare-metal OS, monolithic kernel, single-core ARMv7-A, 100% tự viết bằng tay.
 > Target hardware: BeagleBone Black (SoC AM3358, Cortex-A8).
@@ -251,7 +251,7 @@ Mỗi abort:
 
 ---
 
-## 13. vinixlibc — POSIX subset (hand-written)
+## 13. nothanlibc — POSIX subset (hand-written)
 
 | Module | Function |
 | --- | --- |
@@ -287,7 +287,7 @@ Mỗi utility 1 ELF riêng (không symlink-to-single-binary).
 | `uname` | `/bin/uname` | System info | Via syscall |
 | `rm` | `/bin/rm` | Xoá file | `unlink` |
 | `mv` | `/bin/mv` | Rename | `rename` syscall |
-| `hello` | `/bin/hello` | Smoke test | vinixlibc printf + malloc sanity |
+| `hello` | `/bin/hello` | Smoke test | nothanlibc printf + malloc sanity |
 
 **Tạo/edit file trên device:**
 
@@ -299,7 +299,7 @@ cat /tmp/a                      # verify
 
 ---
 
-## 15. VinCC — Cross-compiler end-user
+## 15. NothCC — Cross-compiler end-user
 
 Python 3, chạy trên host (laptop), không self-hosting trên device. Pipeline hoàn chỉnh: `Source .c → Preprocessor → Lexer → Parser → Semantic → IR → CodeGen → Assembler → Linker → ELF32 ARM`. Tuân thủ AAPCS calling convention. Runtime library tích hợp (reflibc).
 
@@ -307,7 +307,7 @@ Python 3, chạy trên host (laptop), không self-hosting trên device. Pipeline
 
 ```bash
 # Trên laptop
-vincc hello.c -o hello
+nothcc hello.c -o hello
 cp hello /media/sd/bin/hello
 
 # BBB reboot → shell
@@ -321,7 +321,7 @@ cp hello /media/sd/bin/hello
 - Hàm: định nghĩa, gọi hàm, đệ quy (tối đa 4 tham số qua r0–r3)
 - Toán tử: số học, so sánh, logic, bitwise, gán
 
-VinCC chỉ compile end-user C program. Kernel + vinixlibc + system tools dùng `arm-none-eabi-gcc`.
+NothCC chỉ compile end-user C program. Kernel + nothanlibc + system tools dùng `arm-none-eabi-gcc`.
 
 ---
 
@@ -343,7 +343,7 @@ VinCC chỉ compile end-user C program. Kernel + vinixlibc + system tools dùng 
 - `slab_selftest()` — trong `mm/slab.c`
 - `vmm_selftest()` — trong `mm/vmm.c`
 - `sync_selftest()` — trong `sync/sync_selftest.c`
-- Integration harness [test/selftest.c](../vinix-kernel/lib/test/selftest.c): `bcache_hit` + `procfs_read`
+- Integration harness [test/selftest.c](../nothan-kernel/lib/test/selftest.c): `bcache_hit` + `procfs_read`
 - Fail → `PANIC`
 
 ---

@@ -1,4 +1,4 @@
-/* reflibc.h - VinixOS C Runtime */
+/* reflibc.h - NothanOS C Runtime */
 
 #ifndef REFLIBC_H
 #define REFLIBC_H

@@ -2,7 +2,7 @@
 
 > **Phạm vi:** ARMv7-A MMU configuration, L1 page table, address translation, và memory layout chi tiết — từ Phase A (boot) đến Phase B (runtime).
 > **Yêu cầu trước:** [01-boot-and-bringup.md](01-boot-and-bringup.md) — MMU được enable trong entry.S.
-> **Files liên quan:** `vinix-kernel/arch/arm/mm/mmu.c`, `vinix-kernel/arch/arm/mm/mmu_enable.S`, `vinix-kernel/arch/arm/kernel.ld`
+> **Files liên quan:** `nothan-kernel/arch/arm/mm/mmu.c`, `nothan-kernel/arch/arm/mm/mmu_enable.S`, `nothan-kernel/arch/arm/kernel.ld`
 
 ---
 
@@ -10,7 +10,7 @@
 
 ### 1-Level Page Table (Section Descriptors)
 
-VinixOS dùng **1-level page table** với **section descriptors** — mỗi entry map 1 MB:
+NothanOS dùng **1-level page table** với **section descriptors** — mỗi entry map 1 MB:
 
 ```
 L1 Page Global Directory (PGD):
@@ -25,7 +25,7 @@ L1 Page Global Directory (PGD):
 |------|-----|---------|
 | [31:20] | Base Address | PA[31:20] — địa chỉ vật lý của 1 MB section |
 | [11:10] | AP[1:0] | Access Permissions — User/Kernel RW/RO |
-| [8:5] | Domain | Domain number (VinixOS dùng Domain 0) |
+| [8:5] | Domain | Domain number (NothanOS dùng Domain 0) |
 | [4] | XN | Execute Never — cấm execute (không dùng) |
 | [3:2] | C, B | Cacheable, Bufferable |
 | [1:0] | Type | `10` = Section descriptor |
@@ -66,7 +66,7 @@ L1 Page Global Directory (PGD):
 
 ## Section Descriptor Flags
 
-File: `vinix-kernel/arch/arm/mm/mmu.c`
+File: `nothan-kernel/arch/arm/mm/mmu.c`
 
 ```c
 /* Kernel RAM: Cached, Kernel-only (AP=01) */
@@ -158,7 +158,7 @@ void mmu_build_page_table_boot(uint32_t *pgd_pa) {
 
 ## MMU Enable Sequence
 
-Function: `mmu_enable()` — File: `vinix-kernel/arch/arm/mm/mmu_enable.S`
+Function: `mmu_enable()` — File: `nothan-kernel/arch/arm/mm/mmu_enable.S`
 
 ```c
 void mmu_enable(uint32_t *pgd_base) {

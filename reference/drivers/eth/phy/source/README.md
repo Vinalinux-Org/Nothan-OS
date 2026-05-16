@@ -16,7 +16,7 @@
 ## Ghi chú
 
 - PHY address BBB = `0x0` (PHYAD[2:0]=000, xác nhận từ schematic R115/R118/R116)
-- VinixOS PHY layer đơn giản hơn: không cần full phy_driver framework, chỉ cần read/write qua MDIO + check BMSR link bit
+- NothanOS PHY layer đơn giản hơn: không cần full phy_driver framework, chỉ cần read/write qua MDIO + check BMSR link bit
 - Pattern reference: Linux `drivers/net/phy/smsc.c` — re-implemented
 
 ## Board-specific facts (BBB thực tế)

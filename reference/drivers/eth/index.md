@@ -1,6 +1,6 @@
 # Ethernet Driver
 
-Tài liệu tham khảo cho việc phát triển Ethernet driver trong kernel VinixOS.
+Tài liệu tham khảo cho việc phát triển Ethernet driver trong kernel NothanOS.
 
 ## Status
 
@@ -11,8 +11,8 @@ Tài liệu tham khảo cho việc phát triển Ethernet driver trong kernel Vi
 | CPSW | ✅ Done — hardware confirmed, boot log OK, frame RX/TX path wired | SS6 |
 | Net Core | ✅ Done — register_netdev, netif_* helpers, skbuff alloc/free | SS6 |
 
-**SS4:** `drivers/net/ethernet/ti/omap_mdio.c` + `include/vinix/mdio.h` + board entry + MMU L4_FAST mapping
-**SS5:** `include/vinix/phy.h` + phy_probe/init/update_link trong omap_mdio.c + PHYID2 mask fix
+**SS4:** `drivers/net/ethernet/ti/omap_mdio.c` + `include/nothan/mdio.h` + board entry + MMU L4_FAST mapping
+**SS5:** `include/nothan/phy.h` + phy_probe/init/update_link trong omap_mdio.c + PHYID2 mask fix
 **SS6:** `drivers/net/ethernet/ti/omap_cpsw.c` (full driver) + `drivers/net/net_core.c` + `drivers/net/skbuff.c` + `mach/control.h` (MAC_ID0) + Makefile. Chưa commit.
 
 ## Tài liệu liên quan (trong reference)

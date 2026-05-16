@@ -1,6 +1,6 @@
 # MDIO Driver
 
-Tài liệu tham khảo cho việc phát triển MDIO bus driver trong kernel VinixOS.
+Tài liệu tham khảo cho việc phát triển MDIO bus driver trong kernel NothanOS.
 
 ## Tài liệu liên quan (trong reference)
 

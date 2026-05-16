@@ -1,6 +1,6 @@
 # CPSW Driver
 
-Tài liệu tham khảo cho việc phát triển CPSW (MAC + DMA + ALE) driver trong kernel VinixOS.
+Tài liệu tham khảo cho việc phát triển CPSW (MAC + DMA + ALE) driver trong kernel NothanOS.
 
 ## Tài liệu liên quan (trong reference)
 

@@ -1,6 +1,6 @@
 /* ============================================================
- * hello — VinCC compiler integration test.
- * Built by VinCC (Subset C -> ARMv7 ELF32), not arm-none-eabi-gcc.
+ * hello — NothCC compiler integration test.
+ * Built by NothCC (Subset C -> ARMv7 ELF32), not arm-none-eabi-gcc.
  * ============================================================ */
 
 #include "reflibc.h"
@@ -23,8 +23,8 @@ int mul(int a, int b)
 
 int main()
 {
-    print_str("Hello from VinCC!\n");
-    print_str("Compiler: VinixOS VinCC (Subset C -> ARMv7)\n");
+    print_str("Hello from NothCC!\n");
+    print_str("Compiler: NothanOS NothCC (Subset C -> ARMv7)\n");
     print_str("\n");
 
     print_str("add(3, 4) = ");

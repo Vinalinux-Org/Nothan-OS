@@ -12,6 +12,6 @@
 
 ## Ghi chú
 
-- VinixOS không dùng Device Tree → bỏ `of_match_table`, hardcode divisor từ TRM §14.4.3
+- NothanOS không dùng Device Tree → bỏ `of_match_table`, hardcode divisor từ TRM §14.4.3
 - Không có `devm_*` allocator → dùng static struct
 - Pattern reference: Linux `drivers/net/ethernet/ti/davinci_mdio.c` — re-implemented

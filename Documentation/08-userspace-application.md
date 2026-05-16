@@ -200,7 +200,7 @@ File: `userspace/apps/shell/shell.c`
 ```c
 int main(void) {
     char cmd_buf[128];
-    write("\nVinixOS Shell\nType 'help' for commands\n\n", 40);
+    write("\nNothanOS Shell\nType 'help' for commands\n\n", 40);
 
     while (1) {
         write("$ ", 2);
@@ -248,7 +248,7 @@ int main(void) {
 
 ```text
 Step 1: make -C userspace        → shell.bin
-Step 2: make -C vinix-kernel           → kernel.bin (embed shell.bin)
+Step 2: make -C nothan-kernel           → kernel.bin (embed shell.bin)
 ```
 
 > ⚠️ **Quan trọng:** Kernel Makefile gọi userspace build tự động nếu `shell.bin` chưa có. Nhưng nếu chỉ sửa userspace, phải build kernel lại để re-embed.
@@ -280,7 +280,7 @@ shell.bin: shell.elf
 
 ### Embedding vào Kernel
 
-File: `vinix-kernel/init/payload.S`
+File: `nothan-kernel/init/payload.S`
 
 ```asm
 .section .rodata

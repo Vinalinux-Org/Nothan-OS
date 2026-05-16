@@ -140,7 +140,7 @@ pop     {r4-r11, pc}     @ Restore regs; pc = lr → return to caller
 | Arg 4 | `r3` | |
 | Arg 5+ | Stack | Push in reverse order (không implement) |
 
-> VinixOS Subset C hỗ trợ tối đa 4 parameters — stack arguments không cần thiết.
+> NothanOS Subset C hỗ trợ tối đa 4 parameters — stack arguments không cần thiết.
 
 ---
 
@@ -214,7 +214,7 @@ svc     #0              @ trigger SVC exception
 @ return value in r0
 ```
 
-**Syscall numbers (VinixOS):**
+**Syscall numbers (NothanOS):**
 
 | # | Syscall | r0 | r1 | r2 |
 |---|---------|----|----|-----|
@@ -279,7 +279,7 @@ add:
 | Linear scan allocation | Simple, no need for interference graph | Không optimal như graph coloring |
 | Software division | Cortex-A8 không có SDIV | Slower but correct |
 | Save/restore all r4-r11 | Simple — không cần track which regs used | Slight overhead cho simple functions |
-| Base address `0x40000000` | Match VinixOS user space | Fixed — không support PIE |
+| Base address `0x40000000` | Match NothanOS user space | Fixed — không support PIE |
 | No optimization | Focus on correctness | Output equivalent to `-O0` |
 
 ---
@@ -293,7 +293,7 @@ add:
 | AAPCS function frame | `push {r4-r11, lr}` prologue; `pop {r4-r11, pc}` epilogue |
 | Arguments in r0-r3 | First 4 params; return value in r0 |
 | Software division | `__aeabi_idiv` từ `runtime/divmod.S` |
-| Syscall via r7+svc | `mov r7, #num; svc #0` — matches VinixOS ABI |
+| Syscall via r7+svc | `mov r7, #num; svc #0` — matches NothanOS ABI |
 | No optimization | Correctness over performance — equivalent to GCC -O0 |
 
 ---

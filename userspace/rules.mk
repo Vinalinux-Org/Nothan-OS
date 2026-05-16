@@ -1,5 +1,5 @@
 # ==============================================================================
-# VinixOS Userspace Rules (rules.mk)
+# NothanOS Userspace Rules (rules.mk)
 # ==============================================================================
 # This file is included by all userspace component Makefiles.
 
@@ -21,7 +21,7 @@ CFLAGS = -Wall -Wextra -O2 -g \
          -ffreestanding -nostdlib -fno-builtin \
          -march=armv7-a -mfloat-abi=soft \
          -I$(INC_DIR) \
-         -I$(USERSPACE_ROOT)/vinixlibc/include
+         -I$(USERSPACE_ROOT)/nothanlibc/include
 
 # Linker Flags
 LDFLAGS = -nostdlib -T $(USERSPACE_ROOT)/linker/app.ld
