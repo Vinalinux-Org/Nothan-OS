@@ -2021,7 +2021,8 @@ static void gen_numname (
 	UINT i, j;
 
 
-	memcpy(dst, src, 11);	/* Prepare the SFN to be modified */
+	if (dst == NULL || src == NULL) return;	/* Validate pointers before copy */
+	memcpy(dst, src, 11);	/* Prepare the SFN to be modified - dst must be >= 11 bytes (FAT SFN size) */
 
 	if (seq > 5) {	/* In case of many collisions, generate a hash number instead of sequential number */
 		WCHAR wc;
