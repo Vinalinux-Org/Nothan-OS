@@ -17,6 +17,7 @@ MLO="$TOPDIR/bootloader/MLO"
 KERNEL="$TOPDIR/nothan-kernel/build/kernel.bin"
 
 echo "==> build"
+make -C "$TOPDIR/bootloader"
 make -C "$TOPDIR/userspace"
 make -C "$TOPDIR/nothan-kernel"
 

@@ -17,6 +17,14 @@
 uImage
 MLO
 
+# Compiler runtime artifacts
+/compiler/toolchain/runtime/*.a
+/compiler/toolchain/runtime/*.o
+/compiler/tests/programs/*.s
+/compiler/tests/programs/*.o
+/compiler/tests/integration/programs/*.s
+/compiler/tests/integration/programs/*.o
+
 # Temp files
 *.swp
 *.swo
@@ -33,6 +41,8 @@ MLO
 .idea/
 *.code-workspace
 .kiro/
+.kilo
+.claude
 
 # OS generated
 .DS_Store
@@ -47,13 +57,6 @@ Thumbs.db
 # Temporary directories
 /tmp/
 temp/
-
-
-# Documentation
-tech_docs/
-.agent/
-doc_trainingAI/
-AGENT_RULES.md
 
 # Python virtual environment
 venv/
@@ -78,14 +81,5 @@ tags
 TAGS
 .gdb_history
 
-# Compiler runtime artifacts
-/compiler/toolchain/runtime/*.a
-/compiler/toolchain/runtime/*.o
-/compiler/tests/programs/*.s
-/compiler/tests/programs/*.o
-/compiler/tests/integration/programs/*.s
-/compiler/tests/integration/programs/*.o
-test_hello
-fibonacci
-program
-nothan-kernel/build/
+# Roo Code AI agent config (personal)
+.roo*
