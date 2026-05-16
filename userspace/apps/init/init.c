@@ -18,7 +18,7 @@ int main(int argc, char **argv)
 {
     (void)argc; (void)argv;
 
-    printf("\n[INIT] VinixOS init (pid=%d)\n", getpid());
+    printf("\n[INIT] NothanOS init (pid=%d)\n", getpid());
     printf("[INIT] launching /sh...\n");
 
     while (1) {

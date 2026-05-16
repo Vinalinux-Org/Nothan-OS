@@ -2,13 +2,13 @@
 
 > **Phạm vi:** Task structure, context switch mechanism, round-robin preemptive scheduler, và timer configuration.
 > **Yêu cầu trước:** [04-interrupt-and-exception.md](04-interrupt-and-exception.md) — timer IRQ là trigger của scheduler.
-> **Files liên quan:** `vinix-kernel/include/task.h`, `vinix-kernel/sched/`, `vinix-kernel/arch/arm/scheduler/context_switch.S`, `vinix-kernel/drivers/clocksource/timer-omap-dm.c`
+> **Files liên quan:** `nothan-kernel/include/task.h`, `nothan-kernel/sched/`, `nothan-kernel/arch/arm/scheduler/context_switch.S`, `nothan-kernel/drivers/clocksource/timer-omap-dm.c`
 
 ---
 
 ## Task Structure
 
-File: `vinix-kernel/include/task.h`
+File: `nothan-kernel/include/task.h`
 
 ```c
 struct task_context {
@@ -45,7 +45,7 @@ struct task_struct {
 
 ## Task Stack Initialization
 
-File: `vinix-kernel/sched/task.c`
+File: `nothan-kernel/sched/task.c`
 
 ```c
 void task_stack_init(struct task_struct *task,
@@ -91,7 +91,7 @@ void task_stack_init(struct task_struct *task,
 
 ## Context Switch
 
-File: `vinix-kernel/arch/arm/scheduler/context_switch.S`
+File: `nothan-kernel/arch/arm/scheduler/context_switch.S`
 
 ```asm
 .global context_switch
@@ -148,7 +148,7 @@ context_switch:
 
 ## Scheduler Implementation
 
-File: `vinix-kernel/sched/scheduler.c`
+File: `nothan-kernel/sched/scheduler.c`
 
 ### Data Structures
 
@@ -250,7 +250,7 @@ sequenceDiagram
 
 ---
 
-## Tasks trong VinixOS
+## Tasks trong NothanOS
 
 ### Idle Task (Kernel Mode)
 
@@ -285,7 +285,7 @@ void idle_task(void) {
 
 ## Timer Configuration
 
-File: `vinix-kernel/drivers/clocksource/timer-omap-dm.c`
+File: `nothan-kernel/drivers/clocksource/timer-omap-dm.c`
 
 ```c
 #define TIMER_FREQ_HZ 100   /* 100 Hz = 10ms per tick */

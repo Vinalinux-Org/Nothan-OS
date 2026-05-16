@@ -1,5 +1,5 @@
 # ==============================================================================
-# VinixOS Userspace Master Makefile
+# NothanOS Userspace Master Makefile
 # ==============================================================================
 
 MAKEFLAGS += --no-print-directory
@@ -36,7 +36,7 @@ clean:
 	@echo "  Clean complete."
 
 help:
-	@echo "VinixOS Userspace Build System"
+	@echo "NothanOS Userspace Build System"
 	@echo ""
 	@echo "Usage:"
 	@echo "  make            # Build library + all apps (shell, uname, hello, ...)"

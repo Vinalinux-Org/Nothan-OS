@@ -284,7 +284,7 @@ close(3)
 
 ## Future Extensions (Phase 2+)
 
-1. **Self-hosted Compiler (VinCC)** — compiler output chạy trực tiếp trên VinixOS
+1. **Self-hosted Compiler (NothCC)** — compiler output chạy trực tiếp trên NothanOS
 2. **Dynamic Process Creation** — `exec()` load ELF từ filesystem
 3. **Writable Filesystem** — FAT32 hoặc simple writable FS
 4. **Memory Allocator** — `malloc/free` implementation

@@ -1,6 +1,6 @@
 # reference — Index
 
-Tài liệu kỹ thuật phục vụ AI-assisted development cho VinixOS trên BeagleBone Black.
+Tài liệu kỹ thuật phục vụ AI-assisted development cho NothanOS trên BeagleBone Black.
 
 ## Folders
 

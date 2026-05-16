@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Phase 2 Compiler - Main Entry Point
-Cross-compiler cho Subset C targeting ARMv7-A (VinixOS Platform)
+Cross-compiler cho Subset C targeting ARMv7-A (NothanOS Platform)
 """
 
 import sys
@@ -66,8 +66,8 @@ def print_ast(node, indent=0):
 def parse_arguments() -> CompilerConfig:
     """Parse command-line arguments and return CompilerConfig"""
     parser = argparse.ArgumentParser(
-        prog="vincc",
-        description="Subset C Compiler for ARMv7-A (VinixOS Platform)",
+        prog="nothcc",
+        description="Subset C Compiler for ARMv7-A (NothanOS Platform)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     

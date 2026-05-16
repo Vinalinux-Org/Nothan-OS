@@ -1,4 +1,4 @@
-# VinixOS — Coding Style
+# NothanOS — Coding Style
 
 ## Table of Contents
 
@@ -137,7 +137,7 @@ bx  lr
 
 Vendor-specific driver thêm SoC prefix: `omap_uart_*`, `omap_hsmmc_*`, `tilcdc_*`. Generic core function dùng subsystem prefix: `uart_*`, `mmc_*`.
 
-### Mapping Linux → VinixOS
+### Mapping Linux → NothanOS
 
 #### Memory
 
@@ -188,7 +188,7 @@ smp_wmb();  /* write barrier */
 | `tmp`, `data`, `buf` không có context | Vô nghĩa, grep ra hàng trăm match |
 | `do_stuff`, `handle_it`, `process_thing` | Không nói lên action |
 | `MyDriver`, `myFunc` | PascalCase + tiếng Anh non-idiomatic |
-| `vinix_xxx_xxx_xxx_init_v2` | Cờ phase / version trong tên |
+| `nothan_xxx_xxx_xxx_init_v2` | Cờ phase / version trong tên |
 | `tty_*` (cho non-tty), `task_*` (cho non-task) | Kéo namespace Linux sai chỗ |
 
 ---
@@ -207,8 +207,8 @@ smp_wmb();  /* write barrier */
 /* 1. Includes — local trước, project sau, mach cuối */
 #include "types.h"
 #include "uart.h"
-#include "vinix/init.h"
-#include "vinix/errno.h"
+#include "nothan/init.h"
+#include "nothan/errno.h"
 #include "mach/memmap.h"
 #include "mach/irqs.h"
 
@@ -234,8 +234,8 @@ module_platform_driver(omap_uart_driver);
 ### Per-file structure (.h)
 
 ```c
-#ifndef VINIX_UART_H
-#define VINIX_UART_H
+#ifndef NOTHAN_UART_H
+#define NOTHAN_UART_H
 
 #include "types.h"   /* dependency tối thiểu */
 
@@ -252,10 +252,10 @@ static inline int uart_rx_available(void)
     return uart_rx_count() > 0;
 }
 
-#endif /* VINIX_UART_H */
+#endif /* NOTHAN_UART_H */
 ```
 
-**Header guard format**: `VINIX_<PATH>_H` hoặc `<MODULE>_H`. Không dùng `_H_` trailing.
+**Header guard format**: `NOTHAN_<PATH>_H` hoặc `<MODULE>_H`. Không dùng `_H_` trailing.
 
 ### Driver folder layout (subsystem có core + host)
 

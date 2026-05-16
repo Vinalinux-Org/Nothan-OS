@@ -1,6 +1,6 @@
 # GPIO Driver
 
-Tài liệu tham khảo cho việc phát triển GPIO driver trong kernel VinixOS.
+Tài liệu tham khảo cho việc phát triển GPIO driver trong kernel NothanOS.
 
 ## Status
 

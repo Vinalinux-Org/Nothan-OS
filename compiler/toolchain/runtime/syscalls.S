@@ -1,5 +1,5 @@
 /*
- * Syscall Wrappers for VinixOS Platform
+ * Syscall Wrappers for NothanOS Platform
  * Provides C-callable wrappers for system calls
  */
 

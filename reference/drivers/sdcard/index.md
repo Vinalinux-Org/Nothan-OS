@@ -1,6 +1,6 @@
 # SD Card Driver
 
-Tài liệu tham khảo cho việc phát triển SD card driver trong kernel VinixOS.
+Tài liệu tham khảo cho việc phát triển SD card driver trong kernel NothanOS.
 
 ## Tài liệu liên quan (trong reference)
 

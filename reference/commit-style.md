@@ -1,4 +1,4 @@
-# VinixOS — Commit Style
+# NothanOS — Commit Style
 
 ## 1. Format
 
@@ -78,7 +78,7 @@ Refactor(uart): convert to platform_driver and move defines and fix overflow
 
 ## 6. Cấm tuyệt đối
 
-- `Co-Authored-By: Claude` trailer trên commit VinixOS — **không bao giờ**
+- `Co-Authored-By: Claude` trailer trên commit NothanOS — **không bao giờ**
 - `git tag v0.PN-complete` — chỉ commit, không tag phase
 - `git commit --amend` commit đã push — luôn tạo commit mới
 

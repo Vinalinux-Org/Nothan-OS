@@ -1,4 +1,4 @@
-# VinixOS — Bare-metal ARM Operating System
+# NothanOS — Bare-metal ARM Operating System
 
 **Bare-metal operating system + cross-compiler cho ARMv7-A, chạy trên phần cứng thật (BeagleBone Black).**
 
@@ -28,12 +28,12 @@ Project gồm 2 components chính:
 
 | Component | Mô Tả | Ngôn Ngữ |
 |-----------|-------|---------|
-| **VinixOS** | Bare-metal OS: bootloader, kernel, userspace shell, HDMI display | C, ARM Assembly |
-| **VinCC** | Cross-compiler: Subset C → ARMv7-A ELF binary | Python |
+| **NothanOS** | Bare-metal OS: bootloader, kernel, userspace shell, HDMI display | C, ARM Assembly |
+| **NothCC** | Cross-compiler: Subset C → ARMv7-A ELF binary | Python |
 
 ---
 
-## VinixOS — Hệ Điều Hành
+## NothanOS — Hệ Điều Hành
 
 ### Bootloader (MLO)
 
@@ -56,7 +56,7 @@ Project gồm 2 components chính:
 | **VFS** | Multi-FS: FAT32 rootfs (subdir/unlink/rename) + devfs (`/dev/tty`, `/dev/null`) + procfs (`/proc/...`) |
 | **Block** | `block_device` abstraction, LRU buffer cache 64×512 B write-back |
 | **Driver model** | Linux-style `platform_device/driver`, bus matching, `platform_get_resource` |
-| **Userspace** | init (PID 1) + shell fork+exec + 10 external coreutils + vinixlibc POSIX subset (~1.4 KLOC) |
+| **Userspace** | init (PID 1) + shell fork+exec + 10 external coreutils + nothanlibc POSIX subset (~1.4 KLOC) |
 | **HDMI Display** | 800×600 RGB565, TDA19988 HDMI transmitter qua I2C, LCDC framebuffer |
 
 ### HDMI Graphics Stack
@@ -73,22 +73,22 @@ HDMI Output 800×600@60Hz
 
 **Boot screen sequence:**
 1. **Boot Log** — 16 hardware init steps với `[ OK ]` indicators, animation 300ms/dòng
-2. **Splash** — "VINIX OS" scale-6, animated dots, ~4.5 giây
+2. **Splash** — "NOTHAN OS" scale-6, animated dots, ~4.5 giây
 3. **Home Launcher** — status bar (clock, wifi, battery), app icon grid 4×2, page dots
 
 ### Userspace
 
 - **init** (PID 1) — respawn loop, fork+exec `/bin/sh`, reap zombie
 - **shell** (`/bin/sh`) — fork+exec external ELF, built-ins (`cd`, `pwd`, `help`, `exit`), redirect `>` `<` `>>`, auto-prepend `/bin/` cho command không có `/`
-- **Coreutils** — 10 ELFs trên `/bin/`: `ls cat echo ps kill pwd free uname rm mv` (mỗi utility ~30–150 LOC, link vinixlibc)
-- **vinixlibc** — POSIX subset ~1.4 KLOC: `string.h`, `stdio.h` (printf family + FILE), `stdlib.h` (K&R free-list malloc), `unistd.h`, `fcntl.h`, `ctype.h`, `errno.h`, `signal.h`, `sys/stat.h`, `sys/wait.h`
+- **Coreutils** — 10 ELFs trên `/bin/`: `ls cat echo ps kill pwd free uname rm mv` (mỗi utility ~30–150 LOC, link nothanlibc)
+- **nothanlibc** — POSIX subset ~1.4 KLOC: `string.h`, `stdio.h` (printf family + FILE), `stdlib.h` (K&R free-list malloc), `unistd.h`, `fcntl.h`, `ctype.h`, `errno.h`, `signal.h`, `sys/stat.h`, `sys/wait.h`
 - **crt0.S** — argv passthrough, BSS clear, call `main(argc, argv)`, `sys_exit(rc)` fallback
 
 ---
 
-## VinCC — Cross Compiler
+## NothCC — Cross Compiler
 
-Compiler viết bằng Python, compile **Subset C** → **ARMv7-A ELF32 binary** chạy trên VinixOS.
+Compiler viết bằng Python, compile **Subset C** → **ARMv7-A ELF32 binary** chạy trên NothanOS.
 
 ### Pipeline
 
@@ -161,8 +161,8 @@ Kiểm tra cài đặt thành công:
 
 ```bash
 arm-none-eabi-gcc --version        # Cross-compiler cho kernel
-arm-linux-gnueabihf-as --version   # Assembler cho VinCC runtime
-python3 --version                  # Python cho VinCC compiler
+arm-linux-gnueabihf-as --version   # Assembler cho NothCC runtime
+python3 --version                  # Python cho NothCC compiler
 ```
 
 Nếu dùng serial console, thêm user vào group `dialout` (cần logout/login lại):
@@ -175,16 +175,16 @@ sudo usermod -a -G dialout $USER
 
 ## Cài Đặt và Build
 
-### Phần A — Cài Đặt VinixOS
+### Phần A — Cài Đặt NothanOS
 
 #### Bước 1: Clone
 
 ```bash
-git clone https://github.com/Vinalinux-Org/Vinix-OS.git
-cd Vinix-OS
+git clone https://github.com/Vinalinux-Org/Nothan-OS.git
+cd Nothan-OS
 ```
 
-#### Bước 2: Build VinixOS (bootloader + kernel + userspace)
+#### Bước 2: Build NothanOS (bootloader + kernel + userspace)
 
 ```bash
 make
@@ -193,7 +193,7 @@ make
 Output:
 
 - `bootloader/MLO` — first-stage bootloader
-- `vinix-kernel/build/kernel.bin` — kernel với embedded init (PID 1 payload)
+- `nothan-kernel/build/kernel.bin` — kernel với embedded init (PID 1 payload)
 - `userspace/build/apps/<app>/<app>.elf` — 10 external utilities + init + shell
 
 #### Bước 3: Flash SD Card
@@ -247,7 +247,7 @@ Nếu không thấy output, kiểm tra đã chạy `sudo usermod -a -G dialout $
 Trên UART console (rút gọn):
 
 ```text
-VinixOS Bootloader — DDR 128MB OK, loading kernel ...
+NothanOS Bootloader — DDR 128MB OK, loading kernel ...
 [PLATFORM] AM3358 + BeagleBone Black
 [DRIVER] probing omap-uart / omap-dmtimer / omap-intc / omap-hsmmc
 [MM] page_alloc pool 112 MB, slab ready, kmalloc OK
@@ -281,13 +281,13 @@ hello
 # kill 3
 ```
 
-VinixOS đã sẵn sàng. Tiếp theo có thể dùng VinCC để viết và chạy chương trình C riêng.
+NothanOS đã sẵn sàng. Tiếp theo có thể dùng NothCC để viết và chạy chương trình C riêng.
 
 ---
 
-### Phần B — Compile và Chạy Chương Trình với VinCC
+### Phần B — Compile và Chạy Chương Trình với NothCC
 
-#### Bước 1: Cài đặt VinCC
+#### Bước 1: Cài đặt NothCC
 
 ```bash
 bash scripts/install_compiler.sh
@@ -297,14 +297,14 @@ source ~/.bashrc
 Kiểm tra:
 
 ```bash
-vincc --version
-# Expected: vincc 0.1.0
+nothcc --version
+# Expected: nothcc 0.1.0
 ```
 
 #### Bước 2: Compile thử chương trình test
 
 ```bash
-vincc -o test_hello compiler/tests/programs/test_hello.c
+nothcc -o test_hello compiler/tests/programs/test_hello.c
 ```
 
 Nếu thành công sẽ tạo file `test_hello` (ELF32 binary):
@@ -316,7 +316,7 @@ file test_hello
 
 #### Bước 3: Deploy binary sang SD card
 
-Đặt ELF vào `/bin/` trên FAT32 partition đã mount (`/media/$USER/VINIX/bin/test_hello`), hoặc rebuild + deploy toàn bộ rootfs:
+Đặt ELF vào `/bin/` trên FAT32 partition đã mount (`/media/$USER/NOTHAN/bin/test_hello`), hoặc rebuild + deploy toàn bộ rootfs:
 
 ```bash
 sudo ./scripts/deploy_and_flash.sh /dev/sdX
@@ -329,7 +329,7 @@ $ ls /bin
 cat  echo  free  kill  ls  mv  ps  pwd  rm  sh  test_hello  uname
 
 $ /bin/test_hello
-Hello, VinixOS!
+Hello, NothanOS!
 ```
 
 ---
@@ -337,8 +337,8 @@ Hello, VinixOS!
 ## Cấu Trúc Project
 
 ```
-Vinix-OS/
-├── vinix-kernel/
+Nothan-OS/
+├── nothan-kernel/
 │   ├── bootloader/          ← MLO (SRAM @ 0x402F0400)
 │   ├── arch/arm/            ← entry.S, MMU asm, context switch, exception vectors
 │   │   └── mach-omap2/      ← AM3358 board: memory map, IRQ, platform device table
@@ -359,11 +359,11 @@ Vinix-OS/
 │   ├── mm/                  ← page_alloc, slab, vmm
 │   ├── block/               ← block layer, buffer_cache
 │   ├── lib/                 ← string, format, fonts
-│   ├── include/vinix/       ← subsystem headers
+│   ├── include/nothan/       ← subsystem headers
 │   ├── userspace/
 │   │   ├── apps/            ← init, shell, 10 coreutils + hello
 │   │   ├── lib/             ← crt0.S, syscall wrappers
-│   │   └── vinixlibc/       ← POSIX subset (~1.4 KLOC hand-written)
+│   │   └── nothanlibc/       ← POSIX subset (~1.4 KLOC hand-written)
 │   └── Documentation/       ← tài liệu kỹ thuật
 │
 ├── compiler/
@@ -412,7 +412,7 @@ Vinix-OS/
 | Syscalls (22, AAPCS + errno) | ✅ Shipped | [06-syscall-mechanism.md](Documentation/06-syscall-mechanism.md) |
 | VFS + FAT32 + devfs + procfs + block + bcache | ✅ Shipped | [99-system-overview.md](Documentation/99-system-overview.md) |
 | Linux-style Driver Model (platform_device/driver) | ✅ Shipped | `kernel/src/kernel/driver/` |
-| vinixlibc (POSIX subset ~1.4 KLOC) | ✅ Shipped | `userspace/vinixlibc/` |
+| nothanlibc (POSIX subset ~1.4 KLOC) | ✅ Shipped | `userspace/nothanlibc/` |
 | Userspace (init + shell + 10 coreutils) | ✅ Shipped | [08-userspace-application.md](Documentation/08-userspace-application.md) |
 | Selftest harness | ✅ Shipped | `kernel/src/kernel/test/selftest.c` |
 | HDMI Display (800×600) + Boot Screen | ✅ Shipped | `kernel/src/ui/boot_screen.c` |
@@ -423,7 +423,7 @@ Vinix-OS/
 
 ## Tài Liệu
 
-### VinixOS (`Documentation/`)
+### NothanOS (`Documentation/`)
 
 | File | Nội Dung |
 |------|---------|
@@ -466,7 +466,7 @@ Vinix-OS/
 | Principle | Ví Dụ |
 |-----------|-------|
 | **100% hand-written** | Không fork/port Linux/musl/BusyBox/lwIP. Mọi dòng tự viết. |
-| **Linux-inspired API shape** | `task_struct`, `platform_driver`, `spinlock_t`, `wait_event`, `kmalloc(GFP_KERNEL)` — pattern Linux, code VinixOS |
+| **Linux-inspired API shape** | `task_struct`, `platform_driver`, `spinlock_t`, `wait_event`, `kmalloc(GFP_KERNEL)` — pattern Linux, code NothanOS |
 | **Userspace-driven kernel** | Mỗi feature kernel phải có consumer trong userspace/demo. Không consumer → defer. |
 | **Simplicity over features** | MAX_TASKS = 5, single priority, bitmap page allocator, no COW fork |
 | **Correctness over performance** | Flush toàn bộ TLB, no nested interrupts, `-O2` không aggressive |
@@ -493,9 +493,9 @@ Vinix-OS/
 
 **Build fails:**
 - Verify `arm-none-eabi-gcc` đã install: `arm-none-eabi-gcc --version`
-- Dùng `make -C vinix-kernel` để build — Makefile tự xử lý build order (userspace trước kernel)
+- Dùng `make -C nothan-kernel` để build — Makefile tự xử lý build order (userspace trước kernel)
 
-**VinCC compiler error:**
+**NothCC compiler error:**
 - Kiểm tra feature có trong Subset C: xem [subset_c_spec.md](compiler/Documentation/subset_c_spec.md)
 - `++`/`--` không hỗ trợ — dùng `i = i + 1`
 
@@ -504,7 +504,7 @@ Vinix-OS/
 ## FAQ
 
 **Tại sao không dùng Linux hoặc RTOS có sẵn?**
-VinixOS nhắm sovereignty tuyệt đối — 100% tự viết từ zero (kernel, libc, userspace, compiler) để chủ sở hữu từng dòng code. Target market: defense/industrial embedded VN cần owned stack thay vì Yocto/Buildroot Linux.
+NothanOS nhắm sovereignty tuyệt đối — 100% tự viết từ zero (kernel, libc, userspace, compiler) để chủ sở hữu từng dòng code. Target market: defense/industrial embedded VN cần owned stack thay vì Yocto/Buildroot Linux.
 
 **Có phải là Unix/Linux clone không?**
 Không. API shape (naming, struct layout, syscall convention) theo pattern Linux để dev biết Linux đọc code dễ, nhưng codebase độc lập — không fork, không port, không borrow dòng nào từ Linux/musl/BusyBox/lwIP upstream.
@@ -515,8 +515,8 @@ Giá ~$60, AM335x được document công khai qua TRM, không cần proprietary
 **Tại sao ARMv7-A thay vì ARMv8/RISC-V?**
 ARMv7-A đơn giản hơn (32-bit, 1 exception level) nhưng vẫn đại diện cho production embedded systems.
 
-**VinCC có thể compile chương trình phức tạp không?**
-VinCC hỗ trợ Subset C — đủ cho algorithms, data structures, và I/O qua syscalls. Không có `struct`, `malloc`, standard library. VinCC CHỈ dùng cho end-user C program — kernel + libc + userspace của VinixOS build bằng `arm-none-eabi-gcc`.
+**NothCC có thể compile chương trình phức tạp không?**
+NothCC hỗ trợ Subset C — đủ cho algorithms, data structures, và I/O qua syscalls. Không có `struct`, `malloc`, standard library. NothCC CHỈ dùng cho end-user C program — kernel + libc + userspace của NothanOS build bằng `arm-none-eabi-gcc`.
 
 **Có network stack không?**
 Phase 1 (hiện tại): chưa. Phase 2: hand-written CPSW driver + UDP/ICMP/ARP (no TCP).

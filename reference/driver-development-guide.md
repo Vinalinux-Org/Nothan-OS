@@ -1,6 +1,6 @@
-# VinixOS — Driver Development Guide
+# NothanOS — Driver Development Guide
 
-> File này dành cho developer mới hoặc AI cần viết driver cho VinixOS từ đầu.
+> File này dành cho developer mới hoặc AI cần viết driver cho NothanOS từ đầu.
 > Đọc xong file này là đủ để bắt tay viết driver. Không cần đọc Linux source.
 >
 > Style/comment/commit rules → [`CLAUDE.md`](../CLAUDE.md) · [`coding-style.md`](coding-style.md) · [`comment-style.md`](comment-style.md) · [`commit-style.md`](commit-style.md)
@@ -33,10 +33,10 @@ boot
 4. Nếu driver chưa load → đợi đến khi `platform_driver_register()` chạy, sau đó retry
 
 **Nguồn sự thật duy nhất cho hardware layout:**
-- Device → [`arch/arm/mach-omap2/board-bbb.c`](../vinix-kernel/arch/arm/mach-omap2/board-bbb.c)
-- IRQ numbers → [`arch/arm/mach-omap2/include/mach/irqs.h`](../vinix-kernel/arch/arm/mach-omap2/include/mach/irqs.h)
-- Base addresses → [`arch/arm/mach-omap2/include/mach/memmap.h`](../vinix-kernel/arch/arm/mach-omap2/include/mach/memmap.h)
-- Clock control → [`arch/arm/mach-omap2/include/mach/prcm.h`](../vinix-kernel/arch/arm/mach-omap2/include/mach/prcm.h)
+- Device → [`arch/arm/mach-omap2/board-bbb.c`](../nothan-kernel/arch/arm/mach-omap2/board-bbb.c)
+- IRQ numbers → [`arch/arm/mach-omap2/include/mach/irqs.h`](../nothan-kernel/arch/arm/mach-omap2/include/mach/irqs.h)
+- Base addresses → [`arch/arm/mach-omap2/include/mach/memmap.h`](../nothan-kernel/arch/arm/mach-omap2/include/mach/memmap.h)
+- Clock control → [`arch/arm/mach-omap2/include/mach/prcm.h`](../nothan-kernel/arch/arm/mach-omap2/include/mach/prcm.h)
 
 ---
 
@@ -58,7 +58,7 @@ Trước khi viết 1 dòng code, xác minh đủ 5 thứ này từ AM335x TRM:
 **Thiếu bất kỳ thứ nào → DỪNG. Hỏi trước, không đoán.**
 Sai base address = brick device. Sai IRQ = silent failure. Sai init sequence = undefined behavior.
 
-> **MMU trap:** VinixOS dùng static mapping — không có `ioremap()`. Nếu peripheral nằm trong vùng chưa được map trong `mmu_build_page_table_boot()`, driver sẽ DATA ABORT ngay lần `mmio_write32()` đầu tiên. Kiểm tra `arch/arm/mm/mmu.c` — nếu vùng chưa có (ví dụ L4_FAST cho CPSW/MDIO) → thêm vào `mmu_build_page_table_boot()`, `mmu_new_pgd()`, và `mmu_init()` trước khi viết bất kỳ dòng driver nào.
+> **MMU trap:** NothanOS dùng static mapping — không có `ioremap()`. Nếu peripheral nằm trong vùng chưa được map trong `mmu_build_page_table_boot()`, driver sẽ DATA ABORT ngay lần `mmio_write32()` đầu tiên. Kiểm tra `arch/arm/mm/mmu.c` — nếu vùng chưa có (ví dụ L4_FAST cho CPSW/MDIO) → thêm vào `mmu_build_page_table_boot()`, `mmu_new_pgd()`, và `mmu_init()` trước khi viết bất kỳ dòng driver nào.
 
 ### Bước 1 — Thêm entry vào board-bbb.c
 
@@ -110,8 +110,8 @@ Template driver (copy và điền vào):
 #include "types.h"
 #include "mmio.h"
 #include "platform_device.h"
-#include "vinix/init.h"
-#include "vinix/errno.h"
+#include "nothan/init.h"
+#include "nothan/errno.h"
 #include "mach/prcm.h"
 #include "mach/memmap.h"
 #include "mach/irqs.h"
@@ -240,21 +240,21 @@ Cuối `probe()`, đăng ký driver với subsystem core phù hợp:
 
 | Driver type | Header | Đăng ký |
 | --- | --- | --- |
-| UART | `vinix/serial_core.h` | `uart_register_driver()` + `uart_add_one_port()` |
-| Character device | `vinix/cdev.h` | `cdev_register()` |
-| Block device | `vinix/blkdev.h` | `add_disk()` |
-| I2C host | `vinix/i2c.h` | `i2c_add_adapter()` |
-| MMC host | `vinix/mmc/host.h` | `mmc_alloc_host()` + `mmc_add_host()` |
-| Framebuffer | `vinix/fb.h` | `register_framebuffer()` |
-| IRQ chip | `vinix/irqchip.h` | `irqchip_register()` |
-| Watchdog | `vinix/watchdog.h` | `watchdog_register_device()` |
-| Network | `vinix/netdevice.h` | `register_netdev()` |
+| UART | `nothan/serial_core.h` | `uart_register_driver()` + `uart_add_one_port()` |
+| Character device | `nothan/cdev.h` | `cdev_register()` |
+| Block device | `nothan/blkdev.h` | `add_disk()` |
+| I2C host | `nothan/i2c.h` | `i2c_add_adapter()` |
+| MMC host | `nothan/mmc/host.h` | `mmc_alloc_host()` + `mmc_add_host()` |
+| Framebuffer | `nothan/fb.h` | `register_framebuffer()` |
+| IRQ chip | `nothan/irqchip.h` | `irqchip_register()` |
+| Watchdog | `nothan/watchdog.h` | `watchdog_register_device()` |
+| Network | `nothan/netdevice.h` | `register_netdev()` |
 
 ---
 
 ## 3. Worked Example — omap_serial.c
 
-> Gold reference driver: [`drivers/tty/serial/omap_serial.c`](../vinix-kernel/drivers/tty/serial/omap_serial.c)
+> Gold reference driver: [`drivers/tty/serial/omap_serial.c`](../nothan-kernel/drivers/tty/serial/omap_serial.c)
 > Đọc file này khi bắt đầu bất kỳ driver mới nào. 100% compliant.
 
 **Board entry** (`board-bbb.c`):
@@ -359,13 +359,13 @@ Test
 
 | Cần gì | File |
 | --- | --- |
-| Board device table | [`arch/arm/mach-omap2/board-bbb.c`](../vinix-kernel/arch/arm/mach-omap2/board-bbb.c) |
-| IRQ numbers | [`mach/irqs.h`](../vinix-kernel/arch/arm/mach-omap2/include/mach/irqs.h) |
-| Base addresses | [`mach/memmap.h`](../vinix-kernel/arch/arm/mach-omap2/include/mach/memmap.h) |
-| PRCM clock IDs | [`mach/prcm.h`](../vinix-kernel/arch/arm/mach-omap2/include/mach/prcm.h) |
-| Initcall macros | [`include/vinix/init.h`](../vinix-kernel/include/vinix/init.h) |
-| Platform bus API | [`drivers/base/platform.c`](../vinix-kernel/drivers/base/platform.c) |
-| Gold reference driver | [`drivers/tty/serial/omap_serial.c`](../vinix-kernel/drivers/tty/serial/omap_serial.c) |
+| Board device table | [`arch/arm/mach-omap2/board-bbb.c`](../nothan-kernel/arch/arm/mach-omap2/board-bbb.c) |
+| IRQ numbers | [`mach/irqs.h`](../nothan-kernel/arch/arm/mach-omap2/include/mach/irqs.h) |
+| Base addresses | [`mach/memmap.h`](../nothan-kernel/arch/arm/mach-omap2/include/mach/memmap.h) |
+| PRCM clock IDs | [`mach/prcm.h`](../nothan-kernel/arch/arm/mach-omap2/include/mach/prcm.h) |
+| Initcall macros | [`include/nothan/init.h`](../nothan-kernel/include/nothan/init.h) |
+| Platform bus API | [`drivers/base/platform.c`](../nothan-kernel/drivers/base/platform.c) |
+| Gold reference driver | [`drivers/tty/serial/omap_serial.c`](../nothan-kernel/drivers/tty/serial/omap_serial.c) |
 | Driver template skeleton | [`Documentation/driver-template/`](../Documentation/driver-template/) |
 | AM335x TRM reference | [`reference/am335x/`](am335x/) |
 | Style / comment / commit rules | [`CLAUDE.md`](../CLAUDE.md) · [`coding-style.md`](coding-style.md) · [`comment-style.md`](comment-style.md) · [`commit-style.md`](commit-style.md) |

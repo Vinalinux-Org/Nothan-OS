@@ -1,4 +1,4 @@
-# Kiến Trúc Compiler (VinCC)
+# Kiến Trúc Compiler (NothCC)
 
 > **Phạm vi:** Pipeline tổng thể từ source code đến ELF binary — 7 phases, module organization, và design decisions.
 > **Yêu cầu trước:** Không có — đây là tài liệu entry point cho compiler.
@@ -281,7 +281,7 @@ toolchain/
 | Software division | Cortex-A8 không có hardware SDIV | `__aeabi_idiv` từ ARM EABI runtime |
 | Linear scan register allocation | Simple, predictable | Graph coloring — rejected: complex, unnecessary |
 | AAPCS calling convention | Compatible với C libs + ARM EABI | Custom ABI — rejected: interop issues |
-| Base address `0x40000000` | VinixOS user space layout | — |
+| Base address `0x40000000` | NothanOS user space layout | — |
 
 ---
 
@@ -308,7 +308,7 @@ toolchain/
 | Three-Address Code | Mỗi IR instruction ≤ 3 operands — dễ map sang assembly |
 | AAPCS compliance | Compatible với ARM toolchain và C libraries |
 | Software division | Cortex-A8 không có SDIV — dùng `__aeabi_idiv` |
-| Base `0x40000000` | Khớp với VinixOS user space VA |
+| Base `0x40000000` | Khớp với NothanOS user space VA |
 
 ---
 

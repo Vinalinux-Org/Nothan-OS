@@ -2,7 +2,7 @@
 
 > **Phạm vi:** Toàn bộ quá trình boot từ power-on đến khi `kernel_main()` được gọi — ROM → MLO → entry.S.
 > **Yêu cầu trước:** Không có — đây là tài liệu đầu tiên cần đọc.
-> **Files liên quan:** `bootloader/src/main.c`, `vinix-kernel/arch/arm/entry/entry.S`, `vinix-kernel/arch/arm/mm/mmu_enable.S`
+> **Files liên quan:** `bootloader/src/main.c`, `nothan-kernel/arch/arm/entry/entry.S`, `nothan-kernel/arch/arm/mm/mmu_enable.S`
 
 ---
 
@@ -87,7 +87,7 @@ uart_init();
 delay(1000000);   /* UART stabilization delay */
 
 uart_puts("========================================\r\n");
-uart_puts("VinixOS Bootloader\r\n");
+uart_puts("NothanOS Bootloader\r\n");
 uart_puts("========================================\r\n");
 ```
 
@@ -156,7 +156,7 @@ mmc_read_sectors(KERNEL_START_SECTOR, KERNEL_SIZE_SECTORS,
 |-------------|---------|
 | 0 – 127 | MLO (bootloader) — 64 KB |
 | 128 – 2047 | Reserved |
-| 2048+ | `kernel.bin` (VinixOS kernel) |
+| 2048+ | `kernel.bin` (NothanOS kernel) |
 
 > **Kernel load address:** `0x80000000` — đầu DDR3. Kernel được link để run tại địa chỉ này (và tại VA `0xC0000000` sau MMU enable).
 
@@ -194,7 +194,7 @@ asm volatile(
 
 ## Phase 3: Kernel Entry — `entry.S`
 
-File: `vinix-kernel/arch/arm/entry/entry.S`
+File: `nothan-kernel/arch/arm/entry/entry.S`
 
 Kernel entry point chạy tại Physical Address (PA) `0x80000000`, **MMU vẫn OFF**.
 

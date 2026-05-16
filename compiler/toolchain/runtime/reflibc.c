@@ -1,6 +1,6 @@
 /*
- * reflibc.c - VinixOS Standard C Library
- * Basic I/O wrappers around VinixOS syscalls
+ * reflibc.c - NothanOS Standard C Library
+ * Basic I/O wrappers around NothanOS syscalls
  */
 
 /* Internal syscall forward declaration */

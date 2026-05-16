@@ -9,22 +9,22 @@ DEVICE=${1:-/dev/sda}
 PART="${DEVICE}1"
 
 REAL_USER="${SUDO_USER:-$USER}"
-MOUNT=/media/$REAL_USER/VINIX
+MOUNT=/media/$REAL_USER/NOTHAN
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOPDIR="$(dirname "$SCRIPT_DIR")"
 MLO="$TOPDIR/bootloader/MLO"
-KERNEL="$TOPDIR/vinix-kernel/build/kernel.bin"
+KERNEL="$TOPDIR/nothan-kernel/build/kernel.bin"
 
 echo "==> build"
 make -C "$TOPDIR/userspace"
-make -C "$TOPDIR/vinix-kernel"
+make -C "$TOPDIR/nothan-kernel"
 
 echo "==> deploy to $MOUNT"
 MOUNTED_BY_US=0
 if ! mountpoint -q "$MOUNT" 2>/dev/null; then
-    if ! lsblk -no LABEL "$PART" 2>/dev/null | grep -q "^VINIX$"; then
-        echo "error: $PART is not a VINIX partition — run setup-sdcard.sh first"
+    if ! lsblk -no LABEL "$PART" 2>/dev/null | grep -q "^NOTHAN$"; then
+        echo "error: $PART is not a NOTHAN partition — run setup-sdcard.sh first"
         exit 1
     fi
     mkdir -p "$MOUNT"
@@ -53,7 +53,7 @@ if [ -f "$INIT_SRC" ]; then
 fi
 
 cat > "$MOUNT/etc/motd" <<'EOF'
-VinixOS 0.1 — BeagleBone Black
+NothanOS 0.1 — BeagleBone Black
 100% hand-written: kernel, libc, userspace, compiler.
 type `help` for built-ins, or run any /bin/<name>.
 EOF
@@ -72,7 +72,7 @@ if [ ! -f "$MLO" ]; then
     exit 1
 fi
 if [ ! -f "$KERNEL" ]; then
-    echo "error: kernel.bin not found — run: make -C $TOPDIR/vinix-kernel"
+    echo "error: kernel.bin not found — run: make -C $TOPDIR/nothan-kernel"
     exit 1
 fi
 

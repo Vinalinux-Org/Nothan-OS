@@ -1,6 +1,6 @@
 # Network Stack
 
-Tài liệu cho software networking stack của VinixOS — các tầng giao thức phía trên Ethernet driver.
+Tài liệu cho software networking stack của NothanOS — các tầng giao thức phía trên Ethernet driver.
 
 ---
 
@@ -70,15 +70,15 @@ struct tcp_conn {
 ## Files đã tạo
 
 ```
-vinix-kernel/drivers/net/ipv4/
+nothan-kernel/drivers/net/ipv4/
     ip.c      — ip_rx, ip_tx
     tcp.c     — tcp_rx, tcp_send, tcp_poll, tcp_sse_push
 
-vinix-kernel/drivers/net/app/
+nothan-kernel/drivers/net/app/
     http.c    — http_rx, http_sse_frame
     net_task.c — background task, SSE push mỗi giây
 
-vinix-kernel/include/
+nothan-kernel/include/
     ip.h      — public interface ip layer
     tcp.h     — public interface tcp layer
     http.h    — public interface http layer

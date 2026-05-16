@@ -1,5 +1,5 @@
 # ============================================================
-# Makefile for VinixOS Bootloader
+# Makefile for NothanOS Bootloader
 # ============================================================
 
 # Toolchain
@@ -112,7 +112,7 @@ clean:
 
 # Help
 help:
-	@echo "VinixOS Bootloader Build System"
+	@echo "NothanOS Bootloader Build System"
 	@echo ""
 	@echo "Targets:"
 	@echo "  all     - Build MLO (default)"

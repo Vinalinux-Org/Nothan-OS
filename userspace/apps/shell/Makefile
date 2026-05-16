@@ -1,5 +1,5 @@
 # ==============================================================================
-# VinixOS Userspace Application: shell
+# NothanOS Userspace Application: shell
 # ==============================================================================
 
 include ../../rules.mk

@@ -1,10 +1,10 @@
-# VinCC - Trình Biên Dịch C cho VinixOS
+# NothCC - Trình Biên Dịch C cho NothanOS
 
-Trình biên dịch cross-compiler hoàn chỉnh, sinh binary ARMv7-A chạy trên VinixOS.
+Trình biên dịch cross-compiler hoàn chỉnh, sinh binary ARMv7-A chạy trên NothanOS.
 
 ## Tổng Quan
 
-VinCC là compiler viết bằng Python, thực hiện toàn bộ pipeline từ source C đến ELF binary:
+NothCC là compiler viết bằng Python, thực hiện toàn bộ pipeline từ source C đến ELF binary:
 
 ```
 Source (.c) → Preprocessor → Lexer → Parser → Semantic → IR → CodeGen → Assembler → Linker → ELF
@@ -45,7 +45,7 @@ sudo apt-get install binutils-arm-linux-gnueabihf
 sudo bash scripts/setup-environment.sh
 ```
 
-### Cài Đặt VinCC
+### Cài Đặt NothCC
 
 ```bash
 # Từ thư mục gốc project
@@ -53,8 +53,8 @@ bash scripts/install_compiler.sh
 ```
 
 Script sẽ:
-- Copy toolchain vào `~/.local/lib/vincc`
-- Tạo wrapper `~/.local/bin/vincc`
+- Copy toolchain vào `~/.local/lib/nothcc`
+- Tạo wrapper `~/.local/bin/nothcc`
 - Thêm vào PATH
 
 ### Python Dependencies (Development/Testing)
@@ -68,13 +68,13 @@ pip3 install -r requirements.txt
 
 Bao gồm: `pytest`, `pytest-cov`, `hypothesis`, `black`, `mypy`.
 
-> **Lưu ý**: Các package này dành cho phát triển compiler, **không** cần thiết để chỉ dùng `vincc` compile chương trình.
+> **Lưu ý**: Các package này dành cho phát triển compiler, **không** cần thiết để chỉ dùng `nothcc` compile chương trình.
 
 ### Kiểm Tra
 
 ```bash
-vincc --version
-# vincc 0.1.0
+nothcc --version
+# nothcc 0.1.0
 ```
 
 ## Sử Dụng
@@ -83,42 +83,42 @@ vincc --version
 
 ```bash
 # Compile ra executable
-vincc program.c -o program
+nothcc program.c -o program
 
 # Chỉ sinh assembly
-vincc program.c -S -o program.s
+nothcc program.c -S -o program.s
 
 # Compile ra object file
-vincc program.c -c -o program.o
+nothcc program.c -c -o program.o
 ```
 
 ### Debug
 
 ```bash
 # Dump tokens
-vincc program.c --dump-tokens
+nothcc program.c --dump-tokens
 
 # Dump AST
-vincc program.c --dump-ast
+nothcc program.c --dump-ast
 
 # Dump IR
-vincc program.c --dump-ir
+nothcc program.c --dump-ir
 
 # Verbose output
-vincc program.c -v
+nothcc program.c -v
 ```
 
 ### Tùy Chọn Nâng Cao
 
 ```bash
 # Optimization level
-vincc program.c -O1 -o program
+nothcc program.c -O1 -o program
 
 # Giữ file trung gian
-vincc program.c --keep-temps -o program
+nothcc program.c --keep-temps -o program
 
 # Custom linker script
-vincc program.c -T custom.ld -o program
+nothcc program.c -T custom.ld -o program
 ```
 
 ## Runtime Library (reflibc)
@@ -151,14 +151,14 @@ void print_hex(int val);
 #include "reflibc.h"
 
 int main() {
-    print_str("Hello, VinixOS!\n");
+    print_str("Hello, NothanOS!\n");
     return 0;
 }
 ```
 
 Compile:
 ```bash
-vincc hello.c -o hello
+nothcc hello.c -o hello
 ```
 
 ### Fibonacci
@@ -181,19 +181,19 @@ int main() {
 }
 ```
 
-## Chạy Trên VinixOS
+## Chạy Trên NothanOS
 
 ### Bước 1: Compile
 
 ```bash
-vincc program.c -o program
+nothcc program.c -o program
 ```
 
 ### Bước 2: Nhúng Vào Kernel
 
 ```bash
-cp program vinix-kernel/src/kernel/files/
-cd vinix-kernel
+cp program nothan-kernel/src/kernel/files/
+cd nothan-kernel
 make
 ```
 
@@ -211,7 +211,7 @@ $ ls
 program  hello.txt  info.txt
 
 $ exec program
-Hello, VinixOS!
+Hello, NothanOS!
 ```
 
 ## Cấu Trúc Project
@@ -226,7 +226,7 @@ compiler/
 │   └── runtime/            # reflibc
 ├── tests/                  # Test suite
 ├── docs/                   # Tài liệu kỹ thuật
-└── vincc.spec              # PyInstaller spec
+└── nothcc.spec              # PyInstaller spec
 ```
 
 ## Testing
@@ -261,7 +261,7 @@ bash scripts/install_compiler.sh
 sudo apt-get install binutils-arm-linux-gnueabihf
 ```
 
-**Binary không chạy trên VinixOS**:
+**Binary không chạy trên NothanOS**:
 - Kiểm tra: `file program` (phải là ELF32 ARM)
 - Đảm bảo `#include "reflibc.h"`
 - Compile với `-v` để xem linking

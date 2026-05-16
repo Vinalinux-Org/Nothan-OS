@@ -1,10 +1,10 @@
 #!/bin/bash
-# setup-environment.sh — install VinixOS build dependencies on Ubuntu 22.04.
+# setup-environment.sh — install NothanOS build dependencies on Ubuntu 22.04.
 # Run from project root with sudo: sudo bash scripts/setup-environment.sh
 
 set -e
 
-echo "Installing VinixOS dependencies..."
+echo "Installing NothanOS dependencies..."
 
 apt-get update
 apt-get upgrade -y
@@ -18,10 +18,10 @@ apt-get install -y libgmp3-dev libmpc-dev libmpfr-dev libisl-dev texinfo
 # ARM bare-metal toolchain (kernel + userspace)
 apt-get install -y gcc-arm-none-eabi binutils-arm-none-eabi
 
-# ARM Linux toolchain (VinCC code generation backend)
+# ARM Linux toolchain (NothCC code generation backend)
 apt-get install -y binutils-arm-linux-gnueabihf
 
-# Python (VinCC compiler)
+# Python (NothCC compiler)
 apt-get install -y python3 python3-pip python3-venv
 
 # Serial console
@@ -34,7 +34,7 @@ apt-get install -y gcc-multilib libc6-i386
 apt-get install -y parted dosfstools
 
 echo ""
-echo "Installing VinCC Python dependencies..."
+echo "Installing NothCC Python dependencies..."
 if [ -f "compiler/requirements.txt" ]; then
     pip3 install -r compiler/requirements.txt
 else

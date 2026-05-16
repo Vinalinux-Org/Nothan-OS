@@ -1,7 +1,7 @@
 # Build Directories
 /build/
 /bootloader/build/
-/vinix-kernel/build/
+/nothan-kernel/build/
 /userspace/build/
 /compiler/toolchain/build/
 /compiler/toolchain/dist/
@@ -88,4 +88,4 @@ TAGS
 test_hello
 fibonacci
 program
-vinix-kernel/build/
+nothan-kernel/build/

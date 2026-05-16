@@ -2,7 +2,7 @@
 
 int main() {
     print_str("Hello, ");
-    print_str("VinixOS");
+    print_str("NothanOS");
     print_str("!\n");
     
     print_str("Number: ");

@@ -2,7 +2,7 @@
 
 > **Phạm vi:** ARMv7-A exception model, vector table, INTC configuration, và complete IRQ flow từ hardware đến handler.
 > **Yêu cầu trước:** [03-memory-and-mmu.md](03-memory-and-mmu.md) — VBAR phụ thuộc MMU; [02-kernel-initialization.md](02-kernel-initialization.md) — thứ tự init INTC/IRQ.
-> **Files liên quan:** `vinix-kernel/arch/arm/entry/entry.S`, `vinix-kernel/arch/arm/exceptions/`, `vinix-kernel/arch/arm/kernel/exception_handlers.c`, `vinix-kernel/drivers/irqchip/irq-omap-intc.c`, `vinix-kernel/irq/irq_core.c`
+> **Files liên quan:** `nothan-kernel/arch/arm/entry/entry.S`, `nothan-kernel/arch/arm/exceptions/`, `nothan-kernel/arch/arm/kernel/exception_handlers.c`, `nothan-kernel/drivers/irqchip/irq-omap-intc.c`, `nothan-kernel/irq/irq_core.c`
 
 ---
 
@@ -39,7 +39,7 @@ Khi exception xảy ra, CPU **tự động** thực hiện (không cần softwar
 
 ## Vector Table
 
-File: `vinix-kernel/arch/arm/entry/entry.S`
+File: `nothan-kernel/arch/arm/entry/entry.S`
 
 ```asm
 .section .text.vectors, "ax"
@@ -139,7 +139,7 @@ void c_data_abort_handler(void) {
 
 ### 3. SVC (System Call)
 
-File: `vinix-kernel/arch/arm/exceptions/exception_entry.S`
+File: `nothan-kernel/arch/arm/exceptions/exception_entry.S`
 
 ```asm
 svc_handler_entry:
@@ -192,7 +192,7 @@ CPU IRQ/FIQ pins
 
 ### INTC Initialization
 
-File: `vinix-kernel/drivers/irqchip/irq-omap-intc.c`
+File: `nothan-kernel/drivers/irqchip/irq-omap-intc.c`
 
 ```c
 void intc_init(void) {
@@ -237,7 +237,7 @@ void intc_enable_interrupt(uint32_t irq_num, uint32_t priority) {
 
 ## IRQ Handler Registration
 
-File: `vinix-kernel/irq/irq_core.c`
+File: `nothan-kernel/irq/irq_core.c`
 
 ```c
 #define MAX_IRQS 128
@@ -311,7 +311,7 @@ sequenceDiagram
 
 ## Nested Interrupts
 
-VinixOS **KHÔNG** support nested interrupts.
+NothanOS **KHÔNG** support nested interrupts.
 
 > **Rationale:** Đơn giản — không cần nested stack management, tránh stack overflow. Đủ cho reference OS. IRQ handler không re-enable IRQ (I-bit vẫn set). Interrupts chỉ re-enable khi return về task context qua `rfeia`.
 

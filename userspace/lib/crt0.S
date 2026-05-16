@@ -1,7 +1,7 @@
 /* ============================================================
  * crt0.S
  * ------------------------------------------------------------
- * User Application Startup Code for VinixOS
+ * User Application Startup Code for NothanOS
  * ============================================================
  * Execution Flow:
  * 1. Kernel creates task and jumps to _start (0x40000000)

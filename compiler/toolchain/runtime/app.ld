@@ -1,5 +1,5 @@
 /*
- * Linker Script for VinixOS User Programs
+ * Linker Script for NothanOS User Programs
  * Memory layout: Base address 0x40000000
  */
 

@@ -108,7 +108,7 @@ void bootloader_main(void)
 
     /* STAGE 3: boot banner. */
     uart_puts("========================================\r\n");
-    uart_puts("VinixOS Bootloader\r\n");
+    uart_puts("NothanOS Bootloader\r\n");
     uart_puts("========================================\r\n");
     uart_puts("Board:  BeagleBone Black (AM335x)\r\n");
     uart_puts("UART:   Initialized @ 115200 8N1\r\n");

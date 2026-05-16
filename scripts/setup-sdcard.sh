@@ -1,10 +1,10 @@
 #!/bin/bash
-# setup_sdcard.sh — first-time SD card initialization for VinixOS.
+# setup_sdcard.sh — first-time SD card initialization for NothanOS.
 #
 # SD layout:
 #   sector 256, 512, 768 — MLO (raw, AM335x ROM requirement)
 #   sector 2048           — kernel.bin (raw, ~3MB budget before FAT32)
-#   sector 8192+          — FAT32 partition, label VINIX (rootfs)
+#   sector 8192+          — FAT32 partition, label NOTHAN (rootfs)
 #
 # WARNING: this ERASES the entire device. Run once per card.
 # Usage: sudo ./scripts/setup_sdcard.sh /dev/sdX
@@ -35,7 +35,7 @@ read -r -p "Type YES to continue: " confirm
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOPDIR="$(dirname "$SCRIPT_DIR")"
 MLO="$TOPDIR/bootloader/MLO"
-KERNEL="$TOPDIR/vinix-kernel/build/kernel.bin"
+KERNEL="$TOPDIR/nothan-kernel/build/kernel.bin"
 PART="${DEVICE}1"
 
 if [ ! -f "$MLO" ]; then
@@ -43,7 +43,7 @@ if [ ! -f "$MLO" ]; then
     exit 1
 fi
 if [ ! -f "$KERNEL" ]; then
-    echo "error: kernel.bin not found — run: make -C $TOPDIR/vinix-kernel"
+    echo "error: kernel.bin not found — run: make -C $TOPDIR/nothan-kernel"
     exit 1
 fi
 
@@ -60,7 +60,7 @@ partprobe "$DEVICE"
 sleep 1
 
 echo "==> format FAT32"
-mkfs.vfat -F 32 -n VINIX "$PART"
+mkfs.vfat -F 32 -n NOTHAN "$PART"
 
 echo "==> flash MLO + kernel"
 # MLO at three redundant locations (AM335x TRM 26.1.8.5.5).
@@ -93,7 +93,7 @@ if [ -f "$INIT_SRC" ]; then
 fi
 
 cat > "$MOUNT/etc/motd" <<'EOF'
-VinixOS 0.1 — BeagleBone Black
+NothanOS 0.1 — BeagleBone Black
 100% hand-written: kernel, libc, userspace, compiler.
 type `help` for built-ins, or run any /bin/<name>.
 EOF

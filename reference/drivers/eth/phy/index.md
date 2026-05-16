@@ -1,6 +1,6 @@
 # PHY Driver — LAN8710A
 
-Tài liệu tham khảo cho việc phát triển PHY driver (LAN8710A-EZC-TR) trong kernel VinixOS.
+Tài liệu tham khảo cho việc phát triển PHY driver (LAN8710A-EZC-TR) trong kernel NothanOS.
 
 ## Tài liệu liên quan (trong reference)
 

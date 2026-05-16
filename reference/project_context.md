@@ -1,4 +1,4 @@
-# VinixOS — Project Context
+# NothanOS — Project Context
 
 File này cung cấp context nhanh cho AI khi bắt đầu một task mới, tránh phải đọc toàn bộ codebase.
 
@@ -6,7 +6,7 @@ File này cung cấp context nhanh cho AI khi bắt đầu một task mới, tr�
 
 ## Tổng quan
 
-VinixOS là một bare-metal OS tự phát triển từ đầu, chạy trên **BeagleBone Black (BBB)**.
+NothanOS là một bare-metal OS tự phát triển từ đầu, chạy trên **BeagleBone Black (BBB)**.
 
 - **SoC:** Texas Instruments AM3358
 - **CPU:** ARMv7-A Cortex-A8
@@ -17,7 +17,7 @@ VinixOS là một bare-metal OS tự phát triển từ đầu, chạy trên **B
 ## Cấu trúc project
 
 ```
-vinix-kernel/
+nothan-kernel/
 ├── bootloader/     ← MLO: clock, DDR3, load kernel từ SD card
 ├── kernel/         ← Kernel chính
 │   ├── src/
@@ -67,7 +67,7 @@ compiler/           ← Phase 2: Python cross compiler → ARMv7-A (HOÀN THÀNH
 ## Đang phát triển
 
 ### SD card driver trong kernel
-- Port `bootloader/src/mmc.c` vào `vinix-kernel/drivers/mmc/host/omap_hsmmc.c`
+- Port `bootloader/src/mmc.c` vào `nothan-kernel/drivers/mmc/host/omap_hsmmc.c`
 - Thêm write support (`mmc_write_sectors`)
 - Tài liệu: `reference/drivers/sdcard/index.md`
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# install_compiler.sh — install vincc (VinixOS C Compiler) system-wide or user-local.
+# install_compiler.sh — install nothcc (NothanOS C Compiler) system-wide or user-local.
 # Usage: bash scripts/install_compiler.sh [run [args...]]
 
 set -e
@@ -26,15 +26,15 @@ fi
 
 if [[ $EUID -eq 0 ]]; then
     INSTALL_DIR="/usr/local/bin"
-    COMPILER_DIR="/usr/local/lib/vincc"
+    COMPILER_DIR="/usr/local/lib/nothcc"
 else
     INSTALL_DIR="$HOME/.local/bin"
-    COMPILER_DIR="$HOME/.local/lib/vincc"
+    COMPILER_DIR="$HOME/.local/lib/nothcc"
 fi
 
 mkdir -p "$INSTALL_DIR" "$COMPILER_DIR"
 
-echo -e "${GREEN}Installing vincc to $INSTALL_DIR...${NC}"
+echo -e "${GREEN}Installing nothcc to $INSTALL_DIR...${NC}"
 
 if ! command -v python3 &>/dev/null; then
     echo -e "${RED}error: python3 not found${NC}"
@@ -49,17 +49,17 @@ fi
 rm -rf "$COMPILER_DIR/toolchain"
 cp -a "$SRC_COMPILER_DIR" "$COMPILER_DIR/"
 
-cat > "$INSTALL_DIR/vincc" <<EOF
+cat > "$INSTALL_DIR/nothcc" <<EOF
 #!/bin/bash
 COMPILER_DIR="$COMPILER_DIR"
 if [ ! -d "\$COMPILER_DIR/toolchain" ]; then
-    echo "error: vincc package not found at \$COMPILER_DIR/toolchain"
+    echo "error: nothcc package not found at \$COMPILER_DIR/toolchain"
     exit 1
 fi
 export PYTHONPATH="\$COMPILER_DIR:\$PYTHONPATH"
 exec python3 -m toolchain.main "\$@"
 EOF
-chmod +x "$INSTALL_DIR/vincc"
+chmod +x "$INSTALL_DIR/nothcc"
 
 if [[ ":$PATH:" != *":$INSTALL_DIR:"* && $EUID -ne 0 ]]; then
     if ! grep -Fq "export PATH=\"\$PATH:$INSTALL_DIR\"" ~/.bashrc 2>/dev/null; then
@@ -69,5 +69,5 @@ if [[ ":$PATH:" != *":$INSTALL_DIR:"* && $EUID -ne 0 ]]; then
 fi
 
 echo -e "${GREEN}done.${NC}"
-echo "  vincc --version"
-echo "  vincc hello.c -o hello"
+echo "  nothcc --version"
+echo "  nothcc hello.c -o hello"

@@ -1,6 +1,6 @@
 /*
  * C Runtime Startup (crt0.S)
- * Entry point for user programs on VinixOS Platform
+ * Entry point for user programs on NothanOS Platform
  */
 
 .syntax unified

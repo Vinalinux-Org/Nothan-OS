@@ -1,6 +1,6 @@
 # AM335x Technical Reference Manual
 
-Tài liệu TRM của SoC AM335x (Texas Instruments) — register map, peripheral configuration, clock/power management. Đây là tài liệu chính khi viết bất kỳ driver nào cho VinixOS trên BeagleBone Black.
+Tài liệu TRM của SoC AM335x (Texas Instruments) — register map, peripheral configuration, clock/power management. Đây là tài liệu chính khi viết bất kỳ driver nào cho NothanOS trên BeagleBone Black.
 
 ## Files
 

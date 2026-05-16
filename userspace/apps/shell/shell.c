@@ -83,7 +83,7 @@ void shell_puts(const char *s)
     }
 }
 
-/* Format via vinixlibc's vsnprintf, then fan out through shell_puts
+/* Format via nothanlibc's vsnprintf, then fan out through shell_puts
  * so shell_stdout_fd (redirect target) and the UART \n→\r\n
  * expansion are still honoured. Keeps one implementation of %d/%s/…
  * for every userspace consumer. */
@@ -323,7 +323,7 @@ int main(void)
 
     printf("\n");
     printf("========================================\n");
-    printf(" VinixOS User Shell\n");
+    printf(" NothanOS User Shell\n");
     printf("========================================\n");
 
     /* DEBUG: Check CPSR Mode */
