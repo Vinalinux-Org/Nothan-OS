@@ -14,6 +14,7 @@
 #define CM_PER_L4LS_CLKSTCTRL       (CM_PER_BASE + 0x000)
 #define CM_PER_CPGMAC0_CLKCTRL      (CM_PER_BASE + 0x014)
 #define CM_PER_LCDC_CLKCTRL         (CM_PER_BASE + 0x018)
+#define CM_PER_USB_OTG_HS_CLKCTRL   (CM_PER_BASE + 0x01C)
 #define CM_PER_MMC0_CLKCTRL         (CM_PER_BASE + 0x03C)
 #define CM_PER_UART0_CLKCTRL        (CM_PER_BASE + 0x06C)
 #define CM_PER_TIMER2_CLKCTRL       (CM_PER_BASE + 0x080)
@@ -32,6 +33,9 @@
 #define CM_WKUP_BASE                0x44E00400UL
 
 #define CM_WKUP_GPIO0_CLKCTRL       (CM_WKUP_BASE + 0x008)
+#define CM_IDLEST_DPLL_PER          (CM_WKUP_BASE + 0x070)
+#define CM_CLKDCOLDO_DPLL_PER       (CM_WKUP_BASE + 0x07C)
+#define CM_CLKMODE_DPLL_PER         (CM_WKUP_BASE + 0x08C)
 #define CM_IDLEST_DPLL_DISP         (CM_WKUP_BASE + 0x048)
 #define CM_CLKSEL_DPLL_DISP         (CM_WKUP_BASE + 0x054)
 #define CM_CLKMODE_DPLL_DISP        (CM_WKUP_BASE + 0x098)
@@ -49,5 +53,9 @@
 #define IDLEST_IDLE                 (0x2 << 16)
 #define IDLEST_DISABLED             (0x3 << 16)
 #define IDLEST_MASK                 (0x3 << 16)
+
+#define DPLL_MODE_MASK              0x7
+#define DPLL_MODE_LOCK              0x7
+#define DPLL_ST_CLK                 (1 << 0)
 
 #endif /* _MACH_PRCM_H */
