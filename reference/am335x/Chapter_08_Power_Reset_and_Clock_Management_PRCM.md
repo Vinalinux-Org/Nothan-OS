@@ -1,1791 +1,5818 @@
-# 8 Power, Reset, and Clock Management (PRCM)
 
-## Chapter 8: Power Management Architecture
 
----
+# *Power, Reset, and Clock Management (PRCM)*
 
-## 8.1 Introduction
+This chapter describes the PRCM of the device.
 
-The AM335x device power-management architecture ensures maximum performance and operation time while offering versatile power-management techniques for maximum design flexibility. The architecture is built on three fundamental levels:
+| Topic |                                    | Page |
+|-------|------------------------------------|------|
+| 8.1   | Power, Reset, and Clock Management | 1198 |
 
-1. **Clock Management** - Control of clock gating and distribution
-2. **Power Management** - Control of power domain switching  
-3. **Voltage Management** - Control of operating voltages
 
-These management levels are enforced through **domains** - groups of modules that share common resources (clock source, voltage source, or power switch).
+# **8.1 Power, Reset, and Clock Management**
 
----
+# *8.1.1 Introduction*
 
-## 8.2 Device Power-Management Architecture Building Blocks
+The device power-management architecture ensures maximum performance and operation time for user satisfaction (audio/video support) while offering versatile power-management techniques for maximum design flexibility, depending on application requirements. This introduction contains the following information:
 
-### 8.2.1 Domain Concept
+- Power-management architecture building blocks for the device
+- State-of-the-art power-management techniques supported by the power-management architecture of the device
 
-A **domain** is a group of modules or subsections that share a common entity:
-- **Clock Domain** - Modules sharing a common clock source
-- **Power Domain** - Modules sharing a common power switch
-- **Voltage Domain** - Modules sharing a common voltage source
+# *8.1.2 Device Power-Management Architecture Building Blocks*
 
-Each domain is managed by a dedicated policy manager. For example, a clock domain's clocks are managed by a clock manager within the PRCM module.
+To provide a versatile architecture supporting multiple power-management techniques, the powermanagement framework is built with three levels of resource management: clock, power, and voltage management.
 
----
+These management levels are enforced by defining the managed entities or building blocks of the powermanagement architecture, called the clock, power, and voltage domains. A domain is a group of modules or subsections of the device that share a common entity (for example, common clock source, common voltage source, or common power switch). The group forming the domain is managed by a policy manager. For example, a clock for a clock domain is managed by a dedicated clock manager within the power, reset, and clock management (PRCM) module. The clock manager considers the joint clocking constraints of all the modules belonging to that clock domain (and, hence, receiving that clock).
 
-## 8.3 Clock Management
+# *8.1.3 Clock Management*
 
-The PRCM module manages the gating (switching off) and enabling of clocks to device modules based on module requirements.
+The PRCM module along with the control module manages the gating (that is, switching off) and enabling of the clocks to the device modules. The clocks are managed based on the requirement constraints of the associated modules. The following sections identify the module clock characteristics, management policy, clock domains, and clock domain management
 
-### 8.3.1 Module Clock Types
+# **8.1.3.1 Module Interface and Functional Clocks**
 
-Each module requires specific clock inputs divided into two categories:
+Each module within the device has specific clock input characteristic requirements. Based on the characteristics of the clocks delivered to the modules, the clocks are divided into two categories: interface clocks and functional clocks
 
-#### 8.3.1.1 Interface Clock (ICLK)
 
-**Characteristics:**
-- Ensures proper communication between module/subsystem and interconnect
-- Supplies the system interconnect interface and registers of the module
-- Typically one interface clock per module (some may have multiple)
-- Managed at device level
-- Identified by `_ICLK` suffix in PRCM
+The interface clocks have the following characteristics:
 
-#### 8.3.1.2 Functional Clock (FCLK)
+- They ensure proper communication between any module/subsystem and interconnect.
+- In most cases, they supply the system interconnect interface and registers of the module.
+- A typical module has one interface clock, but modules with multiple interface clocks may also exist (that is, when connected to multiple interconnect buses).
 
-**Characteristics:**
-- Supplies the functional part of a module or subsystem
-- A module can have one or more functional clocks:
-  - **Mandatory clocks**: Required for module operation
-  - **Optional clocks**: Used for specific features, can be shut down without stopping module
-- Distributed directly to modules through dedicated clock tree
-- Identified by `_FCLK` suffix in PRCM
 
-### 8.3.2 Module-Level Clock Management
+- Interface clock management is done at the device level.
+- From the standpoint of the PRCM module, an interface clock is identified by an \_ICLK suffix.
 
-The PRCM module differentiates clock-management behavior based on whether a module can:
-- **Initiate transactions** (master/initiator modules) → Master Standby Protocol
-- **Only respond to transactions** (slave/target modules) → Slave Idle Protocol
+Functional clocks have the following characteristics:
 
-#### 8.3.2.1 Master Standby Protocol
+- They supply the functional part of a module or subsystem.
+- A module can have one or more functional clocks. Some functional clocks are mandatory, while others are optional. A module needs its mandatory clock(s) to be operational. The optional clocks are used for specific features and can be shut down without stopping the module activity
+- From the standpoint of the PRCM module, a functional clock is distributed directly to the related modules through a dedicated clock tree. It is identified with an \_FCLK suffix
 
-Used for master modules that can initiate transactions on the device interconnect.
+### **8.1.3.2 Module-Level Clock Management**
 
-**Standby Mode Configuration:**  
-Set via `<Module>_SYSCONFIG.MIDLEMODE` or `<Module>_SYSCONFIG.STANDBYMODE`
+Each module in the device may also have specific clock requirements. Certain module clocks must be active when operating in specific modes, or may be gated otherwise. Globally, the activation and gating of the module clocks are managed by the PRCM module. Hence, the PRCM module must be aware of when to activate and when to gate the module clocks. The PRCM module differentiates the clock-management behavior for device modules based on whether the module can initiate transactions on the device interconnect (called master module or initiators) or cannot initiate transactions and only responds to the transactions initiated by the master (called slave module or targets). Thus, two hardware-based powermanagement protocols are used:
 
-| Mode Value | Mode Name | Description |
-|------------|-----------|-------------|
-| 0x0 | Force-standby | Module unconditionally asserts standby request regardless of internal operations. PRCM may gate clocks immediately. **Risk of data loss** |
-| 0x1 | No-standby | Module never asserts standby request. Clocks remain active. Safe but not power-efficient |
-| 0x2 | Smart-standby | Module asserts standby based on internal activity. Standby signal asserted only when all transactions complete and module idle. PRCM can then gate clocks |
-| 0x3 | Smart-standby wakeup-capable | Same as smart-standby but module can generate master-related wakeup events when in STANDBY state |
+- Master standby protocol: Clock-management protocol between the PRCM and master modules.
+- Slave idle protocol: Clock-management protocol between the PRCM and slave modules.
 
-**Standby Status:**  
-Read from `CM_<Power_domain>_<Module>_CLKCTRL[x].STBYST`
-- 0x0 = Module is functional
-- 0x1 = Module is in standby mode
+# *8.1.3.2.1 Master Standby Protocol*
 
-#### 8.3.2.2 Slave Idle Protocol
+Master standby protocol is used to indicate that a master module must initiate a transaction on the device interconnect and requests specific (functional and interface) clocks for the purpose. The PRCM module ensures that the required clocks are active when the master module requests the PRCM module to enable them. This is called a module wake-up transition and the module is said to be functional after this transition completes. Similarly, when the master module no longer requires the clocks, it informs the PRCM module, which can then gate the clocks to the module. The master module is then said to be in standby mode. Although the protocol is completely hardware-controlled, software must configure the clock-management behavior for the module. This is done by setting the module register bit field <Module>\_SYSCONFIG.MIDLEMODE or <Module>\_SYSCONFIG.STANDBYMODE. The behavior, identified by standby mode values, must be configured.
 
-Allows PRCM module to control the state of a slave module through idle request/acknowledge handshake.
+**Table 8-1. Master Module Standby-Mode Settings**
 
-**Idle Mode Configuration:**  
-Set via `<Module>_SYSCONFIG.SIDLEMODE` or `<Module>_SYSCONFIG.IDLEMODE`
+| Standby Mode Value | Selected Mode | Description                                                                                                                                                                                                                                                                                                                        |
+|--------------------|---------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 0x0                | Force-standby | The module unconditionally asserts the<br>standby request to the PRCM module,<br>regardless of its internal operations. The<br>PRCM module may gate the functional<br>and interface clocks to the module. This<br>mode must be used carefully because it<br>does not prevent the loss of data at the<br>time the clocks are gated. |
+| 0x1                | No-standby    | The module never asserts the standby<br>request to the PRCM module. This mode<br>is safe from a module point of view<br>because it ensures that the clocks remain<br>active. However, it is not efficient from a<br>power-saving perspective because it<br>never allows the output clocks of the<br>PRCM module to be gated        |
 
-| Mode Value | Mode Name | Description |
-|------------|-----------|-------------|
-| 0x0 | Force-idle | Module unconditionally acknowledges idle request regardless of internal operations. **Risk of data loss** |
-| 0x1 | No-idle | Module never acknowledges idle request. Clocks remain active. Safe but not power-efficient |
-| 0x2 | Smart-idle | Module acknowledges idle based on internal activity. Only acknowledges when internal operations complete |
-| 0x3 | Smart-idle wakeup-capable | Same as smart-idle but module can generate slave-related wakeup events (interrupt or DMA request) |
 
-**Idle Status:**  
-Read from `CM_<Power_domain>_<Module>_CLKCTRL[x].IDLEST`
-- 0x0 = Functional (fully functional, clocks running)
-- 0x1 = In transition (between functional and idle)
-- 0x2 = Idle (module idle, clocks may be gated)
-- 0x3 = Disabled (module disabled by software)
+**Table 8-1. Master Module Standby-Mode Settings (continued)**
 
-#### 8.3.2.3 Module Mode Control
+| Standby Mode Value | Selected Mode                    | Description                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+|--------------------|----------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 0x2                | Smart-standby                    | The module asserts the standby request<br>based on its internal activity status. The<br>standby signal is asserted only when all<br>ongoing transactions are complete and<br>the module is idled. The PRCM module<br>can then gate the clocks to the module.                                                                                                                                                                                 |
+| 0x3                | Smart-standbywakeup-capable mode | The module asserts the standby request<br>based on its internal activity status. The<br>standby signal is asserted only when all<br>ongoing transactions are complete and<br>the module is idle. The PRCM module can<br>then gate the clocks to the module. The<br>module may generate (master-related)<br>wake-up events when in STANDBY state.<br>The mode is relevant only if the<br>appropriate module mwakeup output is<br>implemented. |
 
-Software controls module operational state via `CM_<Power_domain>_<Module>_CLKCTRL[x].MODULEMODE`
+The standby status of a master module is indicated by the CM\_<Power\_domain>\_<Module>\_CLKCTRL[x]. STBYST bit in the PRCM module.
 
-| Mode Value | Mode Name | Description |
-|------------|-----------|-------------|
-| 0x0 | Disabled | Module is disabled. PRCM does not manage module clock and power states. Both interface and functional clocks gated |
-| 0x1 | Reserved | - |
-| 0x2 | Enabled | PRCM manages interface and functional clocks. Functional clock remains active unconditionally. Interface clock automatically asserted/deasserted based on clock-domain transitions |
-| 0x3 | Reserved | - |
+**Table 8-2. Master Module Standby Status**
 
-**Optional Clock Control:**  
-PRCM offers direct software control of optional clocks through `OptFclken` bit in programming registers.
+| STBYST Bit Value | Description                   |
+|------------------|-------------------------------|
+| 0x0              | The module is functional.     |
+| 0x1              | The module is in standby mode |
 
-#### 8.3.2.4 Clock Enabling Conditions
+### *8.1.3.2.2 Slave Idle Protocol*
 
-| Clock Type | Enabling Condition |
-|------------|-------------------|
-| Clock with STANDBY protocol | Clock Domain ready **AND** (MStandby de-asserted **OR** Mwakeup asserted) |
-| Clock with IDLE protocol (interface clock) | Clock Domain ready **AND** (Idle status = FUNCT **OR** Idle status = TRANS **OR** SWakeup asserted) |
-| Clock with IDLE protocol (functional clock) | Clock Domain ready **AND** (Idle status = FUNCT **OR** Idle status = IDLE **OR** Idle status = TRANS **OR** SWakeup asserted) |
-| Optional clock | Clock domain ready **AND** OptFclken = Enabled ('1') |
+This hardware protocol allows the PRCM module to control the state of a slave module. The PRCM module informs the slave module, through assertion of an idle request, when its clocks (interface and functional) can be gated. The slave can then acknowledge the request from the PRCM module and the PRCM module is then allowed to gate the clocks to the module. A slave module is said to be in IDLE state when its clocks are gated by the PRCM module. Similarly, an idled slave module may need to be wakened because of a service request from a master module or as a result of an event (called a wake-up event; for example, interrupt or DMA request) received by the slave module. In this situation the PRCM module enables the clocks to the module and then deasserts the idle request to signal the module to wake up. Although the protocol is completely hardware-controlled, software must configure the clockmanagement behavior for the slave module. This is done by setting the module register bit field <Module>\_SYSCONFIG. SIDLEMODE or <Module>\_SYSCONFIG. IDLEMODE. The behavior, listed in the Idle Mode Value column, must be configured by software.
 
-### 8.3.3 Clock Domain
+**Table 8-3. Module Idle Mode Settings**
 
-A **clock domain** is a group of modules fed by clock signals controlled by the same clock manager in PRCM.
+| Idle Mode Value | Selected Mode | Description                                                                                                                                                                                                                                                                                                                                                                                  |
+|-----------------|---------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 0x0             | Force-idle    | The module unconditionally acknowledges<br>the idle request from the PRCM module,<br>regardless of its internal operations. This<br>mode must be used carefully because it<br>does not prevent the loss of data at the<br>time the clock is switched off.                                                                                                                                    |
+| 0x1             | No-idle       | The module never acknowledges any idle<br>request from the PRCM module. This<br>mode is safe from a module point of view<br>because it ensures that the clocks remain<br>active. However, it is not efficient from a<br>power-saving perspective because it does<br>not allow the PRCM module output clock<br>to be shut off, and thus the power domain<br>to be set to a lower power state. |
 
-**Purpose:**  
-Allows control of dynamic power consumption by gating clocks in a domain, cutting clocks to all modules in that domain.
 
-#### 8.3.3.1 Clock Domain States
+**Table 8-3. Module Idle Mode Settings (continued)**
 
-Clock domains transition between three states:
+| Idle Mode Value | Selected Mode                  | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+|-----------------|--------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 0x2             | Smart-idle                     | The module acknowledges the idle<br>request basing its decision on its internal<br>activity. Namely, the acknowledge signal<br>is asserted only when all pending<br>transactions, interrupts, or direct memory<br>access (DMA) requests are processed.<br>This is the best approach to efficient<br>system power management.                                                                                                                                                                                            |
+| 0x3             | Smart-idle wakeup-capable mode | The module acknowledges the idle<br>request basing its decision on its internal<br>wakeup-capable mode activity. Namely,<br>the acknowledge signal is asserted only<br>when all pending transactions, interrupts,<br>or DMA requests are processed. This is<br>the best approach to efficient system<br>power management. The module may<br>generate (IRQ- or DMA-request-related)<br>wake-up events when in IDLE state. The<br>mode is relevant only if the appropriate<br>module swakeup output(s) is<br>implemented. |
 
-```
-        Sleep condition
-ACTIVE ─────────────────→ IDLE_TRANSITION
-  ↑                              ↓
-  │      All modules IDLE/STANDBY
-  │      All domain clocks gated
-  │                              ↓
-  │                          INACTIVE
-  │                              │
-  └──────────────────────────────┘
-   Domain sleep conditions not satisfied
-   OR wake-up request received
-```
+The idle status of a slave module is indicated by the CM\_<Powerdomain>\_<Module>\_CLKCTRL[x] IDLEST bit field in the PRCM module.
 
-**State Descriptions:**
+**Table 8-4. Idle States for a Slave Module**
 
-| State | Description |
-|-------|-------------|
-| **ACTIVE** | • Every nondisabled slave module put out of IDLE state<br>• All interface clocks to nondisabled slave modules provided<br>• All functional and interface clocks to active master modules provided<br>• All enabled optional clocks provided |
-| **IDLE_TRANSITION** | • Transitory state<br>• Every master module in STANDBY<br>• Idle request asserted to all slave modules<br>• Functional clocks to enabled slave modules remain active<br>• All enabled optional clocks provided |
-| **INACTIVE** | • All clocks within clock domain gated<br>• Every slave module in IDLE state and disabled<br>• Every optional functional clock gated |
+| IDLEST Bit VALUE | Idle Status    | Description                                                                                                       |
+|------------------|----------------|-------------------------------------------------------------------------------------------------------------------|
+| 0x0              | Functional     | The module is fully functional.The<br>interface and functional clocks are active.                                 |
+| 0x1              | In transition  | The module is performing a wake-up or a<br>sleep transition.                                                      |
+| 0x2              | Interface idle | The module interface clock is idled. The<br>module may remain functional if using a<br>separate functional clock. |
+| 0x3              | Full idle      | The module is fully idle. The interface and<br>functional clocks are gated in the module.                         |
 
-#### 8.3.3.2 Clock Transition Control
+For the idle protocol management on the PRCM module side, the behavior of the PRCM module is configured in the CM\_<Power domain>\_<module>\_CLKCTRL[x] MODULEMODE bit field. Based on the configured behavior, the PRCM module asserts the idle request to the module unconditionally (that is, immediately when the software requests).
 
-Controlled via `CM_<Clock_domain>_CLKSTCTRL[x].CLKTRCTRL`
+**Table 8-5. Slave Module Mode Settings in PRCM**
 
-| Value | Mode | Description |
-|-------|------|-------------|
-| 0x0 | NO_SLEEP | Sleep transition cannot be initiated. Wakeup transition may occur |
-| 0x1 | SW_SLEEP | Software-forced sleep transition. Transition initiated when associated hardware conditions satisfied |
-| 0x2 | SW_WKUP | Software-forced clock domain wake-up transition initiated |
-| 0x3 | Reserved | - |
+| MODULEMODE Bit VALUE | Selected Mode | Description                                                                                                                                                                                                                                                                                                  |
+|----------------------|---------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 0x0                  | Disabled      | The PRCM module unconditionally asserts<br>the module idle request. This request<br>applies to the gating of the functional and<br>interface clocks to the module. If<br>acknowledged by the module, the PRCM<br>module can gate all clocks to the module<br>(that is, the module is completely<br>disabled) |
+| 0x1                  | Reserved      | NA                                                                                                                                                                                                                                                                                                           |
 
-#### 8.3.3.3 Clock Domain Status
 
-**Functional Clock Activity:**  
-Read from `CM_<Clock_domain>_CLKSTCTRL[x].CLKACTIVITY_<FCLK/Clock_name_FCLK>`
+**Table 8-5. Slave Module Mode Settings in PRCM (continued)**
 
-| Value | Status | Description |
-|-------|--------|-------------|
-| 0x0 | Gated | Functional clock of clock domain is inactive |
-| 0x1 | Active | Functional clock of clock domain is running |
+| MODULEMODE Bit VALUE | Selected Mode | Description                                                                                                                                                                                                                                                                                                                                                                                                        |
+|----------------------|---------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 0x2                  | Enabled       | This mode applies to a module when the<br>PRCM module manages its interface and<br>functional clocks. The functional clock to<br>the module remains active unconditionally,<br>while the PRCM module automatically<br>asserts/deasserts the module idle request<br>based on the clock-domain transitions. If<br>acknowledged by the module, the PRCM<br>module can gate only the interface clock<br>to the module. |
+| 0x3                  | Reserved      | NA                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
----
+In addition to the IDLE and STANDBY protocol, PRCM offers also the possibility to manage optional clocks, through a direct SW control: "OptFclken" bit from programming register.
 
-## 8.4 Power Management
+**Table 8-6. Module Clock Enabling Condition**
 
-The PRCM module manages switching on/off of power supply to device modules. Independent power control allows turning on/off specific sections without affecting others.
+| Clock Enabling                                              |     |                       |                         |                    |
+|-------------------------------------------------------------|-----|-----------------------|-------------------------|--------------------|
+|                                                             | AND | Clock Domain is ready |                         |                    |
+| Clock associated with<br>STANDBY protocol                   |     |                       | MStandby is de-asserted |                    |
+|                                                             |     | OR                    | Mwakeup is asserted     |                    |
+|                                                             |     |                       | Clock Domain is ready   |                    |
+| Clock associated with IDLE                                  | AND |                       | Idle status = FUNCT     |                    |
+| protocol, as interface clock                                |     | OR                    | Idle status = TRANS     |                    |
+|                                                             |     |                       | SWakeup is asserted     |                    |
+|                                                             | AND |                       | Clock Domain is ready   |                    |
+|                                                             |     |                       | Idle status = FUNCT     |                    |
+| Clock associated with IDLE<br>protocol, as functional clock |     |                       |                         | Idle status = IDLE |
+|                                                             |     | OR                    | Idle status = TRANS     |                    |
+|                                                             |     |                       | SWakeup is asserted     |                    |
+|                                                             | AND |                       | Clock domain is ready   |                    |
+| Optional clock                                              |     |                       | OptFclken=Enabled ('1') |                    |
 
-### 8.4.1 Power Domain
+### **8.1.3.3 Clock Domain**
 
-A **power domain** is a section (group of modules) with independent and dedicated power manager. Can be turned on/off without affecting other device parts.
+A clock domain is a group of modules fed by clock signals controlled by the same clock manager in the PRCM module By gating the clocks in a clock domain, the clocks to all the modules belonging to that clock domain can be cut to lower their active power consumption (that is, the device is on and the clocks to the modules are dynamically switched to ACTIVE or INACTIVE (GATED) states). Thus, a clock domain allows control of the dynamic power consumption of the device. The device is partitioned into multiple clock domains, and each clock domain is controlled by an associated clock manager within the PRCM module. This allows the PRCM module to individually activate and gate each clock domain of the device
 
-Each power domain can be split into:
 
-#### 8.4.1.1 Memory Area States
+CLK1 Module 1 Module 2 FCLK2 ICLK1 CM\_a PRCM CM\_b prcm-002
 
-| State | Description |
-|-------|-------------|
-| ON | Memory array powered and fully functional |
-| RETENTION | Memory array powered at reduced voltage, contents preserved |
-| OFF | Memory array powered down, contents lost |
 
-#### 8.4.1.2 Logic Area States
+Figure above is an example of two clock managers: CM\_a and CM\_b. Each clock manager manages a clock domain. The clock domain of CM\_b is composed of two clocks: a functional clock (FCLK2) and an interface clock (ICLK1), while the clock domain of CM\_a consists of a clock (CLK1) that is used by the module as a functional and interface clock. The clocks to Module 2 can be gated independently of the clock to Module 1, thus ensuring power savings when Module 2 is not in use. The PRCM module lets software check the status of the clock domain functional clocks. The CM\_<Clock domain>\_CLKSTCTRL[x] CLKACTIVITY\_<FCLK/Clock name\_FCLK> bit in the PRCM module identifies the state of the functional clock(s) within the clock domain. Table shows the possible states of the functional clock.
 
-| State | Description |
-|-------|-------------|
-| ON | Logic fully powered |
-| OFF | Logic power switches off. All logic (DFF) lost |
+**Table 8-7. Clock Domain Functional Clock States**
 
-### 8.4.2 Power Domain Management
+| CLKACTIVITY BIT Value | Status | Description                                             |
+|-----------------------|--------|---------------------------------------------------------|
+| 0x0                   | Gated  | The functional clock of the clock domain is<br>inactive |
+| 0x1                   | Active | The functional clock of the clock domain is<br>running  |
 
-The power manager ensures all hardware conditions satisfied before initiating power domain transition.
+#### *8.1.3.3.1 Clock Domain-Level Clock Management*
 
-**Control and Status Registers:**
+The domain clock manager can automatically (that is, based on hardware conditions) and jointly manage the interface clocks within the clock domain. The functional clocks within the clock domain are managed through software settings. A clock domain can switch between three possible states: ACTIVE, IDLE\_TRANSITION, and INACTIVE. [Figure](#page-6-0) 8-3 shows the sleep and wake-up transitions of the clock domain between ACTIVE and INACTIVE states.
 
-| Register/Bit Field | Type | Description |
-|-------------------|------|-------------|
-| `PM_<Power_domain>_PWRSTCTRL[1:0].POWERSTATE` | Control | Selects target power state: OFF, ON, or RETENTION |
-| `PM_<Power_domain>_PWRSTST[1:0].POWERSTATEST` | Status | Identifies current state of power domain |
-| `PM_<Power_domain>_PWRSTST[2].LOGICSTATEST` | Status | Identifies current state of logic area: OFF or ON |
-| `PM_<Power_domain>_PWRSTST[5:4].MEMSTATEST` | Status | Identifies current state of memory area: OFF, ON, or RETENTION |
 
-#### 8.4.2.1 Power-Management Techniques
+# **Table 8-8. Clock Domain States**
 
-##### Adaptive Voltage Scaling (AVS)
+| State           | Description                                                                                                                                                                                                                                                                                                   |
+|-----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+|                 | Every nondisabled slave module (that is, those whose<br>MODULEMODE value is not set to disabled) is put out of IDLE<br>state.                                                                                                                                                                                 |
+| ACTIVE          | All interface clocks to the nondisabled slave modules in the<br>clock domain are provided. All functional and interface clocks to<br>the active master modules (that is, not in STANDBY) in the clock<br>domain are provided. All enabled optional clocks to the modules<br>in the clock domain are provided. |
+|                 | This is a transitory state.                                                                                                                                                                                                                                                                                   |
+|                 | Every master module in the clock domain is in STANDBY state.                                                                                                                                                                                                                                                  |
+| IDLE_TRANSITION | Every idle request to all the slave modules in the clock domain is<br>asserted. The functional clocks to the slave module in enabled<br>state (that is, those whose MODULEMODE values are set to<br>enabled) remain active.                                                                                   |
+|                 | All enabled optional clocks to the modules in the clock domain<br>are provided.                                                                                                                                                                                                                               |
+|                 | All clocks within the clock domain are gated.                                                                                                                                                                                                                                                                 |
+|                 | Every slave module in the clock is in IDLE state and set to<br>disabled.                                                                                                                                                                                                                                      |
+| INACTIVE        | Every slave module in the clock domain (that is, those whose<br>MODULEMODE is set to disabled) is in IDLE state and set to<br>disabled.                                                                                                                                                                       |
+|                 | Every optional functional clock in the clock domain is gated                                                                                                                                                                                                                                                  |
 
-AVS is based on Smart Reflex technology for automatic control of operating voltages to reduce active power consumption.
+Each clock domain transition behavior is managed by an associated register bit field in the CM\_<Clock domain>\_CLKSTCTRL[x] CLKTRCTRL PRCM module
 
-**Operation:**
-- Power-supply voltage adapted to silicon performance
-- Can be static (based on predefined performance points) or dynamic (based on real-time temperature performance)
-- Comparison of predefined performance points to real-time on-chip measured performance determines voltage adjustment
-- Achieves optimal performance/power trade-off across technology process spectrum and temperature variation
+**Table 8-9. Clock Transition Mode Settings**
 
-### 8.4.3 AM335x Power Domains
+| CLKTRCTRL Bit Value | Selected Mode | Description                                                                                                                 |
+|---------------------|---------------|-----------------------------------------------------------------------------------------------------------------------------|
+| 0x0                 | NO_SLEEP      | Sleep transition cannot be initiated.<br>Wakeup transition may however occur.                                               |
+| 0x1                 | SW_SLEEP      | A software-forced sleep transition. The<br>transition is initiated when the associated<br>hardware conditions are satisfied |
+| 0x2                 | SW_WKUP       | A software-forced clock domain wake-up<br>transition is initiated                                                           |
+| 0x3                 | Reserved      | NA                                                                                                                          |
 
-The device supports four functional power domains:
+### *8.1.4 Power Management*
 
-1. **PD_WKUP** - Wakeup domain (always ON)
-2. **PD_MPU** - MPU subsystem domain
-3. **PD_PER** - Peripheral domain
-4. **PD_RTC** - RTC domain
-5. **PD_GFX** - Graphics domain (optional)
+The PRCM module manages the switching on and off of the power supply to the device modules. To minimize device power consumption, the power to the modules can be switched off when they are not in use. Independent power control of sections of the device allows the PRCM module to turn on and off specific sections of the device without affecting the others.
 
----
+# **8.1.4.1 Power Domain**
 
-## 8.5 Power Modes
+A power domain is a section (that is, a group of modules) of the device with an independent and dedicated power manager (see Figure). A power domain can be turned on and off without affecting the other parts of the device.
 
-AM335x supports five power modes, ordered from highest power consumption/lowest wakeup latency to lowest power consumption/highest wakeup latency.
 
-### 8.5.1 Active Mode
-
-**Application State:** All features operational
-
-**Power, Clock, and Voltage Configuration:**
-- **Power supplies:** All ON
-  - VDD_MPU = 1.1V (nominal)
-  - VDD_CORE = 1.1V (nominal)
-- **Clocks:**
-  - Main Oscillator (OSC0) = ON
-  - All DPLLs locked
-- **Power domains:**
-  - PD_PER = ON
-  - PD_MPU = ON
-  - PD_GFX = ON or OFF (depending on use case)
-  - PD_WKUP = ON
-- **DDR:** Active
+Vdd Varray Memory array power switch Memory Logic Memory logic Power domain Memory logic power switch Logic power switch PRCM PM Flip-flop logic Logic power switch Memory array Memory bank Memory array Flip-flop logic
 
-**Use Case:** Normal full-performance operation
 
-### 8.5.2 Standby Mode
-
-**Application State:**  
-DDR memory in self-refresh, contents preserved. Wakeup from any GPIO. Cortex-A8 context/register contents lost - must be saved before entering standby. On exit, context restored from DDR. Boot ROM executes and branches to system resume.
-
-**Power, Clock, and Voltage Configuration:**
-- **Power supplies:** All ON
-  - VDD_MPU = 0.95V (nominal)
-  - VDD_CORE = 0.95V (nominal)
-- **Clocks:**
-  - Main Oscillator (OSC0) = ON
-  - All DPLLs in bypass
-- **Power domains:**
-  - PD_PER = ON
-  - PD_MPU = OFF
-  - PD_GFX = OFF
-  - PD_WKUP = ON
-- **DDR:** In self-refresh
-
-**Key Characteristics:**
-- All modules clock gated except GPIOs
-- PLLs in bypass mode
-- Voltage levels reduced to OPP50
-- MPU context lost (save to OCMC RAM or DDR)
-- Internal SRAM contents lost (PD_MPU OFF)
-- Wakeup via GPIO or configured peripheral interrupts
-
-**Power:** Lower than Active  
-**Latency:** Low - fast resume
-
-### 8.5.3 DeepSleep1 Mode
-
-**Application State:**  
-On-chip peripheral registers preserved. Wakeup from configured wakeup sources. Lowest sleep mode required for certain USB wakeup scenarios. On exit, boot ROM executes, Cortex-M3 performs peripheral context restore and system resume.
-
-**Power, Clock, and Voltage Configuration:**
-- **Power supplies:** All ON
-  - VDD_MPU = 0.95V (nominal)
-  - VDD_CORE = 0.95V (nominal)
-- **Clocks:**
-  - Main Oscillator (OSC0) = **OFF**
-  - All DPLLs in bypass
-- **Power domains:**
-  - PD_PER = ON
-  - PD_MPU = OFF
-  - PD_GFX = OFF
-  - PD_WKUP = ON
-- **DDR:** In self-refresh
-
-**Key Difference from Standby:**
-- Main oscillator disabled
-- Oscillator re-enabled by wakeup events via oscillator control circuit
-
-**Power:** Lower than Standby  
-**Latency:** Higher than Standby (oscillator restart)
+prcm-008
 
-### 8.5.4 DeepSleep0 Mode
+To minimize device power consumption, the modules are grouped into power domains. A power domain can be split into a logic area and a memory area.
 
-**Application State:**  
-All on-chip peripheral registers lost. DDR memory in self-refresh, contents preserved. Wakeup from configured wakeup sources. On exit, boot ROM executes, checks resume state, and redirects to DDR. Cortex-M3 performs peripheral context restore followed by system resume.
+**Table 8-10. States of a Memory Area in a Power Domain**
 
-**Power, Clock, and Voltage Configuration:**
-- **Power supplies:** All ON
-  - VDD_MPU = 0.95V (nominal)
-  - VDD_CORE = 0.95V (nominal)
-- **Clocks:**
-  - Main Oscillator (OSC0) = OFF
-  - All DPLLs in bypass
-- **Power domains:**
-  - PD_PER = **OFF**
-  - PD_MPU = OFF
-  - PD_GFX = OFF
-  - PD_WKUP = ON
-- **DDR:** In self-refresh
+| State | Description                                      |
+|-------|--------------------------------------------------|
+| ON    | The memory array is powered and fully functional |
+| OFF   | The memory array is powered down                 |
 
-**Key Characteristics:**
-- All on-chip power domains shut off (except PD_WKUP and PD_RTC)
-- VDD_CORE power to DPLLs turned OFF via dpll_pwr_sw_ctrl (PG 2.x only)
-- VDDS_SRAM_CORE_BG in retention using SMA2.vsldo_core_auto_ramp_en (PG 2.x only)
-- Internal SRAM contents lost
-- Peripheral and MPU context must be saved to DDR before sleep
-- OCMC RAM powered to preserve internal information
-- Boot ROM checks DeepSleep0 resume state on wakeup
+**Table 8-11. States of a Logic Area in a Power Domain**
 
-**Use Case:** Very low power during inactivity while maintaining DDR contents. Lowest power mode with DDR retention - avoids full cold boot.
+| State | Description                                               |
+|-------|-----------------------------------------------------------|
+| ON    | Logic is fully powered                                    |
+| OFF   | Logic power switches are off. All the logic (DFF) is lost |
 
-**Power:** Very low  
-**Latency:** High (context restore from DDR)
 
-### 8.5.5 RTC-Only Mode
+### **8.1.4.2 Power Domain Management**
 
-**Application State:**  
-RTC timer remains active, all other device functionality disabled.
+The power manager associated with each power domain is assigned the task of managing the domain power transitions. It ensures that all hardware conditions are satisfied before it can initiate a power domain transition from a source to a target power state
 
-**Power, Clock, and Voltage Configuration:**
-- **Power supplies:**
-  - All OFF except VDDS_RTC
-  - VDD_MPU = 0V
-  - VDD_CORE = 0V
-- **Clocks:**
-  - Main Oscillator (OSC0) = OFF
-- **Power domains:**
-  - All OFF
+**Table 8-12. Power Domain Control and Status Registers**
 
-**Key Characteristics:**
-- Ultra-low power mode
-- Only RTC subsystem operational
-- All context and memories lost
-- Only RTC power supply required
-- RTC battery backup domain includes:
-  - RTCSS (RTC subsystem)
-  - Dedicated 32.768 kHz crystal oscillator
-  - pmic_power_en I/O
-  - ext_wakeup I/O
+| Register/Bit Field                                          | Type    | Description                                                                                                |
+|-------------------------------------------------------------|---------|------------------------------------------------------------------------------------------------------------|
+| PM_ <power domain="">_PWRSTCTRL[1:0]<br/>POWERSTATE</power> | Control | Selects the target power state of the<br>power domain among OFF, ON, or<br>RETENTION.                      |
+| PM_ <power domain="">_PWRSTST[1:0]<br/>POWERSTATEST</power> | Status  | Identifies the current state of the power<br>domain. It can be OFF, ON, or<br>RETENTION.                   |
+| PM_ <power domain="">_PWRSTST[2]<br/>LOGICSTATEST</power>   | Status  | Identifies the current state of the logic<br>area in the power domain. It can be OFF<br>or ON.             |
+| PM_ <power domain="">_PWRSTST[5:4]<br/>MEMSTATEST</power>   | Status  | Identifies the current state of the memory<br>area in the power domain. It can be OFF,<br>ON, or RETENTION |
 
-**Wakeup Sources:**
-- ext_wakeup0 signal only
-- RTC Alarm (ALARM) only
+# *8.1.4.2.1 Power-Management Techniques*
 
-**Wakeup Process:**
-- Device drives pmic_pwr_enable to initiate PMIC power-up sequence
-- Device must go through full cold boot
+The following section describes the state-of-the-art power-management techniques supported by the device.
 
-**Use Case:** Ultra-low power battery-backed operation with RTC functionality only
+### *8.1.4.2.1.1 Adaptive Voltage Scaling*
 
-**Power:** Extremely low  
-**Latency:** Extremely high (full cold boot)
+AVS is a power-management technique based in Smart Reflex that is used for automatic control of the operating voltages of the device to reduce active power consumption. With Smart Reflex, power-supply voltage is adapted to silicon performance, either statically (based on performance points predefined in the manufacturing process of a given device) or dynamically (based on the temperature-induced real-time performance of the device). A comparison of these predefined performance points to the real-time on-chip measured performance determines whether to raise or lower the power-supply voltage. AVS achieves the optimal performance/power trade-off for all devices across the technology process spectrum and across temperature variation. The device voltage is automatically adapted to maintain performance of the device
 
-### 8.5.6 Power Mode Comparison Table
 
-| Power Mode | Power Consumption | Wakeup Latency | Main Oscillator | PD_PER | PD_MPU | DDR State | Context Loss |
-|-----------|-------------------|----------------|-----------------|---------|---------|-----------|--------------|
-| Active | Highest | N/A | ON | ON | ON | Active | None |
-| Standby | High | Low | ON | ON | OFF | Self-refresh | MPU only |
-| DeepSleep1 | Medium | Medium | **OFF** | ON | OFF | Self-refresh | MPU only |
-| DeepSleep0 | Very Low | High | OFF | **OFF** | OFF | Self-refresh | All except DDR |
-| RTC-Only | Extremely Low | Extremely High | OFF | OFF | OFF | **OFF** | All |
+# **8.1.4.3 Power Modes**
 
-### 8.5.7 Internal RTC LDO
+The following is a high-level description of the different power modes of the device. They are listed in order from highest power consumption, lowest wakeup latency (Standby), to lowest power consumption, highest wakeup latency (RTC-only). If your application requires some sort of power management, you must determine which power mode level described below satisfies your requirements. Each level must be evaluated based on power consumed and latency (the time it takes to wakeup to Active mode). Specific values are detailed in the device-specific data sheet. Note that not all modes are supported by software packages supplied by Texas Instruments.
 
-The device contains an internal LDO regulator powering the RTC digital core. Can be disabled in certain configurations to save power.
+**Table 8-13. Typical Power Modes**
 
-**Configuration Scenarios:**
+| Power Modes | Application State                                                                                                                                                                                                                                                                                    | Power Domains, Clocks, and Voltage<br>Supply States                                                                                                                                                                                                                                                    |
+|-------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Active      | All Features                                                                                                                                                                                                                                                                                         | Power supplies:<br>All power supplies are ON.<br>VDD_MPU = 1.1 V (nom)<br>VDD_CORE = 1.1 V (nom)<br>Clocks:<br>Main Oscillator (OSC0) = ON<br>All DPLLs are locked.<br>Power domains:<br>PD_PER = ON<br>PD_MPU = ON<br>PD_GFX = ON or OFF (depending on<br>use case)<br>PD_WKUP = ON<br>DDR is active. |
+| Standby     | DDR memory is in self-refresh and<br>contents are preserved. Wakeup from any<br>GPIO. CortexA8 context/register contents<br>are lost and must be saved before<br>entering standby. On exit, context must be<br>restored from DDR. For wakeup, boot<br>ROM executes and branches to system<br>resume. | Power supplies:<br>All power supplies are ON.<br>VDD_MPU = 0.95 V (nom)<br>VDD_CORE = 0.95 V (nom)<br>Clocks:<br>Main Oscillator (OSC0) = ON<br>All DPLLs are in bypass.<br>Power domains:<br>PD_PER = ON<br>PD_MPU = OFF<br>PD_GFX = OFF<br>PD_WKUP = ON<br>DDR is in self-refresh.                   |
+| Deepsleep1  | On-chip peripheral registers are<br>preserved. Cortex-A8 context/registers are<br>lost, so the application needs to save<br>them to the L3 OCMC RAM or DDR<br>before entering DeepSleep. DDR is in<br>self-refresh. For wakeup, boot ROM<br>executes and branches to system resume.                  | Power supplies:<br>All power supplies are ON.<br>VDD_MPU = 0.95 V (nom)<br>VDD_CORE = 0.95 V (nom)<br>Clocks:<br>Main Oscillator (OSC0) = OFF<br>All DPLLs are in bypass.<br>Power domains:<br>PD_PER = ON<br>PD_MPU = OFF<br>PD_GFX = OFF<br>PD_WKUP = ON<br>DDR is in self-refresh.                  |
 
-#### Scenario 1: RTC Functionality Not Used
 
-**Connections:**
-- RTC_KALDO_ENn → VDDS_RTC
-- CAP_VDD_RTC → VDD_CORE
-- RTC_PWRONRSTn → GND
+# **Table 8-13. Typical Power Modes (continued)**
 
-**Result:** Internal RTC LDO disabled, external VDD_CORE supplies RTC digital core, RTC stays in reset, achieves lower power in all low power modes.
+| Power Modes | Application State                                                                                                                                                                                                                                                                                                                                                  | Power Domains, Clocks, and Voltage<br>Supply States                                                                                                                                                                                                                                    |
+|-------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Deepsleep0  | PD_PER peripheral and Cortex-A8/MPU<br>register information will be lost. On-chip<br>peripheral register (context) information of<br>PD-PER domain needs to be saved by<br>application to SDRAM before entering this<br>mode. DDR is in self-refresh. For wakeup,<br>boot ROM executes and branches to<br>peripheral context restore followed by<br>system resume. | Power supplies:<br>All power supplies are ON.<br>VDD_MPU = 0.95 V (nom)<br>VDD_CORE = 0.95 V (nom)<br>Clocks:<br>Main Oscillator (OSC0) = OFF<br>All DPLLs are in bypass.<br>Power domains:<br>PD_PER = OFF<br>PD_MPU = OFF<br>PD_GFX = OFF<br>PD_WKUP = ON<br>DDR is in self-refresh. |
+| RTC-Only    | RTC timer remains active and all other<br>device functionality is disabled.                                                                                                                                                                                                                                                                                        | Power supplies:<br>All power supplies are OFF except<br>VDDS_RTC.<br>VDD_MPU = 0 V<br>VDD_CORE = 0 V<br>Clocks:<br>Main Oscillator (OSC0) = OFF<br>Power domains:<br>All power domains are OFF.                                                                                        |
 
-#### Scenario 2: RTC Used, RTC-Only Mode Not Required
+### *8.1.4.3.1 Active*
 
-**Connections:**
-- Same as Scenario 1, but RTC_PWRONRSTn → PWRONRSTn (may require level shifting)
+In Active mode, the supply to all voltage rails must be maintained. All power domains come up in ON state and the device is fully functional.
 
-**Result:** Full RTC functionality without internal LDO consuming power.
+# *8.1.4.3.2 Standby*
 
-#### Scenario 3: RTC Used with RTC-Only Mode Required
+The device can be placed in Standby mode to reduce power consumption during low activity levels. This first level of power management allows you to maintain the device context for fast resume times. The main characteristics of this mode which distinguish it from Active mode are:
 
-**Connections:**
-- RTC_KALDO_ENn → GND
-- CAP_VDD_RTC → 1µF decoupling capacitor to GND
-- RTC_PWRONRSTn → 1.8V RTC power-on reset
-- PMIC_POWER_EN → PMIC power input
-- EXT_WAKEUP0 → wakeup source
+- All modules are clock gated except GPIOs
+- PLLs may be placed in bypass mode if downstream clocking does not require full performance
+- Voltage domains VDD\_MPU and VDD\_CORE voltage levels can be reduced to OPP50 levels because the required performance of the entire device is reduced
+- MPU power domain (PD\_MPU) is in OFF state
+- DDR memory is in low power self-refresh mode.
 
-**Result:** Internal LDO required for proper wakeup signaling from RTC domain.
+Further power reduction can be achieved in this mode if the RTC function is not required. See Section [8.1.4.3.6](#page-13-0), *Internal RTC LDO*.
 
----
+The above conditions result in lower power consumption than Active mode but require the user to save the MPU context to OCMC RAM or DDR to resume properly upon wakeup. Contents of the internal SRAM are lost because PD\_MPU is turned OFF. Wakeup in Standby mode is achieved using any GPIO. GPIO wakeup is possible by switching the pad to GPIO mode and configuring the corresponding GPIO bank for generating an interrupt to the MPUSS. Note that pads that do not have a GPIO muxmode (for example, ADC or USB), cannot cause these wakeups. If additional or other wakeup sources are required, the associated peripheral module clock and interconnect clock domain should remain enabled (this may require the associated PLL to remain locked) and the module must be configured appropriately for wakeup by configuring it to generate an interrupt to the MPUSS.
 
-## 8.6 Wakeup Management
 
-### 8.6.1 Wakeup Sources/Events
+### *8.1.4.3.3 DeepSleep1*
 
-The following events wake the device from deep sleep (low power) modes. These are part of the Wakeup Power domain and remain always ON:
+DeepSleep1 mode enables lower power consumption than Standby mode. The main characteristic of this mode which distinguish it from Standby mode is the main oscillator (OSC0) is disabled.
 
-- **GPIO0 bank** - General purpose I/O wakeup
-- **dmtimer1_1ms** - Timer-based wakeup
-- **USB2PHY** - USB resume signaling from suspend (both USB ports supported)
-- **TSC** - Touch screen controller, ADC monitor functions
-- **UART0** - Infrared support
-- **I2C0** - I2C interface
-- **RTC alarm** - Real-time clock alarm
+DeepSleep1 is the lowest sleep mode required for certain USB wakeup modes. See Section [8.1.4.3.7](#page-14-0), *Supported Low Power USB Wakeup Scenarios*, for more information.
 
-**Note:** These wake events apply to all deep sleep modes and standby mode.
+Further power reduction can be achieved in this mode if the RTC function is not required. See Section [8.1.4.3.6](#page-13-0), *Internal RTC LDO*.
 
-### 8.6.2 Main Oscillator Control During Deep Sleep
+Similar to Standby mode, the contents of the internal SRAM are lost because PD\_MPU is turned OFF. In addition, the contents of the SDRAM are preserved by placing the SDRAM in self-refresh. Activity on wakeup peripherals via wake-up events enables the master crystal oscillator using the oscillator control circuit. The wakeup events also interrupt Cortex-M3. See [Section](#page-15-0) 8.1.4.5, *Wakeup Sources/Events*, for details on wakeup sources.
 
-The **DeepSleep oscillator circuit** controls the main oscillator:
+#### *8.1.4.3.4 DeepSleep0*
 
-**Configuration:**
-- Set `DEEPSLEEP_CTRL.DSENABLE = 1` to activate oscillator control circuit for deep sleep
-- Configure `DEEPSLEEP_CTRL.DSCOUNT` for delay period before re-enabling oscillator
+DeepSleep0 mode enables lower power consumption than DeepSleep1. The main characteristics of the mode which distinguish it from other higher power modes are:
 
-**Operation:**
-1. When oscillator control is activated and Wake M3 enters standby:
-   - Oscillator control disables the oscillator
-   - Clock shuts OFF
-2. Any async event from wakeup sources:
-   - Oscillator control re-enables oscillator
-   - After DSCOUNT configured period
+- All on-chip power domains are shut off (except PD\_WKUP and PD\_RTC remain ON) to reduce power leakage
+- VDD\_CORE power (except VDDA analog) to DPLLs is turned OFF using dpll\_pwr\_sw\_ctrl register (PG 2.x only)
+- VDDS\_SRAM\_CORE\_BG is in retention using SMA2.vsldo\_core\_auto\_ramp\_en (PG2.x only)
 
-### 8.6.3 USB Wakeup Scenarios
+DeepSleep0 mode is typically used during periods of inactivity when the user requires very low power while waiting for an event that requires processing or higher performance. This is the lowest power mode which still includes DDR in self-refresh, so wakeup events do not require a full cold boot, which greatly reduces wakeup latencies over RTC-only mode.
 
-#### USB Wakeup Event Types
+Further power reduction can be achieved in this mode if the RTC function is not required. See Section [8.1.4.3.6](#page-13-0), *Internal RTC LDO*.
 
-Two possible wakeup events generated:
+Similar to DeepSleep1 mode, the contents of the internal SRAM are lost because PD\_MPU is turned OFF.
 
-1. **PHY WKUP:** Internal wakeup signal to Cortex-M3 generated by USB PHY based on USB signaling
-2. **VBUS2GPIO:** External wakeup from level change on VBUS voltage (requires external board solution routing VBUS to GPIO with level shifting)
+Before entering DeepSleep0 mode, peripheral and MPU context must be saved in the DDR. Upon wakeup, the boot ROM executes and checks to see if it has resumed from a DeepSleep0 state. If so, it redirects to the DDR to continue the resume process. Because power to PD\_WKUP is ON throughout DeepSleep0, power to key modules such as GPIO0, I2C, and others is maintained to allow wakeup events to exit out of this mode. In addition, power to OCMC RAM is maintained to preserve information internally during DeepSleep0.
 
-#### USB Wakeup Use Cases
+Activity on wakeup peripherals via wakeup events enables the master crystal oscillator using the oscillator control circuit. The wakeup events also interrupt Cortex M3 which controls proper enabling of power domains and clocks in the PRCM. See [Section](#page-15-0) 8.1.4.5, *Wakeup Sources/Events*, for details on wakeup sources during DeepSleep0 and other low power modes mentioned.
 
-**USB Connect Use Cases:**
+#### *8.1.4.3.5 RTC-Only*
 
-| System Sleep State | USB Controller State | USB Mode | Supported | Wakeup Event |
-|-------------------|---------------------|----------|-----------|--------------|
-| DS0 | POWER OFF | Host | No | N/A |
-| DS0 | POWER OFF | Device | Yes | VBUS2GPIO |
-| DS1/Standby | Clock Gated | Host | Yes | PHY WKUP |
-| DS1/Standby | Clock Gated | Device | Yes | VBUS2GPIO |
+RTC-only mode is an ultra-low power mode which allows the user to maintain power and clocks to the real-time clock (RTC) domain while the rest of the device is powered down. All context and memories will be lost, and the only portion of the chip that will be maintained is the RTC. Only the RTC power supply must be ON. All the remaining supplies must be OFF. The RTC battery backup domain consists of the RTC subsystem (RTCSS), a dedicated, on-chip 32.768 Hz crystal oscillator and I/Os associated with the RTCSS: pmic\_power\_en and ext\_wakeup.
 
-**USB Suspend/Resume Use Cases:**
+[Figure](#page-13-1) 8-5 gives a high level view of system which implements the RTC-only mode.
 
-| System Sleep State | USB Controller State | USB Mode | Supported | Wakeup Event |
-|-------------------|---------------------|----------|-----------|--------------|
-| DS0 | POWER OFF | Host | No | N/A |
-| DS0 | POWER OFF | Device | No | N/A |
-| DS1/Standby | Clock Gated | Host | Yes | PHY WKUP |
-| DS1/Standby | Clock Gated | Device | Yes | PHY WKUP |
 
-**USB Disconnect Use Cases:**
+AM335x RTC/ Backup battery domain PMIC pmic\_pwr\_enable Enable/NSleep Wakeup Internal FSM/control SoC-Power-on-reset SoC-Power-on-supplies ext\_wakeup0 RTC-Power-on-reset RTC Power supply Backup supply Pushbutton Main supply
 
-| System Sleep State | USB Controller State | USB Mode | Supported | Wakeup Event |
-|-------------------|---------------------|----------|-----------|--------------|
-| DS0 | POWER OFF | Host | No | N/A |
-| DS0 | POWER OFF | Device | No | N/A |
-| DS1/Standby | Clock Gated | Host | Yes | PHY WKUP |
-| DS1/Standby | Clock Gated | Device | Yes | VBUS2GPIO |
 
-**Note:** DeepSleep1 is the lowest sleep mode required for certain USB wakeup scenarios.
+Wakeup from RTC-only mode can only be achieved using the ext\_wakeup0 signal or RTC Alarm (ALARM). Once a wakeup is triggered using either of these sources, the device drives pmic\_pwr\_enable to initiate a power-up sequence by the PMIC. The device must go through a full cold boot upon wakeup from RTC-only mode.
 
----
+# *8.1.4.3.6 Internal RTC LDO*
 
-## 8.7 Power Management Sequencing with Cortex-M3
+The device contains an internal LDO (low dropout) regulator which powers the RTC digital core. Depending on your application, you may be able to disable this regulator to save power in low power use cases.
 
-### 8.7.1 Overview
+If your application never uses the RTC functionality, connect RTC\_KALDO\_ENn to VDDS\_RTC, CAP\_VDD\_RTC to VDD\_CORE, and RTC\_PWRONRSTn to ground. These connections disable the internal RTC LDO because RTC\_KALDO\_ENn is high, and they use the external VDD\_CORE supply to power the RTC digital core. The RTC LDO must be disabled for internal power sequencing even though the RTC is not used. Grounding the reset signal will ensure the RTC stays in reset. Disabling the internal LDO will allow the application to achieve lower power consumption in all the low power modes.
 
-AM335x contains a dedicated **Cortex-M3 processor** to handle power management transitions. Located in Wake up Power Domain (PD_WKUP).
+If your application uses the RTC functionality and never needs RTC-only mode, the hardware scenario is similar to the previous description, but the RTC reset signal can be connected to the device PWRONRSTn. Note that PWRONRSTn and RTC\_PWRONRSTn may be at different voltage levels, so PWRONRSTn may require level shifting before connecting to RTC\_PWRONRSTn. This connection allows full functionality of the RTC subsystem without the internal RTC LDO consuming power.
 
-**Architecture:**
-- **Cortex-A8 MPU:** Implements power modes, executes application
-- **Cortex-M3:** Handles low-level power management control
-- **Inter-Processor Communication (IPC):** Registers in Control Module for communication
+If your application uses the RTC functionality and requires RTC-only mode, the internal LDO is required to enable proper wakeup signaling from the RTC domain. The proper wakeup signaling requires the following connections:
 
-**General Principle:** Cortex-A8 and Cortex-M3 are not expected to be active simultaneously. Cortex-M3 along with PRCM is the power manager primarily for PD_MPU and PD_PER. Other power domains (e.g., PD_GFX) may be handled directly by Cortex-A8 MPU software.
+- RTC\_KALDO\_ENn is grounded
+- CAP\_VDD\_RTC is connected to 1uF decoupling capacitor to ground
+- RTC\_PWRONRSTn is connected to 1.8V RTC power on reset
+- PMIC\_POWER\_EN is connected to power input of PMIC
+- EXT\_WAKEUP0 is connected to a wakeup source
 
-### 8.7.2 Power Management Sequence
+See the device datasheet for more information on these signals.
 
-**Basic Flow:**
 
-1. During Active power mode: Cortex-A8 MPU executes WFI instruction to enter IDLE mode
-2. Cortex-M3 gets interrupt and becomes active
-3. Cortex-M3 powers down MPU power domain (if required)
-4. Cortex-M3 registers interrupt for wakeup peripheral
-5. Cortex-M3 executes WFI and goes into idle state
-6. Wakeup event triggers interrupt to Cortex-M3 system
-7. Cortex-M3 wakes up Cortex-A8 MPU
+### *8.1.4.3.7 Supported Low Power USB Wakeup Scenarios*
 
-### 8.7.3 IPC Mechanism
+[Table](#page-14-1) 8-14 summarizes different USB wakeup use cases which are supported in each system sleep state (DeepSleep0, DeepSleep1, or Standby). Three use case scenarios exist:
 
-**IPC Register Mapping:**
+- USB Connect: Wakeup is cause by physically inserting the USB cable.
+- USB Disconnect: Wakeup is caused by physically removing the USB cable.
+- USB Suspend/Resume: Wakeup is caused by a USB suspend or resume command. For example, a USB mouse click can cause a USB resume command.
 
-| Register | Bits | Field | Direction | Purpose |
-|----------|------|-------|-----------|---------|
-| IPC_MSG_REG0 | [15:0] | CMD_STAT | MPU→CM3 | Command status |
-| | [31:16] | CMD_ID | MPU→CM3 | Command ID |
-| IPC_MSG_REG1 | [31:0] | CMD param1 | MPU→CM3 | Command parameter 1 |
-| IPC_MSG_REG2 | [31:0] | CMD param2 | MPU→CM3 | Command parameter 2 |
-| IPC_MSG_REG3 | - | - | CM3→MPU | Response/status from CM3 |
-| IPC_MSG_REG4-6 | - | Reserved | - | Reserved for future use |
-| IPC_MSG_REG7 | [31:0] | Customer Use | Both | Available for customer use |
+Within each wakeup use case, each row describes whether or not that type of wakeup is supported in each system sleep mode. USB mode (host or device) is also considered.
 
-**CMD_STAT Field Values:**
+There are two possible Wakeup events that are generated:
 
-| Value | Name | Description |
-|-------|------|-------------|
-| 0x0 | PASS | In initialization phase, CM3 successfully initialized. For other tasks, task completed successfully |
-| 0x1 | FAIL | In initialization phase, CM3 could not initialize. For other tasks, error occurred. Check trace vector for details |
-| 0x2 | WAIT4OK | CM3 INTC will catch next WFI of A8 and continue with pre-defined sequence |
+- PHY WKUP: this is an internal wakeup signal to the Cortex M3 that is generated by the USB PHY based off of USB signaling.
+- VBUS2GPIO: this is an external wakeup signal coming from a level change on VBUS voltage. This event requires an external board solution which routes VBUS to a GPIO on the device. Ensure you level shift the voltage to conform to the I/O requirements. When VBUS transitions from 0V to 5V (or vice versa), the transition on a GPIO will trigger a wakeup.
 
-**CMD_ID Field Values:**
+**No. USB Wakeup Use Case System Sleep State USB Controller State USB Mode Supported USB Wakeup Event** 1 USB Connect DS0 POWER OFF Host No N/A 2 DS0 POWER OFF Device Yes VBUS2GPIO 3 DS1/ Standby Clock Gated Host Yes PHY WKUP 4 DS1/ Standby Clock Gated Device Yes VBUS2GPIO 5 USB Suspend / Resume DS0 POWER OFF Host No N/A 6 DS0 POWER OFF Device No N/A 7 DS1/ Standby Clock Gated Host Yes PHY WKUP 8 DS1/ Standby Clock Gated Device Yes PHY WKUP 9 USB Disconnect DS0 POWER OFF Host No N/A 10 DS0 POWER OFF Device No N/A 11 DS1/ Standby Clock Gated Host Yes PHY WKUP 12 DS1/ Standby Clock Gated Device Yes VBUS2GPIO
 
-| Value | Name | Description |
-|-------|------|-------------|
-| 0x1 | CMD_RTC | 1. Initiates force_sleep on interconnect clocks<br>2. Turns off MPU and PER power domains<br>3. Programs RTC alarm register for deasserting pmic_pwr_enable |
-| 0x2 | CMD_RTC_FAST | Programs RTC alarm register for deasserting pmic_pwr_enable |
-| 0x3 | CMD_DS0 | 1. Initiates force_sleep on interconnect clocks<br>2. Turns off MPU and PER power domains<br>3. Configures system for disabling MOSC when CM3 executes WFI |
-| 0x5 | CMD_DS1 | 1. Initiates force_sleep on interconnect clocks<br>2. Turns off MPU power domain<br>3. Configures system for disabling MOSC when CM3 executes WFI |
+**Table 8-14. USB Wakeup Use Cases Supported in System Sleep States**
 
-### 8.7.4 Sleep Sequencing Guidelines
+#### **8.1.4.4 Main Oscillator Control During Deep Sleep**
 
-**Recommended Sleep Sequence:**
+The Deepsleep oscillator circuit is used to control the main oscillator by disabling it during deep sleep and enabling during active/wakeup. By default during reset, the oscillator is enabled and the oscillator control circuit comes up disabled (in-active).In order to activate the oscillator control circuit for deepsleep, DSENABLE bit of DEEPSLEEP\_CTRL register must set. Once this is set and whenever wake M3 enters standby, the oscillator control will disable the oscillator causing the clock to be shut OFF. Any async event from the wakeup sources will cause the oscillator control to re-enable the oscillator after a period of DSCOUNT configured in DEEPSLEEP\_CTRL register.
 
-1. Application saves context of peripherals to memories supporting retention and DDR (required for DeepSleep0)
-2. MPU OCMC_RAM remains in retention
-3. Unused power domains turned OFF - program clock/power domain PWRSTCTRL, save contexts
-4. Software populates L3_OCMC_RAM for wakeup restoration:
-   - Save EMIF settings
-   - Public/secure restoration pointers
-5. Execute WFI from SRAM
-6. Any peripheral interrupt triggers wake interrupt to Cortex-M3 via Cortex-A8 MPU's WKUP signal
-7. After MPU power domain clock gated, PRCM provides interrupt to Cortex-M3
-8. Cortex-M3 starts execution and performs low-level power sequencing:
-   - Turns off certain power domains
-   - Eventually executes WFI
-9. Hardware oscillator control circuit disables oscillator once Cortex-M3 goes into WFI
 
-### 8.7.5 Wakeup Sequencing Guidelines
+# **8.1.4.5 Wakeup Sources/Events**
 
-**Recommended Wakeup Sequence:**
+Following events will wake up the device from Deep sleep(low power) modes. These are part of the Wakeup Power domain and remain always ON.
 
-1. Configured wakeup event triggers wakeup sequence
-2. Wakeup event switches ON oscillator (if configured OFF during sleep)
-3. Wakeup event triggers interrupt to Cortex-M3
-4. Cortex-M3 executes following on wakeup:
-   - Restores voltages to normal operating voltage
-   - Enables PLL locking
-   - Switches ON power domains and/or enables clocks for PD_PER
-   - Switches ON power domains and/or enables clocks for PD_MPU
-   - Executes WFI
-5. Cortex-A8 MPU starts executing from ROM reset vector
-6. Restores application context (only for DeepSleep0)
+**Note:** For differences in operation based on AM335x silicon revision, see Section 1.2, *Silicon Revision Functional Differences and Enhancements*.
 
-### 8.7.6 Periodic Idling of Cortex-A8 MPU
+- GPIO0 bank
+- dmtimer1\_1ms (timer based wakeup)
+- USB2PHY (USB resume signaling from suspend) Both USB ports supported.
+- TSC (touch screen controller, ADC monitor functions )
+- UART0 (Infra-red support)
+- I2C0
+- RTC alarm
 
-For periodic ON/OFF of Cortex-A8 MPU:
+These wake events apply on any of the deep sleep modes and standby mode.
 
-1. Cortex-A8 MPU executes WFI instruction
-2. Any peripheral interrupt triggers wake interrupt to Cortex-M3 via MPU Subsystem's WKUP signal
-3. Cortex-M3 powers down MPU (PD_MPU)
-4. On receiving interrupt, Cortex-M3 switches ON MPU power domain
-5. Cortex-M3 goes into idle mode using WFI instruction
+### **8.1.4.6 Functional Sequencing for Power Management with Cortex M3**
 
----
+The AM335x device contains a dedicated Cortex M3 processor to handle the power management transitions. It is part of the Wake up Power domain (PD\_WKUP). Implementing the Power modes are part of the MPU and Cortex A8 processors.
 
-### 8.7.7 Reset Management
+The power management sequence kicks off with Cortex A8 MPU executing a WFI instruction with the following steps:
 
-#### 8.7.7.1 Overview
+- 1. During Active power mode, the Cortex A8 MPU executes a WFI instruction to enter IDLE mode.
+- 2. Cortex M3 gets an interrupts and gets active, It powers down the MPU power domain( if required).
+- 3. Registers interrupt for the Wake up peripheral(which is listed in Wake up sources in previous section).
+- 4. Executes WFI and goes into idle state.
+- 5. The wake up event triggers an interrupt to Cortex M3 system and it wakes up the Cortex A8 MPU.
 
-The PRCM manages resets to all power domains inside the device and generates a single reset output signal through the device pin WARMRSTn for external use. The PRCM has no knowledge of or control over resets generated locally within a module (e.g., via OCP configuration register bit `IPName_SYSCONFIG.SoftReset`).
+Generally, A8 and Cortex M3 are not expected to be active at the same time Cortex M3 along with PRCM is the power manager primarily for PD\_MPU and PD\_PER. Other power domains (e.g., PD\_GFX) may be handled directly using Cortex A8 MPU software. [Figure](#page-16-0) 8-6 gives a system level view of the Power management system between Cortex A8 MPU and Cortex M3.
 
-All PRM reset outputs are asynchronously asserted (active-low, except PLL resets). Deassertion is synchronous to CLK_M_OSC.
 
-#### 8.7.7.2 Reset Types
+PD\_GFX 16KB unified RAM 8KB DRAM WKUP System power clock manager Cortex-M3 subsystem MSG1 INTR1 Legend: Interrupt Alternate Interrupt/Event s/w message Alternate s/w message Data flow Cortex-M3 PD\_PER INTR2 MSG3 TXEV RXEV INTR3 PD\_MPU (Cortex-A8) Bus Power Idle Bus Power connect/ disconnect MBX Interconnect IP/Peripherals Power Idle MSG3 Control PRCM
 
-**Cold Reset:** Affects all logic and memories. Causes full boot sequence. SYSBOOT pins are re-latched.
 
-**Warm Reset:** Subset of logic is reset. PLLs and dividers remain intact. Clocks are not affected. SYSBOOT pins are NOT re-latched (retain values from last cold reset). Most debug subsystem logic not affected. Some PRCM/Control Module registers are warm-reset insensitive.
+The Cortex-M3 handles all of the low-level power management control of the AM335x. A firmware binary is provided by Texas Instruments that includes all of the necessary functions to achieve low power modes. Inter-Processor Communication (IPC) registers (ipc\_msg\_reg*x*, located in the Control Module Registers) are available to communicate with the Cortex-M3 so the user can provide certain configuration parameters based on the level of low power that is required. [Figure](#page-17-0) 8-7 provides a mapping of these registers.
 
-**Global vs. Local:**
-- Global reset sources: device-wide effect
-- Local reset sources: regional effect (specific power domain)
 
-Each Reset Manager provides two reset outputs:
-- Cold reset output (from global + local cold reset sources)
-- Warm+cold reset output (from combined global and local cold+warm reset sources)
+IPC\_MSG\_REG1 contains the CMD\_STAT and CMD\_ID parameters as described in [Table](#page-17-1) 8-15 and [Table](#page-17-2) 8-16.
 
-#### 8.7.7.3 Reset Sources
+|  | Table 8-15. CMD_STAT Field |  |
+|--|----------------------------|--|
+|  |                            |  |
 
-| Reset Source | Type | Description |
-|---|---|---|
-| PORz (Power-On Reset) | Cold | External pin. All supplies stable triggers internal reset. nRESETIN_OUT driven after RSTTIME1 + RSTTIME2 delay |
-| nRESETIN_OUT (External Warm) | Warm | Bidirectional. When used as input: external warm reset source. All IOs tri-state immediately on assertion |
-| GLOBAL_COLD_SW_RST | Cold | Software-initiated cold reset via PRM_RSTCTRL.RST_GLOBAL_COLD_SW (self-clearing bit) |
-| GLOBAL_WARM_SW_RST | Warm | Software-initiated warm reset via PRM_RSTCTRL.RST_GLOBAL_WARM_SW (self-clearing bit) |
-| WDT1_RST | Warm | Watchdog Timer 1 timeout |
-| ICEPICK_RST | Cold/Warm | ICEPick emulation module reset |
-| Bad Device Reset | Cold | Asserted when DEVICE_TYPE encodes unsupported device type |
 
-**POR Sequence:**
-1. All supplies stable → PORz asserts
-2. CLK_M_OSC stable
-3. RSTTIME1 delay: nRESETIN_OUT held low (defined by PRM_RSTTIME[9:0])
-4. RSTTIME2 delay: remaining peripherals released (defined by PRM_RSTTIME[14:10])
-5. Host processor reset deasserted → boot begins
+| CMD_STAT | Value | Description                                                                                                                                                                                                     |
+|----------|-------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| PASS     | 0x0   | In the initialization phase, PASS (0x1) denotes that the CM3 was successfully<br>initialized.                                                                                                                   |
+| FAIL     | 0x1   | In the initialization phase, 0x2 denotes CM3 could not properly initialize. When<br>other tasks are to be done, FAIL (0x3) indicates some error in carrying out the<br>task.<br>Check trace vector for details. |
+| WAIT4OK  | 0x2   | CM3 INTC will catch the next WFI of A8 and continue with the pre-defined<br>sequence.                                                                                                                           |
 
-**External Warm Reset Sequence:**
-1. nRESETIN_OUT pin asserted low
-2. All IOs (except test/emulation) go tri-state immediately
-3. Chip clocks NOT affected (PLLs and dividers intact)
-4. nRESETIN_OUT deasserted after 30 cycles
-5. PRCM deasserts reset to host processor and all peripherals without local CPUs
+**Table 8-16. CMD\_ID Field**
 
-**Note:** All IPs with local CPUs have local reset asserted by default at Warm Reset. Deassertion requires host processor to write to respective PRCM registers.
 
----
+| CMD_ID       | Value | Description                                                                                                                                                                    |
+|--------------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| CMD_RTC      | 0x1   | 1.<br>Initiates force_sleep on interconnect clocks.<br>2.<br>Turns off MPU and PER power domains.<br>3.<br>Programs the RTC alarm register for deasserting pmic_pwr_enable.    |
+| CMD_RTC_FAST | 0x2   | Programs the RTC alarm register for deasserting pmic_pwr_enable.                                                                                                               |
+| CMD_DS0      | 0x3   | 1.<br>Initiates force_sleep on interconnect clocks.<br>2.<br>Turns off the MPU and PER power domains.<br>3.<br>Configures the system for disabling MOSC when CM3 executes WFI. |
+| CMD_DS1      | 0x5   | 1.<br>Initiates force_sleep on interconnect clocks.<br>2.<br>Turns off the MPU power domains.<br>3.<br>Configures the system for disabling MOSC when CM3 executes WFI.         |
 
-## 8.8 PRCM Module Overview
 
-The PRCM is structured using architectural concepts providing:
-- Set of modular, re-usable FSM blocks for clock and power management
-- Register set and associated programming model
-- Functional sub-block definitions for clock, power, system clock, and master clock generation
+# *8.1.4.6.1 Periodic Idling of Cortex A8 MPU*
 
-### 8.8.1 Functional Power Domains
+To implement Cortex A8 MPU periodic ON/OFF in the use case, the control flow could be implemented according to the following steps:
 
-**Generic Domains:**
-- **WAKEUP** - Always-on domain for wakeup functionality
-- **MPU** - MPU subsystem (Cortex-A8 processor)
-- **PER** - Peripheral domain
-- **RTC** - Real-time clock domain
+- 1. Cortex A8 MPU executes WFI instruction
+- 2. Any peripheral interrupt in any of the next steps will trigger a wake interrupt to Cortex M3 via MPU Subsystem's WKUP signal (INTR2 shown on the diagram). Cortex M3 powers down the MPU(PD\_MPU)
+- 3. On receiving an interrupt Cortex M3 switches ON the MPU power domain by turning on PD\_MPU
+- 4. Cortex M3 goes into idle mode using WFI instruction
 
-### 8.8.2 PRCM Functional Features
+#### *8.1.4.6.2 Sleep Sequencing*
 
-- Software configurable for direct, automatic, or combination power domain state transition control
+This section gives the system level guidelines for sleep sequencing. The guidelines can serve as an example for implementing the sleep mode sequencing. The user can opt to implement a sequence with certain steps interchanged between the MPU and Cortex M3 processor.
+
+- 1. Application saves context of peripherals to memories supporting retention and DDR this step is only required for Deepsleep0.
+- 2. MPU OCMC\_RAM remains in retention
+- 3. Unused power domains are turned OFF program clock/power domains PWRSTCTRL, save contexts etc
+- 4. Software populates L3\_OCMC\_RAM for wakeup restoration viz Save EMIF settings, public/secure restoration pointers, etc.
+- 5. Execute WFI from SRAM
+- 6. Any peripheral interrupt will trigger a wake interrupt to Cortex M3 via Cortex A8 MPU's WKUP signal (INTR2 shown on the diagram).
+- 7. After MPU power domain is clock gated PRCM will provide an interrupt to Cortex M3 (using INTR1 shown in the block diagram)
+- 8. Cortex M3 starts execution and performs low level power sequencing to turn off certain power domain, and eventually executes WFI.
+- 9. Hardware oscillator control circuit disables the oscillator once Cortex M3 goes into WFI
+
+#### *8.1.4.6.3 Wakeup Sequencing*
+
+This section gives the guidelines for Wakeup sequencing.
+
+- 1. One of the wakeup event triggers (which was configured during the sleep sequencing) will initiate a wakeup sequence
+- 2. The wake up event will switch on the oscillator (if it was configured to go OFF during sleep)
+- 3. The wake up event will also trigger interrupt to Cortex M3
+- 4. On the wakeup event due to interrupt Cortex M3 execute the following
+- Restore the voltages to normal Operating voltage
+- Enable PLL locking
+- Cortex M3 will switch ON the power domains and/or enable clocks for PD\_PER
+- Cortex M3 will switch ON the power domains and/or enable clocks for PD\_MPU
+- Executes WFI
+- 5. Cortex A8 MPU starts executing from ROM reset vector
+- 6. Restore the application context(only for Deep sleep 0)
+
+# *8.1.5 PRCM Module Overview*
+
+The PRCM is structured using the architectural concepts presented in the 5000x Power Management Framework. This framework provides:
+
+
+A set of modular, re-usable FSM blocks to be assembled into the full clock and power management mechanism. A register set and associated programming model. Functional sub-block definitions for clock management, power management, system clock source generation, and master clock generation.
+
+The device supports an enhanced power management scheme based on four functional power domains:
+
+### **Generic Domains**
+
+- WAKEUP
+- MPU
+- PER
+- RTC
+
+The PRCM provides the following functional features:
+
+- Software configurable for direct, automatic, or a combination thereof, functional power domain state transition control
 - Device power-up sequence control
-- Device sleep/wake-up sequence control
+- Device sleep / wake-up sequence control
 - Centralized reset generation and management
 - Centralized clock generation and management
 
-### 8.8.3 PRCM Interface Overview
+The PRCM modules implement these general functional interfaces:
 
-**Key Interfaces:**
+- OCP configuration ports
+- Direct interface to device boundary
+- Power switch control signals
+- Device control signals
+- Clocks control signals
+- Resets signals
+- A set of power management protocol signals for each module to control and monitor standby, idle and wake-up modes (CM and PRM)
+- Emulation signals
 
-1. **OCP Configuration Ports** - OCP/IP2.0 compliant 32-bit target interface
-2. **Power Control Interface** - Controls power domain switches, receives switch status, controls isolation signals
-3. **Device Control Interface** - Device-level feature management:
-   - Device type coding
-   - IOs isolation control
-4. **Clocks Interface** - All clock inputs and outputs
-5. **Resets Interface** - All reset inputs and outputs
-6. **Modules Power Management Control Interface:**
-   - **Initiator modules:** MStandby signal, MWait signal
-   - **Target modules:** SIdleReq signal, SIdleAck signal, FCLKEN signal
+#### **8.1.5.1 Interface Descriptions**
 
----
+This section lists and shortly describes the different interfaces that allow PRCM to communicate with other modules or external devices.
 
-## 8.9 Clock Generation and Management
+# *8.1.5.1.1 OCP Interfaces*
 
-PRCM provides centralized control for generation, distribution, and gating of most clocks in the device.
+The PRCM has 1 target OCP interfaces, compliant with respect to the OCP/IP2 standard. The OCP port, for the PRCM module is used to control power, reset and wake-up Management.
 
-### 8.9.1 Clock Terminology
+# *8.1.5.1.2 OCP Slave Interfaces*
 
-**Two types of clocks:**
+PRCM implements a 32-bit OCP target interface compliant to the OCP/IP2.0 standard.
 
-1. **Interface Clocks:**
-   - Provide clocking for system interconnect modules
-   - Supply functional module's system interconnect interface and registers
-   - In some cases, also used as functional clock
+### *8.1.5.1.3 Power Control Interface*
 
-2. **Functional Clocks:**
-   - Supply functional part of module or subsystem
-   - May require several functional clocks:
-     - One or several main functional clock(s)
-     - One or several optional clock(s)
-   - Main clocks required for module operation
-   - Optional clocks for specific features, can shutdown without stopping module
+The Device does has power domain switches over the device, this interface provides PRCM control over power domain switches and receives responses from the power domains which indicate the switch status. It also controls the isolation signals. The control for power domain switches will be latched in PRCM Status Registers
 
-### 8.9.2 Clock Structure
+# *8.1.5.1.4 Device Control Interface*
 
-**DPLL Types:**
+This interface provides PRM management of several device-level features which are not specific to any single power domain. This PRM interface controls signals to/from the device for global control:
 
-The device supports multiple on-chip DPLLs:
 
-1. **ADPLLS:** Used for Core, Display, ARM Subsystem, and DDR PLLs
-2. **ADPLLLJ:** Used for peripheral functional clocks
+- Device Type coding
+- IOs isolation control
 
-**Reference Clocks:**
+# *8.1.5.1.5 Clocks Interface*
 
-Two reference clocks generated by on-chip oscillators or externally:
-- **Main clock tree** - From main oscillator (CLK_M_OSC)
-- **RTC block** - From 32 kHz crystal oscillator (controlled by RTC IP)
-- **RC oscillator** - On-chip RC oscillator (always on, not configurable)
+This interface gathers all clock inputs and outputs managed by PRCM modules.
 
-**Note:** All PLLs come up in bypass mode at reset. Software must program all PLL settings and wait for PLL lock.
+#### *8.1.5.1.6 Resets Interface*
 
-### 8.9.3 ADPLLS Architecture
+This interface gathers all resets inputs and outputs managed by PRCM module.
 
-High resolution frequency synthesizer PLL with built-in level shifters, allows generation of PLL-locked frequencies up to 2 GHz.
+#### *8.1.5.1.7 Modules Power Management Control Interface*
 
-**ADPLLS PLLs:**
+Modules or subsystems in the device are split over 2 categories:
+
+- Initiator: an initiator is a module able to generate traffic on the device interconnects (typically: processors, MMU, EDMA).
+- Target: a target is a module that cannot generate traffic on the device interconnects, but that can generate interrupts or DMA request to the system (typically: peripherals). PRCM handles a power management handshake protocol with each module or sub-system. This protocol allows performing proper clock and power transition taking into account each module activity or state.
+
+#### *8.1.5.1.8 Initiator Modules Interface*
+
+PRCM module handle all initiator modules power management interfaces: MStandby signal MWait signal
+
+### *8.1.5.1.9 Targets Modules Interface*
+
+PRCM module handle all target modules power management interfaces: SIdleReq signal SIdleAck signal FCLKEN signal
+
+**Note:** USB Support for SWakeUp
+
+### *8.1.6 Clock Generation and Management*
+
+PRCM provides a centralized control for the generation, distribution and gating of most clocks in the device. PRCM gathers external clocks and internally generated clocks for distribution to the other modules in the device. PRCM manages the system clock generation
+
+#### **8.1.6.1 Terminology**
+
+The PRCM produces 2 types of clock:
+
+**Interface clocks:** these clocks primarily provide clocking for the system interconnect modules and the portions of device's functional modules which interface to the system interconnect modules. In most cases, the interface clock supplies the functional module's system interconnect interface and registers. For some modules, interface clock is also used as functional clock. In this document, interface clocks are represented by blue lines.
+
+**Functional clock:** this clock supplies the functional part of a module or a sub-system. In some cases, a module or a subsystem may require several functional clocks: 1 or several main functional clock(s), 1 or several optional clock(s). A module needs its main clock(s) to be operational. Optional clocks are used for specific features and can be shutdown without stopping the module
+
+# **8.1.6.2 Clock Structure**
+
+To generate high-frequency clocks, the device supports multiple on-chip DPLLs controlled directly by the
+
+PRCM module. They are of two types of PLLs, referred to ADPLLS and ADPLLLJ throughout this document.
+
+The ADPLLS module is used for the Core, Display, ARM Subsystem and DDR PLLs
+
+The ADPLLLJ module is used for the peripheral functional clocks
+
+
+The device has two reference clocks which are generated by on-chip oscillators or externally. These are for the main clock tree and RTC block, respectively.
+
+In the case of an external oscillator, a clock can directly be connected to XTALIN pin and the oscillator will be put in bypass mode. The 32-Khz crystal oscillator is controlled and configurable by RTC IP. This device also contains an on-chip RC oscillator. This oscillator is not configurable and is always on.
+
+The main oscillator on the device (see Chapter 26, *Initialization*, for possible frequencies) produces the master high frequency clock CLK\_M\_OSC.
+
+#### **8.1.6.3 ADPLLS**
+
+The ADPLLS is a high resolution frequency synthesizer PLL with built in level shifters which allows the generation of PLL locked frequencies up to 2 GHz. ADPLLS has a predivide feature which allows user to divide, for instance, a 24- or 26-MHz reference clock to 1-MHz and then multiply up to 2-GHz maximum.
+
+All PLLs will come-up in bypass mode at reset. SW needs to program all the PLL settings appropriately and then wait for PLL to be locked. For more details, see the configuration procedure for each PLL.
+
+The following PLLs are:
+
 - MPU PLL
-- Core PLL  
+- Core PLL
 - Display PLL
 - DDR PLL
 
-**Input Clocks:**
-- **CLKINP:** Reference input clock
-- **CLKINPULOW:** Low frequency input clock for bypass mode only
-- **CLKINPHIF:** High frequency input clock for post-divider M3
+CLKINP PFD Multiplier DAC 1/M2 (5 bits) ½ (1 bit) ½ (1 bit) 1/M.f SSC sigmadelta 1/M3 (5 bits) 1/(N2+1) (4 bits) 1/(N+1) 7 bits REFCLK FBCLK CLKINPULOW ULOWCLKEN CLKOUTX2 BYPASS\_INT CLKOUT CLKDCOLDO CLKOUTHIF CLKINPHIFSEL CLKINPHIF
 
-**Output Clocks:**
-- **CLKOUTHIF:** High frequency output clock from post divider M3
-- **CLKOUTX2:** Secondary 2x output
-- **CLKOUT:** Primary output clock
-- **CLKDCOLDO:** Oscillator (DCO) output clock with no bypass
 
-**Internal Clocks:**
-- **REFCLK:** Generated by dividing CLKINP by (N+1). REFCLK = CLKINP/(N+1)
-- **BCLK:** Bus clock for programming registers
+The ADPLLS has three input clocks:
 
-**Lock Frequency:** fDPLL = CLKDCOLDO
+- CLKINP: Reference input clock
+- CLKINPULOW: Low frequency input clock for bypass mode only.
+- CLKINPHIF: High Frequency Input Clock for post-divider M3
 
-#### ADPLLS Output Clock Frequencies
+The ADPLLS has four output clocks:
 
-**In Locked Condition (REGM4XEN='0'):**
+- CLKOUTHIF: High Frequency Output Clock from Post divider M3
+- CLKOUTX2: Secondary 2x Output
+- CLKOUT: Primary output clock
+- CLKDCOLDO: Oscillator (DCO) output clock with no bypass
 
-| Clock | Frequency Formula |
-|-------|------------------|
-| CLKOUT | [M / (N+1)] * CLKINP * [1/M2] |
-| CLKOUTX2 | 2 * [M / (N+1)] * CLKINP * [1/M2] |
-| CLKDCOLDO | 2 * [M / (N+1)] * CLKINP |
-| CLKOUTHIF (CLKINPHIFSEL='1') | CLKINPHIF / M3 |
-| CLKOUTHIF (CLKINPHIFSEL='0') | 2 * [M / (N+1)] * CLKINP * [1/M3] |
 
-**In Locked Condition (REGM4XEN='1'):**
+The DPLL has two internal clocks:
 
-| Clock | Frequency Formula |
-|-------|------------------|
-| CLKOUT | [4M / (N+1)] * CLKINP * [1/M2] |
-| CLKOUTX2 | 2 * [4M / (N+1)] * CLKINP * [1/M2] |
-| CLKDCOLDO | 2 * [4M / (N+1)] * CLKINP |
-| CLKOUTHIF (CLKINPHIFSEL='1') | CLKINPHIF / M3 |
-| CLKOUTHIF (CLKINPHIFSEL='0') | 2 * [4M / (N+1)] * CLKINP * [1/M3] |
+- REFCLK (Internal reference clock): This is generated by dividing the input clock CLKINP by the programmed value N+1. The entire loop of the PLL runs on the REFCLK. Here, REFCLK = CLKINP/(N+1).
+- BCLK: Bus clock which is used for programming the various settings using registers
 
-**Before Lock and During Relock Modes:**
+The ADPLLS lock frequency is defined as follows: fDPLL = CLKDCOLDO
 
-| Clock | Frequency (ULOWCLKEN='0') | Frequency (ULOWCLKEN='1') |
-|-------|-------------------------|-------------------------|
-| CLKOUT | CLKINP / (N2+1) | CLKINPULOW |
-| CLKOUTX2 | CLKINP / (N2+1) | CLKINPULOW |
-| CLKDCOLDO | Low | Low |
-| CLKOUTHIF | CLKINPHIF/M3 (ULOWCLKEN='1') | Low (ULOWCLKEN='0') |
+### *8.1.6.3.1 Clock Functions*
 
-### 8.9.4 ADPLLLJ (Low Jitter DPLL)
+**Table 8-17. Output Clocks in Locked Condition**
 
-Low jitter PLL with 2 GHz maximum output, used for peripheral functional clocks.
+| Pin Name  | Frequency                          | Comments         |  |  |  |  |
+|-----------|------------------------------------|------------------|--|--|--|--|
+|           | REGM4XEN='0'                       |                  |  |  |  |  |
+| CLKOUT    | [M / (N+1)] * CLKINP * [1/M2]      |                  |  |  |  |  |
+| CLKOUTX2  | 2 * [M / (N+1)] * CLKINP * [1/M2]  |                  |  |  |  |  |
+| CLKDCOLDO | 2 * [M / (N+1)] * CLKINP           |                  |  |  |  |  |
+| CLKOUTHIF | CLKINPHIF / M3                     | CLKINPHIFSEL='1' |  |  |  |  |
+|           | 2 * [M / (N+1)] * CLKINP * [1/M3]  | CLKINPHIFSEL='0' |  |  |  |  |
+|           | REGM4XEN='1'                       |                  |  |  |  |  |
+| CLKOUT    | [4M / (N+1)] * CLKINP * [1/M2]     |                  |  |  |  |  |
+| CLKOUTX2  | 2 * [4M / (N+1)] * CLKINP * [1/M2] |                  |  |  |  |  |
+| CLKDCOLDO | 2 * [4M / (N+1)] * CLKINP          |                  |  |  |  |  |
+|           | CLKINPHIF / M3                     | CLKINPHIFSEL='1' |  |  |  |  |
+| CLKOUTHIF | 2 * [4M / (N+1)] * CLKINP * [1/M3] | CLKINPHIFSEL='0' |  |  |  |  |
 
-**Features:**
-- Predivide feature allows dividing reference clock (e.g., 24/26 MHz) to 1 MHz
-- Then multiply up to 2 GHz maximum
-- Similar architecture to ADPLLS but optimized for low jitter
+**Table 8-18. Output Clocks Before Lock and During Relock Modes**
 
-### 8.9.5 Core PLL Typical Frequencies
+| Pin Name  | Frequency       | Comments      |
+|-----------|-----------------|---------------|
+|           | CLKINP / (N2+1) | ULOWCLKEN='0' |
+| CLKOUT    | CLKINPULOW      | ULOWCLKEN='1' |
+|           | CLKINP / (N2+1) | ULOWCLKEN='0' |
+| CLKOUTX2  | CLKINPULOW      | ULOWCLKEN='1' |
+| CLKDCOLDO | Low             |               |
+|           | CLKINPHIF/M3    | ULOWCLKEN='1' |
+| CLKOUTHIF | Low             | ULOWCLKEN='0' |
 
-The Core PLL (ADPLLS with HSDIVIDER) provides infrastructure and peripheral clocks. HSDIVIDER generates M4, M5, M6 clocks.
+**Note:** Since M3 divider is running on the internal LDO domain, in the case when CLKINPHIFSEL='1', CLKOUTHIF could be active only when internal LDO is ON. Hence, whenever LDOPWDN goes low to high to powerdown LDO (happens when TINITZ activated / when entering slow relock bypass mode), output CLKOUTHIF will glitch and stop. To avoid this glitch, it is recommended to gate CLKOUTHIF using control CLKOUTHIFEN before asserting TINITZ / entering any slow relock bypass mode Frequency Range (MHz)
 
-**Core PLL Typical Frequencies (MHz):**
+See the device-specific data manual for details on operating performance points (OPPs) supported by your device.
 
-| Clock | Source | POR/Bypass | OPP100 DIV | OPP100 Freq | OPP50 DIV | OPP50 Freq |
-|---|---|---|---|---|---|---|
-| CLKDCOLDO (PLL lock freq) | ADPLLS | - | - | 2000 | - | 100 |
-| CORE_CLKOUTM4 (L3F_CLK) | HSDIVIDER-M4 | MstrXtal | 10 | 200 | 1 | 100 |
-| CORE_CLKOUTM5 (MHZ_250_CLK) | HSDIVIDER-M5 | MstrXtal | 8 | 250 | 1 | 100 |
-| CORE_CLKOUTM6 | HSDIVIDER-M6 | MstrXtal | 4 | 500 | 1 | 100 |
-| L4_PER / L4_WKUP | CORE_CLKOUTM4/2 | MstrXtal/2 | 2 | 100 | 2 | 50 |
-
-Derived clocks from MHZ_250_CLK (M5): MHZ_125_CLK = /2 (Ethernet Switch Bus), MHZ_50_CLK = /5 (100Mbps RGMII/RMII), MHZ_5_CLK = /50 (10Mbps RGMII).
-
-**Core PLL Configuration Sequence:**
-1. Set CM_CLKMODE_DPLL_CORE.DPLL_EN = 0x4 (MN bypass mode)
-2. Wait for CM_IDLEST_DPLL_CORE.ST_MN_BYPASS = 1
-3. Set CM_CLKSEL_DPLL_CORE.DPLL_MULT and DPLL_DIV to desired values
-4. Set M4/M5/M6 dividers in CM_DIV_M4/M5/M6_DPLL_CORE
-5. Set CM_CLKMODE_DPLL_CORE.DPLL_EN = 0x7 (lock mode)
-6. Wait for CM_IDLEST_DPLL_CORE.ST_DPLL_CLK = 1
-
-Note: M4, M5, M6 dividers can be changed on-the-fly without putting PLL in bypass.
-
-### 8.9.6 Peripheral PLL Typical Frequencies
-
-The Peripheral PLL (ADPLLLJ) is locked at 960 MHz.
-
-**Per PLL Typical Frequencies (MHz):**
-
-| Clock | Source | OPP100 | OPP50 |
-|---|---|---|---|
-| PLL Lock frequency | PLL | 960 | 960 |
-| USB_PHY_CLK (CLKDCOLDO) | PLL | 960 | 960 |
-| PER_CLKOUTM2 | CLKOUT/M2=5 | 192 | 96 |
-| MMC_CLK | PER_CLKOUTM2/2 | 96 | 48 |
-| SPI_CLK, UART_CLK, I2C_CLK | PER_CLKOUTM2/4 | 48 | 48 |
-| PRU_ICSS_UART_CLK | PER_CLKOUTM2/2 gated | 96 | 48 |
-| CLK_32KHZ | 48MHz/~1464.8 | 32.768 kHz | 32.768 kHz |
-
-### 8.9.7 Bus Interface Clock Assignments
-
-| Clock | Modules Served |
-|---|---|
-| L3F_CLK | SGX530, LCDC, MPU Subsystem, CPSW (Ethernet), DAP, PRU-ICSS, EMIF, TPTC, TPCC, OCMC RAM, DEBUGSS, AES, SHA |
-| L3S_CLK | USB, TSC, GPMC, MMCHS2, McASP0, McASP1 |
-| L4_PER_CLK | DCAN0/1, DES, DMTIMER2-7, eCAP/eQEP/ePWM0-2, eFuse, ELM, GPIO1-3, I2C1/2, IEEE1500, LCD, Mailbox0, McASP0/1, MMCHS0/1, PKARNG, SPI0/1, Spinlock, UART1-5 |
-| L4_WKUP_CLK | ADC_TSC, ClockManager, ControlModule, DMTIMER0, DMTIMER1_1MS, GPIO0, I2C0, M3UMEM, M3DMEM, SmartReflex0/1, UART0, WDT0, WDT1 |
-
-### 8.9.8 Spread Spectrum Clocking (SSC)
-
-**Purpose:** Reduce electromagnetic interference (EMI) by spreading clock signal energy across frequency spectrum.
-
-**Principle:**
-- Modulates clock frequency in triangular pattern
-- Spreads energy instead of concentrating at single frequency
-- Reduces power of peaks but increases global noise
-
-**EMI Reduction Estimation:**
-
-Peak_power_reduction (dB) = 10 * log((Deviation * fc) / fm)
-
-Where:
-- Deviation: % of initial clock frequency (Δf / fc)
-- fc: Original clock frequency (MHz)
-- fm: Spreading frequency (MHz)
-
-**Example:** For fc=400 MHz, deviation=1% (Δf=4 MHz), fm=400 kHz → peak power reduction ≈ 10 dB
-
-**SSC Configuration:**
-
-Enabled/disabled via `CM_CLKMODE_DPLL_xxx.DPLL_SSC_EN` where xxx = MPU, DDR, DISP, CORE, or PER.
-
-**Key Parameters:**
-- **Modulation Frequency (fm):** Programmed via MODFREQDEV_MANTISSA and MODFREQDEV_EXPONENT
-  - ModFreqDivider = Fref / (4*fm)
-  - ModFreqDivider = MODFREQDEV_MANTISSA * 2^MODFREQDEV_EXPONENT
-- **Frequency Spread (Δf):** Controlled via DELTAMSTEP_INTEGER and DELTAMSTEP_FRACTION
-- **Downspread Mode:** If DPLL_SSC_DOWNSPREAD=1, frequency spread on lower side is 2x programmed value, upper side is 0
-
-**Restrictions:**
-- M - ΔM ≥ 20
-- M + ΔM ≤ 2045
-- If downspread enabled: M - 2*ΔM ≥ 20 and M ≤ 2045
-- Modulation frequency must be within DPLL loop bandwidth (fm < Fref/70)
-
----
-
-## 8.10 Summary of Key Concepts for AI Training
-
-### Clock Management Hierarchy
-
-```
-PRCM Module
-├── Clock Domains (groups of modules with common clock source)
-│   ├── Clock Managers (control clock gating per domain)
-│   ├── Interface Clocks (_ICLK) → interconnect/registers
-│   └── Functional Clocks (_FCLK) → module functionality
-│       ├── Mandatory clocks (required for operation)
-│       └── Optional clocks (feature-specific)
-└── Module Clock Protocols
-    ├── Master Standby Protocol (for initiator modules)
-    │   ├── Force-standby (immediate, risk of data loss)
-    │   ├── No-standby (always active, not power-efficient)
-    │   ├── Smart-standby (activity-based, safe)
-    │   └── Smart-standby wakeup (with wakeup generation)
-    └── Slave Idle Protocol (for target modules)
-        ├── Force-idle (immediate, risk of data loss)
-        ├── No-idle (always active, not power-efficient)
-        ├── Smart-idle (activity-based, safe)
-        └── Smart-idle wakeup (with wakeup generation)
-```
-
-### Power Management Hierarchy
-
-```
-PRCM Module
-├── Power Domains (groups with independent power control)
-│   ├── Logic Area (ON/OFF states)
-│   └── Memory Area (ON/RETENTION/OFF states)
-├── Power States Control
-│   ├── PWRSTCTRL (target state configuration)
-│   └── PWRSTST (current state status)
-└── Voltage Management
-    └── AVS (Adaptive Voltage Scaling via Smart Reflex)
-```
-
-### Power Modes Spectrum
-
-```
-Active Mode (Highest Power, Zero Latency)
-  ↓ All supplies ON, all DPLLs locked
-Standby Mode
-  ↓ Main osc ON, DPLLs bypass, PD_MPU OFF, DDR self-refresh
-DeepSleep1 Mode
-  ↓ Main osc OFF, DDR self-refresh, USB wakeup capable
-DeepSleep0 Mode
-  ↓ PD_PER OFF, DDR self-refresh maintained
-RTC-Only Mode (Lowest Power, Highest Latency)
-  All OFF except RTC domain, full cold boot on wakeup
-```
-
-### Wakeup Management
-
-```
-Wakeup Sources (PD_WKUP domain, always ON):
-├── GPIO0 bank
-├── dmtimer1_1ms
-├── USB2PHY (both ports)
-├── TSC
-├── UART0
-├── I2C0
-└── RTC alarm
-
-Wakeup Path:
-Event → Oscillator Enable → Cortex-M3 Interrupt → 
-Power Domain Restore → Clock Enable → Cortex-A8 Resume
-```
-
-### Cortex-M3 Power Management Role
-
-```
-Power Transition Flow:
-1. Cortex-A8 executes WFI
-2. Cortex-M3 wakes, receives IPC command (CMD_DS0/DS1/RTC)
-3. Cortex-M3 executes power sequencing:
-   - Forces sleep on interconnect clocks
-   - Powers down MPU/PER domains
-   - Configures oscillator control
-4. Cortex-M3 executes WFI (enters idle)
-5. Wakeup event arrives
-6. Cortex-M3 wakes, executes restore sequence:
-   - Restores voltages
-   - Locks PLLs
-   - Enables power domains
-   - Enables clocks
-7. Cortex-A8 resumes from ROM reset vector
-```
-
-### Critical Register Fields
-
-**Clock Control:**
-- `MODULEMODE`: Module enable/disable control
-- `CLKTRCTRL`: Clock domain transition control
-- `CLKACTIVITY`: Clock activity status
-- `IDLEST`: Module idle status
-- `STBYST`: Module standby status
-
-**Power Control:**
-- `POWERSTATE`: Target power state configuration
-- `POWERSTATEST`: Current power state status
-- `LOGICSTATEST`: Logic area state status
-- `MEMSTATEST`: Memory area state status
-
-**IPC Communication:**
-- `CMD_STAT`: Command status (PASS/FAIL/WAIT4OK)
-- `CMD_ID`: Command identifier (CMD_RTC/CMD_DS0/CMD_DS1)
-- `CMD param1/param2`: Command parameters
-
----
-
-## Key Takeaways
-
-1. **Hierarchical Management:** Three-level architecture (clock/power/voltage) with domain-based organization
-
-2. **Hardware Protocols:** Automatic clock gating via Master Standby and Slave Idle protocols with smart modes for safety
-
-3. **Power Mode Trade-offs:** Five power modes providing spectrum from full performance to ultra-low power with corresponding latency trade-offs
-
-4. **Cortex-M3 Role:** Dedicated processor handles low-level power transitions, allowing Cortex-A8 to focus on application
-
-5. **Flexible Wakeup:** Multiple wakeup sources in always-on domain enable application-specific low-power scenarios
-
-6. **Context Management:** Critical requirement to save/restore context appropriately for each power mode
-
-7. **USB Considerations:** DeepSleep1 minimum for USB wakeup scenarios, different events for host vs device mode
-
-8. **RTC Domain:** Can operate independently with battery backup for ultra-low power timekeeping
-
-9. **Clock Generation:** ADPLLS and ADPLLLJ DPLLs with SSC capability for EMI reduction
-
-10. **Software Control:** Extensive register set provides fine-grained control while hardware protocols ensure safety
-
----
-
-## 8.11 Clock Module Registers
-
-### 8.11.1 Register Groups Overview
-
-The Clock Module provides the following register groups:
-
-| Register Group | Base Address | Purpose |
-|---------------|--------------|---------|
-| **CM_PER** | 0x44E00000 | Peripheral clock management |
-| **CM_WKUP** | 0x44E00400 | Wakeup domain clock management |
-| **CM_DPLL** | 0x44E00500 | DPLL configuration and control |
-| **CM_MPU** | 0x44E00600 | MPU clock management |
-| **CM_DEVICE** | 0x44E00700 | Device-level clock control |
-| **CM_RTC** | 0x44E00800 | RTC clock management |
-| **CM_GFX** | 0x44E00900 | Graphics clock management |
-| **CM_CEFUSE** | 0x44E00A00 | eFuse clock management |
-
-### 8.11.2 Common Register Types
-
-#### 8.11.2.1 CLKSTCTRL Registers (Clock State Control)
-
-Control clock domain state transitions and monitor clock activity.
-
-**Common Bit Fields:**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [31:8] | CLKACTIVITY_* | R | Activity status bits for various clocks in domain (0=Gated, 1=Active) |
-| [1:0] | CLKTRCTRL | R/W | Clock transition control:<br>0x0 = NO_SLEEP (sleep transition cannot be initiated)<br>0x1 = SW_SLEEP (software forced sleep)<br>0x2 = SW_WKUP (software forced wakeup)<br>0x3 = Reserved |
-
-#### 8.11.2.2 CLKCTRL Registers (Clock Control)
-
-Control individual module clocks and monitor module state.
-
-**Common Bit Fields:**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [18] | STBYST | R | Standby status:<br>0x0 = Module functional (not in standby)<br>0x1 = Module in standby |
-| [17:16] | IDLEST | R | Idle status:<br>0x0 = Functional (fully functional including OCP)<br>0x1 = Transition (wakeup, sleep, or sleep abortion)<br>0x2 = Idle (OCP idle, functional if using separate functional clock)<br>0x3 = Disabled (module disabled, cannot be accessed) |
-| [1:0] | MODULEMODE | R/W | Module mode:<br>0x0 = DISABLED (module disabled by SW, OCP access causes error)<br>0x1 = Reserved<br>0x2 = ENABLE (module explicitly enabled, clocks guaranteed)<br>0x3 = Reserved |
-
-### 8.11.3 Key CM_PER Registers
-
-Peripheral domain clock management registers (Base: 0x44E00000).
-
-| Offset | Register Name | Purpose |
-|--------|--------------|---------|
-| 0x00 | CM_PER_L4LS_CLKSTCTRL | L4LS clock domain state control |
-| 0x04 | CM_PER_L3S_CLKSTCTRL | L3S clock domain state control |
-| 0x0C | CM_PER_L3_CLKSTCTRL | L3 clock domain state control |
-| 0x14 | CM_PER_CPGMAC0_CLKCTRL | Ethernet switch (CPSW) clock control |
-| 0x18 | CM_PER_LCDC_CLKCTRL | LCD controller clock control |
-| 0x1C | CM_PER_USB0_CLKCTRL | USB0 clock control |
-| 0x24 | CM_PER_TPTC0_CLKCTRL | EDMA TPTC0 clock control |
-| 0x28 | CM_PER_EMIF_CLKCTRL | EMIF (DDR) clock control |
-| 0x2C | CM_PER_OCMCRAM_CLKCTRL | On-chip RAM clock control |
-| 0x30 | CM_PER_GPMC_CLKCTRL | GPMC (parallel interface) clock control |
-| 0x34 | CM_PER_MCASP0_CLKCTRL | McASP0 clock control |
-| 0x38 | CM_PER_UART5_CLKCTRL | UART5 clock control |
-| 0x3C | CM_PER_MMC0_CLKCTRL | MMC0 clock control |
-| 0x40 | CM_PER_ELM_CLKCTRL | ELM (Error Location Module) clock control |
-| 0x44 | CM_PER_I2C2_CLKCTRL | I2C2 clock control |
-| 0x48 | CM_PER_I2C1_CLKCTRL | I2C1 clock control |
-| 0x4C | CM_PER_SPI0_CLKCTRL | SPI0 clock control |
-| 0x50 | CM_PER_SPI1_CLKCTRL | SPI1 clock control |
-| 0x60 | CM_PER_L4LS_CLKCTRL | L4LS interconnect clock control |
-| 0x68 | CM_PER_MCASP1_CLKCTRL | McASP1 clock control |
-| 0x6C | CM_PER_UART1_CLKCTRL | UART1 clock control |
-| 0x70 | CM_PER_UART2_CLKCTRL | UART2 clock control |
-| 0x74 | CM_PER_UART3_CLKCTRL | UART3 clock control |
-| 0x78 | CM_PER_UART4_CLKCTRL | UART4 clock control |
-| 0x7C | CM_PER_TIMER7_CLKCTRL | DMTIMER7 clock control |
-| 0x80 | CM_PER_TIMER2_CLKCTRL | DMTIMER2 clock control |
-| 0x84 | CM_PER_TIMER3_CLKCTRL | DMTIMER3 clock control |
-| 0x88 | CM_PER_TIMER4_CLKCTRL | DMTIMER4 clock control |
-| 0xAC | CM_PER_GPIO1_CLKCTRL | GPIO1 clock control |
-| 0xB0 | CM_PER_GPIO2_CLKCTRL | GPIO2 clock control |
-| 0xB4 | CM_PER_GPIO3_CLKCTRL | GPIO3 clock control |
-| 0xBC | CM_PER_TPCC_CLKCTRL | EDMA TPCC clock control |
-| 0xC0 | CM_PER_DCAN0_CLKCTRL | DCAN0 clock control |
-| 0xC4 | CM_PER_DCAN1_CLKCTRL | DCAN1 clock control |
-| 0xCC | CM_PER_EPWMSS1_CLKCTRL | eHRPWM/eCAP/eQEP SS1 clock control |
-| 0xD4 | CM_PER_EPWMSS0_CLKCTRL | eHRPWM/eCAP/eQEP SS0 clock control |
-| 0xD8 | CM_PER_EPWMSS2_CLKCTRL | eHRPWM/eCAP/eQEP SS2 clock control |
-| 0xDC | CM_PER_L3_INSTR_CLKCTRL | L3 instrumentation clock control |
-| 0xE0 | CM_PER_L3_CLKCTRL | L3 interconnect clock control |
-| 0xE4 | CM_PER_IEEE5000_CLKCTRL | IEEE 1500 test access port clock control |
-| 0xE8 | CM_PER_PRU_ICSS_CLKCTRL | PRU-ICSS clock control |
-| 0xEC | CM_PER_TIMER5_CLKCTRL | DMTIMER5 clock control |
-| 0xF0 | CM_PER_TIMER6_CLKCTRL | DMTIMER6 clock control |
-| 0xF4 | CM_PER_MMC1_CLKCTRL | MMC1 clock control |
-| 0xF8 | CM_PER_MMC2_CLKCTRL | MMC2 clock control |
-| 0xFC | CM_PER_TPTC1_CLKCTRL | EDMA TPTC1 clock control |
-| 0x100 | CM_PER_TPTC2_CLKCTRL | EDMA TPTC2 clock control |
-| 0x10C | CM_PER_SPINLOCK_CLKCTRL | Spinlock clock control |
-| 0x110 | CM_PER_MAILBOX0_CLKCTRL | Mailbox0 clock control |
-| 0x11C | CM_PER_L4HS_CLKSTCTRL | L4HS clock domain state control |
-| 0x120 | CM_PER_L4HS_CLKCTRL | L4HS interconnect clock control |
-| 0x12C | CM_PER_OCPWP_L3_CLKSTCTRL | OCPWP L3 clock domain state control |
-| 0x130 | CM_PER_OCPWP_CLKCTRL | OCP Watchpoint clock control |
-| 0x140 | CM_PER_PRU_ICSS_CLKSTCTRL | PRU-ICSS clock domain state control |
-| 0x144 | CM_PER_CPSW_CLKSTCTRL | CPSW clock domain state control |
-| 0x148 | CM_PER_LCDC_CLKSTCTRL | LCDC clock domain state control |
-| 0x14C | CM_PER_CLKDIV32K_CLKCTRL | 32kHz clock divider clock control |
-| 0x150 | CM_PER_CLK_24MHZ_CLKSTCTRL | 24MHz clock domain state control |
-
-### 8.11.4 Key CM_WKUP Registers
-
-Wakeup domain clock management registers (Base: 0x44E00400).
-
-| Offset | Register Name | Purpose |
-|--------|--------------|---------|
-| 0x00 | CM_WKUP_CLKSTCTRL | Wakeup clock domain state control |
-| 0x04 | CM_WKUP_CONTROL_CLKCTRL | Control module clock control |
-| 0x08 | CM_WKUP_GPIO0_CLKCTRL | GPIO0 clock control |
-| 0x0C | CM_WKUP_L4WKUP_CLKCTRL | L4 wakeup interconnect clock control |
-| 0x10 | CM_WKUP_TIMER0_CLKCTRL | Timer0 clock control |
-| 0x14 | CM_WKUP_DEBUGSS_CLKCTRL | Debug subsystem clock control |
-| 0x18 | CM_L3_AON_CLKSTCTRL | L3 always-on clock domain state control |
-| 0x1C | CM_AUTOIDLE_DPLL_MPU | MPU DPLL auto-idle control |
-| 0x20 | CM_IDLEST_DPLL_MPU | MPU DPLL idle/lock status |
-| 0x24 | CM_SSC_DELTAMSTEP_DPLL_MPU | MPU DPLL SSC delta M step |
-| 0x28 | CM_SSC_MODFREQDIV_DPLL_MPU | MPU DPLL SSC modulation frequency |
-| 0x2C | CM_CLKSEL_DPLL_MPU | MPU DPLL multiply/divide configuration |
-| 0x30 | CM_AUTOIDLE_DPLL_DDR | DDR DPLL auto-idle control |
-| 0x34 | CM_IDLEST_DPLL_DDR | DDR DPLL idle/lock status |
-| 0x38 | CM_SSC_DELTAMSTEP_DPLL_DDR | DDR DPLL SSC delta M step |
-| 0x3C | CM_SSC_MODFREQDIV_DPLL_DDR | DDR DPLL SSC modulation frequency |
-| 0x40 | CM_CLKSEL_DPLL_DDR | DDR DPLL multiply/divide configuration |
-| 0x44 | CM_AUTOIDLE_DPLL_DISP | Display DPLL auto-idle control |
-| 0x48 | CM_IDLEST_DPLL_DISP | Display DPLL idle/lock status |
-| 0x4C | CM_SSC_DELTAMSTEP_DPLL_DISP | Display DPLL SSC delta M step |
-| 0x50 | CM_SSC_MODFREQDIV_DPLL_DISP | Display DPLL SSC modulation frequency |
-| 0x54 | CM_CLKSEL_DPLL_DISP | Display DPLL multiply/divide configuration |
-| 0x58 | CM_AUTOIDLE_DPLL_CORE | Core DPLL auto-idle control |
-| 0x5C | CM_IDLEST_DPLL_CORE | Core DPLL idle/lock status |
-| 0x60 | CM_SSC_DELTAMSTEP_DPLL_CORE | Core DPLL SSC delta M step |
-| 0x64 | CM_SSC_MODFREQDIV_DPLL_CORE | Core DPLL SSC modulation frequency |
-| 0x68 | CM_CLKSEL_DPLL_CORE | Core DPLL multiply/divide configuration |
-| 0x6C | CM_AUTOIDLE_DPLL_PER | PER DPLL auto-idle control |
-| 0x70 | CM_IDLEST_DPLL_PER | PER DPLL idle/lock status |
-| 0x74 | CM_SSC_DELTAMSTEP_DPLL_PER | PER DPLL SSC delta M step |
-| 0x78 | CM_SSC_MODFREQDIV_DPLL_PER | PER DPLL SSC modulation frequency |
-| 0x7C | CM_CLKDCOLDO_DPLL_PER | PER DPLL CLKDCOLDO output control |
-| 0x80 | CM_DIV_M4_DPLL_CORE | Core DPLL M4 divider (L3F_CLK) |
-| 0x84 | CM_DIV_M5_DPLL_CORE | Core DPLL M5 divider (MHZ_250_CLK) |
-| 0x88 | CM_CLKMODE_DPLL_MPU | MPU DPLL mode control |
-| 0x8C | CM_CLKMODE_DPLL_PER | PER DPLL mode control |
-| 0x90 | CM_CLKMODE_DPLL_CORE | Core DPLL mode control |
-| 0x94 | CM_CLKMODE_DPLL_DDR | DDR DPLL mode control |
-| 0x98 | CM_CLKMODE_DPLL_DISP | Display DPLL mode control |
-| 0x9C | CM_CLKSEL_DPLL_PERIPH | PER DPLL peripheral clock select |
-| 0xA0 | CM_DIV_M2_DPLL_DDR | DDR DPLL M2 divider |
-| 0xA4 | CM_DIV_M2_DPLL_DISP | Display DPLL M2 divider |
-| 0xA8 | CM_DIV_M2_DPLL_MPU | MPU DPLL M2 divider |
-| 0xAC | CM_DIV_M2_DPLL_PER | PER DPLL M2 divider |
-| 0xB0 | CM_WKUP_WKUP_M3_CLKCTRL | Cortex-M3 (WakeM3) clock control |
-| 0xB4 | CM_WKUP_UART0_CLKCTRL | UART0 clock control |
-| 0xB8 | CM_WKUP_I2C0_CLKCTRL | I2C0 clock control |
-| 0xBC | CM_WKUP_ADC_TSC_CLKCTRL | ADC/Touchscreen clock control |
-| 0xC0 | CM_WKUP_SMARTREFLEX0_CLKCTRL | SmartReflex0 clock control |
-| 0xC4 | CM_WKUP_TIMER1_CLKCTRL | DMTIMER1 (1ms) clock control |
-| 0xC8 | CM_WKUP_SMARTREFLEX1_CLKCTRL | SmartReflex1 clock control |
-| 0xCC | CM_L4_WKUP_AON_CLKSTCTRL | L4 wakeup always-on clock domain state control |
-| 0xD4 | CM_WKUP_WDT1_CLKCTRL | Watchdog Timer 1 clock control |
-| 0xD8 | CM_DIV_M6_DPLL_CORE | Core DPLL M6 divider (CORE_CLKOUTM6) |
-
-**CM_AUTOIDLE_DPLL_xxx Register (applies to MPU, DDR, DISP, CORE, PER):**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [2:0] | AUTO_DPLL_MODE | R/W | Auto-idle mode for DPLL. Note: This feature is not supported on AM335x. Must be set to 0x0 |
-
-### 8.11.5 CM_DPLL Registers
-
-DPLL configuration and control registers (Base: 0x44E00500).
-
-#### 8.11.5.1 DPLL Control Registers
-
-Each DPLL has the following register set pattern:
-
-| Register | Purpose |
-|----------|---------|
-| CM_CLKMODE_DPLL_xxx | DPLL mode control (bypass, lock, etc.) |
-| CM_IDLEST_DPLL_xxx | DPLL lock status |
-| CM_CLKSEL_DPLL_xxx | DPLL multiply/divide configuration |
-| CM_DIV_M2_DPLL_xxx | M2 divider configuration |
-| CM_DIV_M4_DPLL_xxx | M4 divider configuration (if available) |
-| CM_DIV_M5_DPLL_xxx | M5 divider configuration (if available) |
-| CM_DIV_M6_DPLL_xxx | M6 divider configuration (if available) |
-
-Where xxx = MPU, DDR, DISP, CORE, or PER.
-
-**Clock Source Select Registers (Base: 0x44E00500):**
-
-| Offset | Register Name | Purpose |
-|--------|--------------|---------|
-| 0x04 | CLKSEL_TIMER7_CLK | Timer7 clock source (reset=0x1=CLK_M_OSC) |
-| 0x08 | CLKSEL_TIMER2_CLK | Timer2 clock source (reset=0x1=CLK_M_OSC) |
-| 0x0C | CLKSEL_TIMER3_CLK | Timer3 clock source (reset=0x1=CLK_M_OSC) |
-| 0x10 | CLKSEL_TIMER4_CLK | Timer4 clock source (reset=0x1=CLK_M_OSC) |
-| 0x14 | CM_MAC_CLKSEL | CPSW CPTS reference clock select |
-| 0x18 | CLKSEL_TIMER5_CLK | Timer5 clock source (reset=0x1=CLK_M_OSC) |
-| 0x1C | CLKSEL_TIMER6_CLK | Timer6 clock source (reset=0x1=CLK_M_OSC) |
-| 0x20 | CM_CPTS_RFT_CLKSEL | CPTS RFT clock select |
-| 0x28 | CLKSEL_TIMER1MS_CLK | Timer1 1ms clock source (reset=0x0=CLK_RC32K) |
-| 0x2C | CLKSEL_GFX_FCLK | GFX (SGX530) functional clock select |
-| 0x30 | CLKSEL_PRU_ICSS_OCP_CLK | PRU-ICSS OCP clock select |
-| 0x34 | CLKSEL_LCDC_PIXEL_CLK | LCDC pixel clock select |
-| 0x38 | CLKSEL_WDT1_CLK | Watchdog Timer 1 clock source |
-| 0x3C | CLKSEL_GPIO0_DBCLK | GPIO0 debounce clock select |
-
-**CLKSEL_TIMERx_CLK Field (CLKSEL bits [1:0]):**
-
-| Value | Description |
-|-------|-------------|
-| 0x0 | SEL1: TCLKIN (external clock input) |
-| 0x1 | SEL2: CLK_M_OSC (main oscillator) - default |
-| 0x2 | SEL3: CLK_32KHZ (32kHz from PER PLL) |
-| 0x3 | SEL4: Reserved |
-
-**CLKSEL_TIMER1MS_CLK Field (CLKSEL bits [2:0]):**
-
-| Value | Description |
-|-------|-------------|
-| 0x0 | SEL1: CLK_RC32K (on-chip RC oscillator ~32kHz) - default |
-| 0x1 | SEL2: CLK_32K_RTC (32kHz RTC oscillator) |
-| 0x2 | SEL3: TCLKIN (external clock input) |
-| 0x3 | SEL4: CLK_M_OSC |
-| 0x4 | SEL5: CLK_32KHZ (from PER PLL) |
-
-**CLKSEL_GFX_FCLK Fields:**
-
-| Bits | Field | Description |
-|------|-------|-------------|
-| [1] | CLKSEL | 0=CORE_CLKOUTM4/2, 1=CORE_CLKOUTM4 |
-| [0] | CLKDIV_SEL | 0=PER_CLKOUTM2 (192MHz), 1=CORE_CLKOUTM4 (200MHz) |
-
-**CLKSEL_PRU_ICSS_OCP_CLK Field (CLKSEL bit [0]):**
-
-| Value | Description |
-|-------|-------------|
-| 0x0 | SEL1: L3F clock as OCP clock of PRU-ICSS |
-| 0x1 | SEL2: DISP DPLL clock as OCP clock of PRU-ICSS |
-
-**CLKSEL_LCDC_PIXEL_CLK Field (CLKSEL bits [1:0]):**
-
-| Value | Description |
-|-------|-------------|
-| 0x0 | SEL1: DISP DPLL CLKOUT |
-| 0x1 | SEL2: CORE DPLL M5 (MHZ_250_CLK) |
-| 0x2 | SEL3: PER DPLL M2 |
-| 0x3 | SEL4: Reserved |
-
-**CLKSEL_WDT1_CLK Field (CLKSEL bit [0]):**
-
-| Value | Description |
-|-------|-------------|
-| 0x0 | SEL1: CLK_RC32K |
-| 0x1 | SEL2: CLK_32KHZ |
-
-**CLKSEL_GPIO0_DBCLK Field (CLKSEL bits [1:0]):**
-
-| Value | Description |
-|-------|-------------|
-| 0x0 | SEL1: CLK_RC32K - default |
-| 0x1 | SEL2: CLK_32K_RTC |
-| 0x2 | SEL3: CLK_32KHZ |
-
-#### 8.11.5.2 CM_CLKMODE_DPLL_xxx (DPLL Mode Control)
-
-**Key Bit Fields:**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [23] | DPLL_SSC_ACK | R | SSC acknowledgment (0=Disabled, 1=Enabled) |
-| [22] | DPLL_SSC_DOWNSPREAD | R/W | Downspread enable (0=Center spread, 1=Downspread) |
-| [12] | DPLL_SSC_EN | R/W | Spread Spectrum Clocking enable |
-| [8] | DPLL_LPMODE_EN | R/W | Low power mode enable |
-| [7] | DPLL_RELOCK_RAMP_EN | R/W | Relock ramp enable |
-| [6] | DPLL_DRIFTGUARD_EN | R/W | Drift guard enable (recalibration) |
-| [5:4] | DPLL_RAMP_LEVEL | R/W | Ramp level control |
-| [3] | DPLL_RAMP_RATE | R/W | Ramp rate control |
-| [2:0] | DPLL_EN | R/W | DPLL enable mode:<br>0x0 = Reserved<br>0x1 = Reserved<br>0x2 = Reserved<br>0x3 = Reserved<br>0x4 = MN bypass mode<br>0x5 = Idle bypass low-power mode<br>0x6 = Reserved<br>0x7 = Lock mode |
-
-#### 8.11.5.3 CM_IDLEST_DPLL_xxx (DPLL Status)
-
-**Key Bit Fields:**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [8] | ST_MN_BYPASS | R | MN bypass status (0=Not in bypass, 1=In bypass) |
-| [0] | ST_DPLL_CLK | R | DPLL lock status (0=Unlocked, 1=Locked) |
-
-#### 8.11.5.4 CM_CLKSEL_DPLL_xxx (DPLL Multiply/Divide)
-
-**Key Bit Fields:**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [22:8] | DPLL_MULT | R/W | DPLL multiplier factor (M) [2-2047] |
-| [6:0] | DPLL_DIV | R/W | DPLL divider factor (N) [0-127] |
-
-**Frequency Calculation:**
-- Fref = Finp / (N + 1)
-- Fdpll = Fref * M = Finp * M / (N + 1)
-- Fout = Fdpll / M2
-
-#### 8.11.5.5 CM_DIV_M2_DPLL_xxx (M2 Divider)
-
-**Key Bit Fields:**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [5] | DPLL_CLKOUT_DIVCHACK | R | Divider change acknowledgment (toggles on change) |
-| [4:0] | DPLL_CLKOUT_DIV | R/W | M2 divider value [1-31], actual divisor = value + 1 |
-
-**Note:** M2 divider can be changed on-the-fly without putting DPLL in bypass mode.
-
-#### 8.11.5.6 SSC Configuration Registers
-
-For DPLL with Spread Spectrum Clocking support:
-
-**CM_SSC_DELTAMSTEP_DPLL_xxx:**
-
-| Bits | Field | Description |
-|------|-------|-------------|
-| [19:18] | DELTAMSTEP_INTEGER | Integer part of delta M step |
-| [17:0] | DELTAMSTEP_FRACTION | Fractional part of delta M step (18-bit) |
-
-**CM_SSC_MODFREQDIV_DPLL_xxx:**
-
-| Bits | Field | Description |
-|------|-------|-------------|
-| [9:7] | MODFREQDIV_EXPONENT | Modulation frequency divider exponent (3-bit) |
-| [6:0] | MODFREQDIV_MANTISSA | Modulation frequency divider mantissa (7-bit) |
-
-### 8.11.6 CM_MPU Registers
-
-MPU subsystem clock management (Base: 0x44E00600).
-
-| Offset | Register Name | Purpose |
-|--------|--------------|---------|
-| 0x00 | CM_MPU_CLKSTCTRL | MPU clock domain state control |
-| 0x04 | CM_MPU_MPU_CLKCTRL | MPU clock control |
-
-### 8.11.7 CM_DEVICE Registers
-
-Device-level clock control (Base: 0x44E00700).
-
-| Offset | Register Name | Purpose |
-|--------|--------------|---------|
-| 0x00 | CM_CLKOUT_CTRL | SYS_CLKOUT2 external clock output control |
-
-**CM_CLKOUT_CTRL Register:**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [7] | CLKOUT2EN | R/W | SYS_CLKOUT2 enable: 0=Disabled, 1=Enabled |
-| [5:3] | CLKOUT2DIV | R/W | Clock division factor: 0=DIV1, 1=DIV2, 2=DIV3, 3=DIV4, 4=DIV5, 5=DIV6, 6=DIV7 |
-| [2:0] | CLKOUT2SOURCE | R/W | Source clock: 0=32kHz oscillator, 1=L3 clock, 2=DDR PHY clock, 3=192MHz from PER PLL, 4=LCDC pixel clock |
-
-### 8.11.8 CM_RTC Registers
-
-RTC clock management (Base: 0x44E00800).
-
-| Offset | Register Name | Purpose |
-|--------|--------------|---------|
-| 0x00 | CM_RTC_RTC_CLKCTRL | RTC subsystem clock control |
-| 0x04 | CM_RTC_CLKSTCTRL | RTC clock domain state control (CLKACTIVITY bits: RTC_32KCLK and L4_RTC_GCLK) |
-
-### 8.11.9 CM_GFX Registers
-
-Graphics (SGX530) clock management (Base: 0x44E00900).
-
-| Offset | Register Name | Purpose |
-|--------|--------------|---------|
-| 0x00 | CM_GFX_L3_CLKSTCTRL | GFX L3 clock domain state control |
-| 0x04 | CM_GFX_GFX_CLKCTRL | GFX (SGX530) clock control |
-| 0x0C | CM_GFX_L4LS_GFX_CLKSTCTRL | GFX L4LS clock domain state control |
-| 0x10 | CM_GFX_MMUCFG_CLKCTRL | GFX MMU config clock control |
-| 0x14 | CM_GFX_MMUDATA_CLKCTRL | GFX MMU data clock control |
-
-### 8.11.10 CM_CEFUSE Registers
-
-eFuse clock management (Base: 0x44E00A00).
-
-| Offset | Register Name | Purpose |
-|--------|--------------|---------|
-| 0x00 | CM_CEFUSE_CLKSTCTRL | eFuse clock domain state control |
-| 0x20 | CM_CEFUSE_CEFUSE_CLKCTRL | eFuse module clock control |
-
----
-
-## 8.12 Power Management Registers
-
-### 8.12.1 Register Groups Overview
-
-The Power Management module provides the following register groups:
-
-| Register Group | Base Address | Purpose |
-|---------------|--------------|---------|
-| **PRM_IRQ** | 0x44E00B00 | PRM interrupt status and enable registers |
-| **PRM_PER** | 0x44E00C00 | Peripheral power domain management |
-| **PRM_WKUP** | 0x44E00D00 | Wakeup power domain management |
-| **PRM_MPU** | 0x44E00E00 | MPU power domain management |
-| **PRM_DEVICE** | 0x44E00F00 | Device-level power management |
-| **PRM_RTC** | 0x44E01000 | RTC power domain management |
-| **PRM_GFX** | 0x44E01100 | Graphics power domain management |
-| **PRM_CEFUSE** | 0x44E01200 | eFuse power domain management |
-
-### 8.12.2 PRM_IRQ Registers (Base: 0x44E00B00)
-
-| Offset | Register Name | Purpose |
-|--------|--------------|---------|
-| 0x00 | REVISION_PRM | PRCM IP revision code |
-| 0x04 | PRM_IRQSTATUS_MPU | MPU interrupt event status (W1C) |
-| 0x08 | PRM_IRQENABLE_MPU | MPU interrupt event enable |
-| 0x0C | PRM_IRQSTATUS_M3 | Cortex-M3 interrupt event status (W1C) |
-| 0x10 | PRM_IRQENABLE_M3 | Cortex-M3 interrupt event enable |
-
-**REVISION_PRM Register:**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [7:4] | Rev[7:4] | R | Major revision (e.g., 0x1 for revision 1.x) |
-| [3:0] | Rev[3:0] | R | Minor revision (e.g., 0x0 for revision x.0) |
-
-**PRM_IRQSTATUS_MPU / PRM_IRQSTATUS_M3 Register:**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [15] | dpll_per_recal_st | R/W1C | PER DPLL recalibration interrupt status |
-| [14] | dpll_ddr_recal_st | R/W1C | DDR DPLL recalibration interrupt status |
-| [13] | dpll_disp_recal_st | R/W1C | DISP DPLL recalibration interrupt status |
-| [12] | dpll_core_recal_st | R/W1C | Core DPLL recalibration interrupt status |
-| [11] | dpll_mpu_recal_st | R/W1C | MPU DPLL recalibration interrupt status |
-| [10] | ForceWkup_st | R/W1C | Forced wakeup status |
-| [8] | Transition_st | R/W1C | Power domain transition complete status |
-
-**PRM_IRQENABLE_MPU / PRM_IRQENABLE_M3 Register:**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [15] | dpll_disp_recal_en | R/W | Enable DISP DPLL recalibration interrupt |
-| [14] | dpll_ddr_recal_en | R/W | Enable DDR DPLL recalibration interrupt |
-| [13] | dpll_per_recal_en | R/W | Enable PER DPLL recalibration interrupt |
-| [12] | dpll_core_recal_en | R/W | Enable Core DPLL recalibration interrupt |
-| [11] | dpll_mpu_recal_en | R/W | Enable MPU DPLL recalibration interrupt |
-| [10] | ForceWkup_en | R/W | Enable forced wakeup interrupt |
-| [8] | Transition_en | R/W | Enable power domain transition interrupt |
-
-### 8.12.3 PRM_PER Registers (Base: 0x44E00C00)
-
-| Offset | Register Name | Purpose |
-|--------|--------------|---------|
-| 0x00 | RM_PER_RSTCTRL | PER domain local reset control |
-| 0x08 | PM_PER_PWRSTST | PER power domain status (warm reset insensitive) |
-| 0x0C | PM_PER_PWRSTCTRL | PER power domain control (reset = 0xEE0000EB) |
-
-**RM_PER_RSTCTRL Register:**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [1] | PRU_ICSS_LRST | R/W | PRU-ICSS local reset: 0=Clear (released), 1=Assert (held in reset) |
-
-**PM_PER_PWRSTST Register (reset = 0x1E60007):**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [24:23] | pru_icss_mem_statest | R | PRU-ICSS memory state: 0=OFF, 1=RETENTION, 3=ON |
-| [22:21] | ram_mem_statest | R | OCMC RAM memory state: 0=OFF, 1=RETENTION, 3=ON |
-| [20] | InTransition | R | 0=No transition, 1=Transition in progress |
-| [18:17] | PER_mem_statest | R | PER domain memory state: 0=OFF, 1=RETENTION, 3=ON |
-| [2] | LogicStateSt | R | Logic state: 0=OFF, 1=ON |
-| [1:0] | PowerStateSt | R | Power state: 0=OFF, 1=RETENTION, 2=INACTIVE, 3=ON |
-
-**PM_PER_PWRSTCTRL Register (reset = 0xEE0000EB):**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [31:30] | ram_mem_ONState | R/W | OCMC RAM on-state: 3=ON |
-| [29] | PER_mem_RETState | R/W | PER memory retention state: 0=OFF, 1=RETENTION |
-| [27] | ram_mem_RETState | R/W | OCMC RAM retention state: 0=OFF, 1=RETENTION |
-| [26:25] | PER_mem_ONState | R/W | PER memory on-state: 3=ON |
-| [9:8] | pru_icss_mem_RETState | R/W | PRU-ICSS memory retention state |
-| [7:6] | pru_icss_mem_ONState | R/W | PRU-ICSS memory on-state: 3=ON |
-| [4] | LowPowerStateChange | R/W | Low power state change request |
-| [3] | LogicRETState | R/W | Logic retention: 0=Logic off, 1=Logic retention |
-| [1:0] | PowerState | R/W | Target power state: 0=OFF, 1=RETENTION, 3=ON |
-
-### 8.12.4 PRM_WKUP Registers (Base: 0x44E00D00)
-
-| Offset | Register Name | Purpose |
-|--------|--------------|---------|
-| 0x00 | RM_WKUP_RSTCTRL | WKUP domain local reset control |
-| 0x04 | PM_WKUP_PWRSTCTRL | WKUP power domain control (reset = 0x8) |
-| 0x08 | PM_WKUP_PWRSTST | WKUP power domain status |
-| 0x0C | RM_WKUP_RSTST | WKUP domain reset status (warm reset insensitive) |
-
-**RM_WKUP_RSTCTRL Register:**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [3] | WKUP_M3_LRST | R/W | Assert local reset to Cortex-M3: 0=Clear (released), 1=Assert (held in reset by A8) |
-
-**PM_WKUP_PWRSTCTRL Register:**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [4] | LowPowerStateChange | R/W | Low power state change request (auto-clears) |
-| [3] | LogicRETState | R/W | Logic retention state: 0=Logic off (only retention regs retained), 1=Logic retention (whole logic retained) |
-
-### 8.12.5 PRM_MPU Registers (Base: 0x44E00E00)
-
-| Offset | Register Name | Purpose |
-|--------|--------------|---------|
-| 0x00 | PM_MPU_PWRSTCTRL | MPU power domain control (reset = 0x1FF0007) |
-| 0x04 | PM_MPU_PWRSTST | MPU power domain status (reset = 0x157) |
-| 0x08 | RM_MPU_RSTST | MPU domain reset status (warm reset insensitive) |
-
-**RM_MPU_RSTST Register:**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [14] | ICECRUSHER_MPU_RST | R/W1C | ICECrusher-initiated MPU reset status |
-| [13] | EMULATION_MPU_RST | R/W1C | Emulation-initiated MPU reset status |
-
-### 8.12.11 Common Register Types
-
-#### 8.12.2.1 PM_xxx_PWRSTCTRL (Power State Control)
-
-Controls target power state for power domain.
-
-**Key Bit Fields:**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [11:10] | LOWPOWERSTATECHANGE | R/W | Low power state change request |
-| [9:8] | LOGICRETSTATE | R/W | Logic retention state:<br>0x0 = Logic off<br>0x1 = Logic retention |
-| [5:4] | MEM_x_RETSTATE | R/W | Memory bank retention state:<br>0x0 = Memory off<br>0x1 = Memory retention |
-| [3:2] | MEM_x_ONSTATE | R/W | Memory bank on state:<br>0x3 = Memory on |
-| [1:0] | POWERSTATE | R/W | Power state control:<br>0x0 = OFF<br>0x1 = RETENTION<br>0x2 = INACTIVE (not used)<br>0x3 = ON |
-
-#### 8.12.2.2 PM_xxx_PWRSTST (Power State Status)
-
-Reports current power state of power domain.
-
-**Key Bit Fields:**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [20] | LASTPOWERSTATEENTERED | R | Last low power state entered |
-| [11:10] | LOGICSTATEST | R | Logic state status:<br>0x0 = Logic off<br>0x1 = Logic retention<br>0x2 = Reserved<br>0x3 = Logic on |
-| [9:8] | MEM_STATEST_x | R | Memory bank state status:<br>0x0 = Memory off<br>0x1 = Memory retention<br>0x2 = Reserved<br>0x3 = Memory on |
-| [5] | INTRANSITION | R | Power state transition status:<br>0x0 = No transition<br>0x1 = Transition ongoing |
-| [1:0] | POWERSTATEST | R | Current power state:<br>0x0 = OFF<br>0x1 = RETENTION<br>0x2 = INACTIVE<br>0x3 = ON |
-
-### 8.12.6 PRM_DEVICE Registers (Base: 0x44E00F00)
-
-| Offset | Register Name | Purpose |
-|--------|--------------|---------|
-| 0x00 | PRM_RSTCTRL | Global warm/cold reset control |
-| 0x04 | PRM_RSTTIME | Reset timing configuration |
-| 0x08 | PRM_RSTST | Reset source status |
-| 0x0C | PRM_SRAM_COUNT | SRAM LDO transition counters |
-| 0x10 | PRM_LDO_SRAM_CORE_SETUP | SRAM LDO setup for CORE voltage domain |
-| 0x14 | PRM_LDO_SRAM_CORE_CTRL | SRAM LDO control for CORE voltage domain |
-| 0x18 | PRM_LDO_SRAM_MPU_SETUP | SRAM LDO setup for MPU voltage domain |
-| 0x1C | PRM_LDO_SRAM_MPU_CTRL | SRAM LDO control for MPU voltage domain |
-
-**PRM_RSTTIME Register (reset = 0x1006):**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [14:10] | RSTTIME2 | R/W | Reset time 2 in 32kHz clock cycles (duration for peripheral releases after host processor) |
-| [9:0] | RSTTIME1 | R/W | Reset time 1 in 32kHz clock cycles (nRESETIN_OUT assertion duration) |
-
-**PRM_SRAM_COUNT Register (reset = 0x78000017, warm reset insensitive):**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [31:24] | StartUp_Count | R/W | SRAM and ABB LDO startup duration (16 x N system clock cycles, target: 50us). Default: 0x78 |
-| [23:16] | SLPCNT_VALUE | R/W | Delay between retention/off assertion of last SRAM bank and SRAM_ALL_RET signal to LDO. Counting on system clock. Target: 2us |
-| [15:8] | VSETUPCNT_VALUE | R/W | SRAM LDO ramp-up time from retention to active (8 x N system clock cycles, target: 30us) |
-| [5:0] | PCHARGECNT_VALUE | R/W | Delay between de-assertion of standby_rta_ret_on and standby_rta_ret_good. Target: 600ns. Default: 0x17 |
-
-**PRM_LDO_SRAM_CORE_SETUP Register (warm reset insensitive):**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [8] | AIPOFF | R/W | Override AIPOFF input of SRAM LDO: 0=No override, 1=Force AIPOFF=1 (LDO disabled, HZ mode) |
-| [7] | ENFUNC5 | R/W | Active-to-retention transfer: 0=One step, 1=Two step |
-| [6] | ENFUNC4 | R/W | External clock: 0=One external clock supplied, 1=No external clock |
-| [5] | ENFUNC3_EXPORT | R/W Special | ENFUNC3 input (auto-loaded from eFuse after POR) |
-| [4] | ENFUNC2_EXPORT | R/W Special | ENFUNC2 input (auto-loaded from eFuse after POR) |
-| [3] | ENFUNC1_EXPORT | R/W Special | ENFUNC1 input (auto-loaded from eFuse after POR) |
-| [2] | ABBOFF_SLEEP_EXPORT | R/W Special | SRAM NWA supply during deep-sleep: 0=VDDS, 1=VDDAR (auto-loaded from eFuse) |
-| [1] | ABBOFF_ACT_EXPORT | R/W Special | SRAM NWA supply during active mode: 0=VDDS, 1=VDDAR (auto-loaded from eFuse) |
-| [0] | DISABLE_RTA_EXPORT | R/W Special | Disable RTA (auto-loaded from eFuse after POR) |
-
-### 8.12.7 PRM_RTC Registers (Base: 0x44E01000)
-
-| Offset | Register Name | Purpose |
-|--------|--------------|---------|
-| 0x00 | PM_RTC_PWRSTCTRL | RTC power domain control (reset = 0x4) |
-| 0x04 | PM_RTC_PWRSTST | RTC power domain status (reset = 0x4) |
-
-### 8.12.8 PRM_GFX Registers (Base: 0x44E01100)
-
-| Offset | Register Name | Purpose |
-|--------|--------------|---------|
-| 0x00 | PM_GFX_PWRSTCTRL | GFX power domain control (reset = 0x60044) |
-| 0x04 | RM_GFX_RSTCTRL | GFX domain local reset control (reset = 0x1) |
-| 0x10 | PM_GFX_PWRSTST | GFX power domain status (reset = 0x17) |
-| 0x14 | RM_GFX_RSTST | GFX domain reset status (warm reset insensitive) |
-
-**RM_GFX_RSTCTRL Register:**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [0] | RESET | R/W | GFX subsystem reset: 0=Clear (SGX released), 1=Assert (SGX held in reset) |
-
-### 8.12.9 PRM_CEFUSE Registers (Base: 0x44E01200)
-
-| Offset | Register Name | Purpose |
-|--------|--------------|---------|
-| 0x00 | PM_CEFUSE_PWRSTCTRL | eFuse power domain control (reset = 0x0) |
-| 0x04 | PM_CEFUSE_PWRSTST | eFuse power domain status (reset = 0x7) |
-
-**PM_CEFUSE_PWRSTCTRL Register:**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [4] | LowPowerStateChange | R/W | Low power state change request when domain already performed a sleep transition |
-| [1:0] | PowerState | R/W | Target power state: 0=OFF, 3=ON |
-
-#### PRM_RSTCTRL (Reset Control)
-
-Global warm reset control.
-
-**Key Bit Fields:**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [1] | RST_GLOBAL_COLD_SW | R/W | Software cold reset |
-| [0] | RST_GLOBAL_WARM_SW | R/W | Software warm reset |
-
-#### PRM_RSTST (Reset Status)
-
-Reports reset source.
-
-**Key Bit Fields:**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [9] | ICEPICK_RST | R/W1toClr | ICEPick reset |
-| [6] | EXTERNAL_WARM_RST | R/W1toClr | External warm reset |
-| [5] | WDT1_RST | R/W1toClr | Watchdog 1 reset |
-| [4] | GLOBAL_COLD_RST | R/W1toClr | Global cold reset |
-| [1] | GLOBAL_WARM_SW_RST | R/W1toClr | Global warm software reset |
-| [0] | POWER_ON_RST | R/W1toClr | Power-on reset |
-
-#### PRM_RSTTIME (Reset Timing)
-
-Controls reset timing parameters.
-
-**Key Bit Fields:**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [14:10] | RSTTIME2 | R/W | Reset time 2 (in 32kHz clock cycles) |
-| [9:0] | RSTTIME1 | R/W | Reset time 1 (in 32kHz clock cycles) |
-
-### 8.12.12 Sleep/Wakeup Control Registers
-
-See PRM_SRAM_COUNT (8.12.6, offset 0x0C) and PRM_LDO_SRAM_CORE/MPU_SETUP/CTRL (8.12.6) for SRAM retention during sleep control.
-
-### 8.12.13 Device Control Registers (Control Module)
-
-Located in Control Module (base 0x44E10000), but critical for power management.
-
-#### DEEPSLEEP_CTRL (Control Module: 0x44E10470)
-
-**Key Bit Fields:**
-
-| Bits | Field | Type | Description |
-|------|-------|------|-------------|
-| [31:16] | Reserved | - | - |
-| [15:3] | DSCOUNT | R/W | Deep sleep count (oscillator restart delay) |
-| [0] | DSENABLE | R/W | Deep sleep enable (0=Disable, 1=Enable) |
-
-### 8.12.14 IPC Registers
-
-Inter-processor communication registers for Cortex-A8 and Cortex-M3 (Control Module: 0x44E10400+).
-
-| Offset | Register Name | Purpose |
-|--------|--------------|---------|
-| 0x00 | IPC_MSG_REG0 | Command ID and Status |
-| 0x04 | IPC_MSG_REG1 | Command Parameter 1 |
-| 0x08 | IPC_MSG_REG2 | Command Parameter 2 |
-| 0x0C | IPC_MSG_REG3 | Response/Status from CM3 |
-| 0x10 | IPC_MSG_REG4 | Reserved |
-| 0x14 | IPC_MSG_REG5 | Reserved |
-| 0x18 | IPC_MSG_REG6 | Reserved |
-| 0x1C | IPC_MSG_REG7 | Customer use |
-
-**IPC_MSG_REG0 Format:**
-
-| Bits | Field | Description |
-|------|-------|-------------|
-| [31:16] | CMD_ID | Command identifier |
-| [15:0] | CMD_STAT | Command status |
-
----
-
-## 8.13 Register Access Considerations
-
-### 8.14.1 Synchronization Requirements
-
-- **Clock Domain Transitions:** Software must ensure proper sequencing when changing CLKTRCTRL
-- **DPLL Configuration:** Always put DPLL in bypass before changing M, N, or M2 values (except M2 on-the-fly changes)
-- **Power Domain Transitions:** Check INTRANSITION bit before assuming power state change completed
-- **Module Enable:** Always wait for IDLEST to show functional state before accessing module
-
-### 8.14.2 Reset Sensitivity
-
-Some register bits are marked as:
-- **Cold reset only:** Preserved during warm reset
-- **Warm reset sensitive:** Reset to default on warm reset
-- **Power domain reset:** Reset when power domain is cycled
-
-Check module documentation for specific reset behavior.
-
-### 8.14.3 Access Restrictions
-
-- **Read-only fields:** Writing has no effect
-- **Write-to-clear bits:** Writing 1 clears the bit, writing 0 has no effect (e.g., reset status bits)
-- **Reserved bits:** Should not be modified, read as 0
-
-### 8.14.4 Common Pitfalls
-
-1. **Forgetting to enable clock domain:** Module won't function if clock domain is in NO_SLEEP or SW_SLEEP
-2. **Not waiting for lock:** Accessing DPLL outputs before lock completes causes undefined behavior
-3. **Missing IDLEST check:** Accessing module registers before IDLEST shows functional can cause bus errors
-4. **Power domain sequencing:** Incorrect power-up/power-down sequence can hang system
-5. **Context loss:** Not saving context before entering low power modes with memory OFF
+#### **8.1.6.4 ADPLLLJ (Low Jitter DPLL)**
+
+The ADPLLLJ is a low jitter PLL with a 2-GHz maximum output. ADPLLLJ has a predivide feature which allows user to divide, for instance, a 24-MHz or 26-MHz reference clock to 1 MHz and then multiply up to 2 GHz maximum.
+
+All PLLs will come-up in bypass mode at reset. SW needs to program all the PLL settings appropriately and then wait for PLL to be locked. For more details, see the configuration procedure for each PLL.
+
+
+The Peripheral PLL belongs to type ADPLLLJ:
+
+The DPLL has two input clocks:
+
+- CLKINP: Reference input clock
+- CLKINPULOW: Bypass input clock.
+
+The DPLL has two internal clocks:
+
+- REFCLK (Internal reference clock): This is generated by dividing the input clock CLKINP by the programmed value N+1. The entire loop of the PLL runs on the REFCLK.
+- Here, REFCLK = CLKINP/(N+1).
+- CLKDCOLDO (Internal Oscillator clock.):This is the raw clock directly out of the digitally controlled oscillator (DCO) before the post-divider. The PLL output clock is synthesized by an internal oscillator which is phase locked to the refclk. There are two oscillators built within ADPLLLJ. The oscillators are user selectable based on the synthesized output clock frequency requirement. In locked condition, CLKDCOLDO = CLKINP \*[M/(N+1)].
+
+The ADPLLLJ lock frequency is defined as follows: fDPLL = CLKDCOLDO
+
+The DPLL has three external output clocks:
+
+• CLKOUTLDO: Primary output clock in VDDLDOOUT domain. Bypass option not available on this output.
+
+CLKOUTLDO = (M / (N+1))\*CLKINP\*(1/M2)
+
+- CLKOUT: Primary output clock on digital core domain
+- CLKOUT = (M / (N+1))\*CLKINP\*(1/M2)
+- CLKDCOLDO: Oscillator (DCO) output clock before post-division in VDDLDOOUT domain. Bypass option is not available on this output.
+- CLKDCOLDO = (M / (N+1))\*CLKINP.
+
+
+All clock outputs of the DPLL can be gated. The Control module provides the DPLL with a clock gating control signal to enable or disable the clock, and the DPLL provides the PRCM module with a clock activity status signal to let the PRCM module hardware know when the clock is effectively running or effectively gated. Output clock gating control for various clockouts: CLKOUTEN/CLKOUTLDOEN/CLKDCOLDOEN.
+
+### *8.1.6.4.1 Clock Functions*
+
+**Table 8-19. Output Clocks in Locked Condition**
+
+| Pin Name  | Frequency                    |
+|-----------|------------------------------|
+| CLKOUT    | [M /(N+1)] * CLKINP * [1/M2] |
+| CLKOUTLDO | [M /(N+1)] * CLKINP * [1/M2] |
+| CLKDCOLDO | [M /(N+1)] * CLKINP          |
+
+**Table 8-20. Output Clocks Before Lock and During Relock Modes**
+
+| Pin Name  | Frequency     | Comments      |
+|-----------|---------------|---------------|
+| CLKOUT    | CLKINP/(N2+1) | ULOWCLKEN='0' |
+|           | CLKINPLOW     | ULOWCLKEN='1' |
+| CLKDCOLDO | LOW           |               |
+| CLKOUTLDO | LOW           |               |
+
+#### **8.1.6.5 M2 Change On-the-Fly**
+
+The divider M2 is designed to change on the fly and provide a glitch-free frequency switch from the old to new frequencies. It can be changed while the PLL is in a locked condition without having to switch to bypass mode. A status toggle bit will give an indication if the new divisor was accepted. The divider M2 can also be changed in bypass mode, and the new divisor value will be reflected on output after the PLL relocks. For more details, see the PLL configuration procedures for each PLL.
+
+#### **8.1.6.6 Spread Spectrum Clocking (SSC)**
+
+**NOTE:** Spread spectrum clock is only supported for the DISP/LCD and MPU PLLs on this device. Spread spectrum clocking is not supported for DDR, PER, and CORE PLLs. When enabling SSC on MPU PLL, ensure the maximum MPU frequency remains below the maximum rated frequency for the chosen OPP (see the device-specific Data Manual for more details).
+
+The module supports spread spectrum clocking (SSC) on its output clocks. SSC is used to spread the spectral peaking of the clock to reduce any electromagnetic interference (EMI) that may be caused due to the clock's fundamental or any of its harmonics. When SSC is enabled the clock's spectrum is spread by the amount of frequency spread, and the attenuation is given by the ratio of the frequency spread (Δf) and the modulation frequency (fm), i.e., [{10\*log10(Df/fm)}-10] dB.
+
+#### *8.1.6.6.1 Definition*
+
+The aim of SSC is to add a variation in the frequency of an original clock, which spreads the generated interferences over a larger band of frequency.
+
+In theory, SSC means that the clock signal is varied around the desired frequency. For example, for a 1- GHz clock, the frequency may be 999.5 MHz at one moment and 1.0005 GHz at another. When SSC is enabled the clock spectrum is spread by the amount of frequency spread. Doing this constantly causes the power of the tone to be spread out more over a broader band of tight frequencies (centered at the desired tone). To realize this constant variation on the original signal, a modulation with an additional signal (called spreading waveform) is realized.
+
+Creating an SSC by spreading the initial clock frequency is done by defining the following parameters:
+
+
+- The spreading frequency (deviation), which is the ratio of the range of spreading frequency over the original clock frequency
+- The modulation rate (fm), which is used to determine the clock-frequency spreading-cycling rate and is the time during which the generated clock frequency varies through Δf and returns to the original frequency
+- The modulation waveform, which describes the variation curve in terms of time
+
+The spectral power reduction in the DPLL clocks is dependent on the modulation index (K), which is a ratio of spreading frequency calculated from the frequency deviation (Δf) and the modulation rate (fm) .
+
+#### *8.1.6.6.2 Effect on the Clock Signal*
+
+[Figure](#page-25-0) 8-10 is an example of the effect of a triangular spreading on a clock signal.
+
+
+[Figure](#page-25-0) 8-10 shows not only the power reduction of the main peak, but also the flatter aspect of the modulated signal. The minimum level of the second signal is higher than the minimum level of the first signal. This effect is normal and is due to the noise added for the modulation.
+
+**NOTE:** The spreading technique scatters the energy of the peaks on the other frequencies, which reduces the power of the peaks but increases the global noise of the signal.
+
+[Figure](#page-26-0) 8-11 shows the effect of triangular spreading on a clock signal in the time domain.
+
+
+scm-039
+
+#### *8.1.6.6.3 Estimation of the EMI Reduction Level*
+
+[Figure](#page-26-1) 8-12 shows the effect of spreading on a clock and its harmonics.
+
+
+The electromagnetic interference reduction can be estimated with the following equation:
+
+Peak\_power\_reduction = 10 \* log ((Deviation \* f<sup>c</sup> ) / f<sup>m</sup>
+
+With:
+
+
+- Peak power reduction in dB
+- Deviation in % of the initial clock frequency  $(f_c)$ , equals  $\Delta f / f_c$
+- f<sub>c</sub> is the original clock frequency, in MHz
+- f<sub>m</sub> is the spreading frequency, in MHz
+
+According to equation (1), it is also possible to compute the deviation, and then  $\Delta f$ , for a required peak power reduction:
+
+Deviation =  $(f_m / f_c) * 10^{(Peak\_power\_reduction / 10)}$
+
+Example:
+
+For  $f_c$ =400 MHz, deviation =1% peak from  $f_c$ ( $\Delta f$  = 4MHz) and  $f_m$ =400kHz; the estimated peak power reduction is 10dB.
+
+#### 8.1.6.6.4 Bandwidth Calculation (Carson Bandwidth Rule)
+
+The Carson bandwidth rule defines the approximate bandwidth requirements of communications system components for a carrier signal that is frequency-modulated by a continuous or broad spectrum of frequencies rather than a single frequency.
+
+The Carson bandwidth rule is expressed by the relation CBR =  $2 * (\Delta f + f_m)$ , where CBR is the bandwidth requirement,  $\Delta f$  is the peak frequency deviation, and  $f_m$  is the highest frequency in the modulating signal.
+
+For example, an FM signal with a 5-kHz peak deviation and a maximum audio frequency of 3 kHz, would require an approximate bandwidth 2\*(5 3) = 16 kHz.
+
+Theoretically, any FM signal has an infinite number of sidebands and hence an infinite bandwidth, but in practice all significant sideband energy (98% or more) is concentrated within the bandwidth defined by the Carson bandwidth rule.
+
+#### 8.1.6.6.5 SSC Generation Control in the Device
+
+SSC is performed by changing the feedback divider (M) in a triangular pattern. Implying, the frequency of the output clock would vary in a triangular pattern. The frequency of this pattern would be modulation frequency ( $f_m$ ). The peak ( $\Delta M$ ) or the amplitude of the triangular pattern as a percent of M would be equal to the percent of the output frequency spread ( $\Delta f$ ); that is,  $\Delta M/M = \Delta f / f_c$ . Next mark with Finp the frequency of the clock signal at the input of the DPLL. Because it is divided to N+1 before entering the phase detector, so the internal reference frequency is Fref = Finp / (N + 1).
+
+Assume the central frequency  $f_c$  to be equal to the DPLL output frequency Fout, or  $f_c$ = Fout = (Finp / (N + 1)) \* (M / M2). Since this is in band modulation for the DPLL, the modulation frequency is required to be within the DPLL's loop bandwidth (lowest BW of Fref / 70). A higher modulation frequency would result in lesser spreading in the output clock.
+
+SSC can be enabled/disabled using bit CM CLKMODE DPLL xxx.DPLL SSC EN (where xxx can be any one of the following DPLLs: MPU, DDR, DISP, CORE, PER). An acknowledge signal CM CLKMODE DPLL xxx.DPLL SSC ACK notifies the exact start and end of SSC. When SSC EN is de-asserted, SSC is disabled only after completion of one full cycle of the triangular pattern given by the modulation frequency. This is done in order to maintain the average frequency.
+
+Modulation frequency (f<sub>m</sub>) can be programmed as a ratio of Fref / 4; that is, the value that needs to be programmed ModFreqDivider = Fref / (4\*f<sub>m</sub>). The ModFreqDivider is split into Mantissa and 2^Exponent (ModFreqDivider = ModFreqDividerMantissa \* 2^ModFreqDividerExponent). The mantissa is controlled by 7-bit signal ModFregDividerMantissa through
+
+CM\_SSC\_MODFREQDIV\_DPLL\_xxx.MODFREQDEV\_MANTISSA bit field. The exponent is controlled by 3bit signal ModFreqDividerExponent through the
+
+CM\_SSC\_MODFREQDIV\_DPLL\_xxx.MODFREQDEV\_EXPONENT bit field.
+
+NOTE: Although the same value of ModFreqDivider can be obtained by different combinations of mantissa and exponent values, it is recommended to get the target ModFreqDivider by programming maximum mantissa and a minimum exponent.
+
+
+To define the Frequency spread ( $\Delta f$ ),  $\Delta M$  must be controlled as explained previously. To define  $\Delta M$ , the step size of M for each Fref during the triangular pattern must be programmed; that is,
+
+$\Delta M$  = (2^ModFreqDividerExponent) \* ModFreqDividerMantissa \* DeltaMStep IF ModFreqDividerExponent  $\leq 3\Delta M = 8$  \* ModFreqDividerMantissa \* DeltaMStep IF ModFreqDividerExponent > 3
+
+DeltaMStep is split into integer part and fractional part. Integer part is controlled by 2-bit signal DeltaMStepInteger through the CM\_SSC\_DELTAMSTEP\_DPLL\_xxx.DELTAMSTEP\_INTEGER bit field. Fractional part is controlled by 18-bit signal DeltaMStepFraction through the CM\_SSC\_DELTAMSTEP\_DPLL\_xxx.DELTAMSTEP\_FRACTION bit field.
+
+The frequency spread achieved has an overshoot of 20 percent or an inaccuracy of +20 percent. If the CM\_CLKMODE\_DPLL.DPLL\_SSC\_DOWNSPREADis set to 1, the frequency spread on lower side is twice the programmed value. The frequency spread on higher side is 0 (except for the overshoot as described previously).
+
+There is restriction of range of M values. The restriction is M- $\Delta$ M should be  $\geq$  20. Also, M+ $\Delta$ M should be  $\leq$  2045. In case the downspread feature is enabled, M-2\* $\Delta$ M should be  $\geq$  20 and M  $\leq$  2045.
+
+#### 8.1.6.6.6 SSC Generation
+
+The configuration of the spreading feature is not mandatory when programming the DPLL. This feature is usually enabled when the DPLL clocks generate harmonics that can potentially interfere with the GSM carrier frequencies.
+
+Let's take the SSC featured Display ADPLL and try to set the output frequency to  $F_{out} = f_c = 11$  MHz. Software most likely sets the DPLL higher to clock the DSS module at a higher functional clock, and then sets the DISPC\_DIVISOR to achieve an 11 MHz pixel clock. But in this example, the PLL is set to output 11 MHz. The frequency of the input clock source for Display ADPLL is  $F_{inp} = 25$  MHz.
+
+- 1. The desired output frequency can be achieved with the following ratio of the divider coefficients: (M / M2) \* 1 / (N + 1) =  $F_{out}$  /  $F_{inp}$  = 11 / 25. The dividers used in the Display ADPLL can be set within the following ranges: N = 0..127; M = 0..2047; M2 = 1;2. The desired output frequency is achieved through the following choice of possible divider values: M = 22; N = 4; and M2 = 10. In that case the reference clock  $F_{ref}$  =  $F_{inp}$  / (N + 1) = 25 / (4 + 1) = 5 MHz.
+- The feedback divider value M = 22 is chosen to satisfy the restriction from Section 8.1.6.6. If, for example, the deviation  $\Delta M$  / M =  $\Delta f$  f<sub>c</sub>= 0.05 (5%) is chosen, we have M +  $\Delta M$  < 2045 and at the same time M +  $\Delta M$  > 20
+- Once the clock generation control registers are configured, it is possible to configure the spreading on the clock signal.
+- 2. Calculate the ratio between central(output) frequency and modulation frequency on the base of the desired peak power reduction (PPR) and chosen relative deviation  $\Delta f / F_{out}$ , where  $\Delta f / F_{out} = f_m / f_c^*$  10 ^ (PPR / 10). To achieve PPR = 10dB with SSC deviation ( $\Delta f / f_c$ ) chosen to be equal to 5 percent,  $f_m = \Delta f / 10^{(PPR/10)} = 55$  kHz. To check whether the modulation frequency has the appropriate value, check whether it is within the DPLL loop bandwidth or if  $f_m < F_{ref} / 70 = 5 / 70 = 71.4$  KHz, which is true.
+- 3. Calculate the contents of the MODFREQDEV\_MANTISSA and MODFREQDEV\_EXPONENT bit fields on the base of ModFreqDivider value: ModFreqDivider =  $F_{ref}$  / (4 \*  $f_m$ ) = 5 / (4 \* 0.055) = 22.73. The resulting value needs to be put in the form MODFREQDEV\_MANTISSA \*  $2^{MODFREQDEV\_EXPONENT}$ . Thus, we can approximate 23 = 23 \* 20. The approximation will just slightly affect the PPR.
+- This means we should write MODFREQDEV\_EXPONENT = 0x0 and MODFREQDEV\_MANTISSA = 0x17
+- 4. The DeltaMStep parameter is calculated according to the formula: DeltaMStep =  $\Delta M$  / ModFreqDivider. Since  $\Delta M$  = M \* ( $\Delta f$  /  $f_c$ ), DeltaMStep = M \* ( $\Delta f$  /  $f_c$ ) / ModFreqDivider. Thus in this example, DeltaMStep = 22 \* 0.05 / 23 = 0.047826.
+- In this case, write 0x0 in DELTAMSTEP\_INTEGER (bits 19:18). To express the fractional part 0.05 as a binary, calculate: 0.047826 \* 2^18 = 12537.3, then round to 12537, convert the integer part to binary and write it into the field: DELTAMSTEP\_FRACTIONAL (bits 17:0) = 0x30F9.
+- The spreading must be enabled using the SSC\_EN bit.
+
+
+**NOTE:** It is necessary to configure the spreading on a clock carefully to avoid adding noise on frequencies that are used by another module. For example, adding spreading on a clock to reduce noise on GSM frequencies can "move" the generated noise to the frequency of the memory controller and degrade its performance.
+
+The state of the modulation feature can be monitored with the DPLL\_SSC\_ACK bit of the corresponding register.
+
+### **8.1.6.7 Core PLL Description**
+
+The Core PLL provides the source for a majority of the device infrastructure and peripheral clocks. The Core PLL comprises an ADPLLS with HSDIVIDER and additional dividers and muxes located in the PRCM as shown in [Figure](#page-29-0) 8-13.
+
+
+ALT\_CLKs are to be used for internal test purpose and should not be used in functional mode.
+
+
+# **Table 8-21. PLL and Clock Frequences**
+
+| Mux Select<br>Register BitSection 9.2.4.4 |                                 |  |
+|-------------------------------------------|---------------------------------|--|
+| A                                         | PRCM.CLKSEL_GFX_FCLK[1]         |  |
+| B                                         | PRCM.CLKSEL_GFX_FCLK[0]         |  |
+| C                                         | PRCM.CLKSEL_PRU-ICSS_OCP_CLK[0] |  |
+| D                                         | PRCM.CM_CPTS_RFT_CLKSEL[0]      |  |
+| E                                         | TEST.CDR (via P1500)            |  |
+
+[Table](#page-30-0) 8-22 gives the typical PLL and clock frequencies. The HSDIVIDER is used to generate three divided clocks M4, M5 & M6. M4 & M5 are nominally 200 & 250 MHz, respectively.
+
+**Table 8-22. Core PLL Typical Frequencies (MHz)**
+
+
+| CLOCK                                                                                | Source            |     | Power-On-Reset /<br>HSDIVIDER Bypass |           | OPP100     |           | OPP50(1)(2) |
+|--------------------------------------------------------------------------------------|-------------------|-----|--------------------------------------|-----------|------------|-----------|-------------|
+|                                                                                      |                   | DIV | Freq                                 | DIV Value | Freq (MHz) | DIV Value | Freq (MHz)  |
+| CLKDCOLDO (PLL<br>Lock frequency)                                                    | APLLS             | -   | -                                    | -         | 2000       | -         | 100         |
+| CORE_CLKOUTM4                                                                        | HSDIVIDER<br>M4   | -   | Mstr Xtal                            | 10        | 200        | 1         | 100         |
+| L3F_CLK, L4F_CLK,<br>PRU-ICSS IEP CLK,<br>DebugSS clka,<br>SGX.MEMCLK,<br>SGX.SYSCLK | CORE_CLKO<br>UTM4 | -   | Mstr Xtal                            | -         | 200        | -         | 100         |
+| L4_PER, L4_WKUP                                                                      | CORE_CLKO<br>UTM4 | 2   | Mstr Xtal / 2                        | 2         | 100        | 2         | 50          |
+|                                                                                      | CORE_CLKO         | 1   | Mstr Xtal                            | 1         | 200        | 1         | 100         |
+| SGX CORECLK                                                                          | UTM4              |     |                                      | 2         | 100        | 2         | 50          |
+| CORE_CLKOUTM5                                                                        | HSDIVIDER<br>M5   | -   | Mstr Xtal                            | 8         | 250        | 1         | 100         |
+| MHZ_250_CLK (Gigabit<br>RGMII)                                                       | CORE_CLKO<br>UTM5 | -   | NA                                   | -         | 250        | -         | NA          |
+| MHZ_125_CLK<br>(Ethernet Switch Bus<br>Clk)                                          | CORE_CLKO<br>UTM5 | 2   | Mstr Xtal / 2                        | 2         | 125        | 2         | 50          |
+| MHZ_50_CLK (100<br>mbps RGMII or 10/100<br>RMII)                                     | CORE_CLKO<br>UTM5 | 5   | Mstr Xtal / 5                        | 5         | 50         | 2         | 50          |
+| MHZ_5_CLK (10 mbps<br>RGMII)                                                         | MHZ_50_CLK        | 10  | Mstr Xtal / 50                       | 10        | 5          | 10        | 5           |
+| CORE_CLKOUTM6                                                                        | HSDIVIDER<br>M6   | -   | Mstr Xtal                            | 4         | 500        | 1         | 100         |
+
+<sup>(1)</sup> Not all interfaces and peripheral modules are available in OPP50. For more information, see the device specific datasheet.
+
+The ADPLLS module supports two different bypass modes via their internal MNBypass mode and their external Low Power Idle bypass mode. The PLLs are in the MNBypass mode after power-on reset and can be configured by software to enter Low Power Idle bypass mode for power-down.
+
+When the Core PLL is configured in bypass mode, the HSDIVIDER enters bypass mode and the CLKINBYPASS input is driven on the M4, M5, and M6 outputs. CLKINBYPASS defaults to the master oscillator input (typically 24 MHz).
+
+<sup>(2)</sup> For limitations using OPP50, see *AM335x ARM Cortex-A8 Microprocessors (MPUs) Silicon Errata* (literature number [SPRZ360\)](http://www.ti.com/lit/pdf/SPRZ360).
+
+
+### **Table 8-23. Bus Interface Clocks**
+
+| L3F_CLK     | SGX530 (MEMCLK & SYSCLK), LCDC, MPU Subsystem, GEMAC<br>Switch (Ethernet), DAP, PRU-ICSS, EMIF, TPTC, TPCC, OCMC<br>RAM, DEBUGSS, AES, SHA                                                                                                                                                                                                    |
+|-------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| L3S_CLK     | USB, TSC, GPMC, MMCHS2, McASP0, McASP1                                                                                                                                                                                                                                                                                                        |
+| L4_PER_CLK  | DCAN0, DCAN1, DES<br>DMTIMER2, DMTIMER3, DMTIMER4, DMTIMER5, DMTIMER6,<br>DMTIMER7<br>eCAP/eQEP/ePWM0, eCAP/eQEP/ePWM1, eCAP/eQEP/ePWM2,<br>eFuse<br>ELM, GPIO1, GPIO2, GPIO3<br>I2C1, I2C2, IEEE1500, LCD, Mailbox0<br>McASP0, McASP1<br>MMCHS0, MMCHS1, OCP Watchpoint, PKARNG<br>SPI0, SPI1, Spinlock<br>UART1, UART2, UART3, UART4, UART5 |
+| L4_WKUP_CLK | ADC_TSC, Clock Manager, Control Module<br>DMTIMER0, DMTIMER1_1MS, GPIO0<br>I2C0, M3UMEM, M3DMEM, SmartReflex0, SmartReflex1<br>UART0, WDT0, WDT1                                                                                                                                                                                              |
+
+# *8.1.6.7.1 Core PLL Configuration*
+
+- 1. Switch PLL to bypass mode by setting CM\_CLKMODE\_DPLL\_CORE.DPLL\_EN to 0x4.
+- 2. Wait for CM\_IDLEST\_DPLL\_CORE.ST\_MN\_BYPASS = 1 to ensure PLL is in bypass (CM\_IDLEST\_DPLL\_CORE.ST\_DPLL\_CLK should also change to 0 to denote the PLL is unlocked).
+- 3. Configure Multiply and Divide values by setting CM\_CLKSEL\_DPLL\_CORE.DPLL\_MULT and DPLL\_DIV to the desired values.
+- 4. Configure M4, M5 and M6 dividers by setting HSDIVIDER\_CLKOUT1\_DIV bits in CM\_DIV\_M4\_DPLL\_CORE,CM\_DIV\_M5\_DPLL\_CORE, and CM\_DIV\_M6\_DPLL\_CORE to the desired values.
+- 5. Switch over to lock mode by setting CM\_CLKMODE\_DPLL\_CORE.DPLL\_EN to 0x7.
+- 6. Wait for CM\_IDLEST\_DPLL\_CORE.ST\_DPLL\_CLK = 1 to ensure PLL is locked (CM\_IDLEST\_DPLL\_CORE.ST\_MN\_BYPASS should also change to 0 to denote the PLL is out of bypass mode).
+
+**Note:** M4, M5, and M6 dividers can also be changed on-the-fly so that there is no need to put the PLL in bypass and back to lock mode. After changing CM\_DIV\_Mx\_DPLL\_CORE.DPLL\_CLKOUT\_DIV, check CM\_DIV\_Mx\_DPLL\_CORE.DPLL\_HSDIVIDER\_CLKOUT1\_DIVCHACK for a toggle (a change from 0 to 1 or 1 to 0) to see if the change was acknowledged by the PLL.
+
+#### **8.1.6.8 Peripheral PLL Description**
+
+The Per PLL provides the source for peripheral functional clocks. The Per PLL comprises an ADPLLLJ and additional dividers and muxes located in the PRCM as shown
+
+
+Osc (CLK\_M\_OSC) Per PLL (ADPLLLJ) USB\_PHY\_CLK (960 MHz) CLKINP CLKDCOLDO ▶ To USB PHY ALT\_CLK1
+
+✓ ALT\_CLK2
+
+✓ PER CLKOUTM2 PRCM TEST.CDR (via P1500) (192 MHz) CLKOUT ▶ PRU\_ICSS\_UART\_CLK Reset default = 0 (96 MHz) MMC CLK /2 SPI\_CLK (48 MHz) CONTROL\_CLK32K DIVRATIO\_CTRL[0]\* UART\_CLK Controls CLK 48 12C CLK **CLKINPULOW** /2 /732 4219 ULOWCLKEN ULOWPRIORITY /366.2109 (32,768 Hz) ► CLK\_32KHZ ► To DDR, Disp, MPU PLLs bypass clocking PRCM SGX clock mux
+
+
+\*Reset default zero
+
+ALT\_CLKs are to be used for internal test purpose and should not be used in functional mode.
+
+The PLL is locked at 960 MHz. The PLL output is divided by the M2 divider to generate a 192-MHz CLKOUT. This clock is gated in the PRCM to form the PRU-ICSS UART clock. There is a /2 divider to create 96 MHz for MMC\_CLK. The clock is also divided within the PRCM by a fixed /4 divider to create a 48-MHz clock for the SPI, UART and I2C modules. The 48-MHz clock is further divided by a fixed /2 divider and a fixed /732.4219 divider to create an accurate 32.768-KHz clock for Timer and debounce use.
+
+Table 8-24. Per PLL Typical Frequencies (MHz)
+
+| Clock                            | Source                                                                                                                   | 1 1 1                        | Reset / PLL<br>pass                 | OPP100    |               | OPP50 <sup>(1)(2)</sup> |               |
+|----------------------------------|--------------------------------------------------------------------------------------------------------------------------|------------------------------|-------------------------------------|-----------|---------------|-------------------------|---------------|
+| CIOCK                            | Source                                                                                                                   | DIV Value                    | Freq                                | DIV Value | Freq<br>(MHz) | DIV Value               | Freq<br>(MHz) |
+| PLL Lock frequency               | PLL                                                                                                                      | -                            | -                                   | -         | 960           | -                       | 960           |
+| USB_PHY_CLK                      | CLKDCOLDO                                                                                                                | -                            | Held Low                            | -         | 960           | -                       | 960           |
+| PER_CLKOUTM2                     | CLKOUT of<br>ADPLLLJ<br>CLKOUT uses PLL's<br>M2 Divider when PLL<br>is locked and PLL's<br>N2 divider when PLL<br>Bypass | N2 is 0 on<br>power-on-reset | Mstr Xtal/<br>(N2+1)                | 5         | 192           | 10                      | 96            |
+| MMC_CLK                          | PER_CLKOUTM2                                                                                                             | 2                            | Mstr Xtal/<br>((N2+1)*2)            | 2         | 96            | 2                       | 48            |
+| SPI_CLK,<br>UART_CLK,<br>I2C_CLK | PER_CLKOUTM2                                                                                                             | 4                            | Mstr Xtal/<br>((N2+1)*4)            | 4         | 48            | 4                       | 24            |
+| CLK_24                           | CLK_48                                                                                                                   | 2                            | CLK_48 /2                           | 2         | 24            | 2                       | 12            |
+| CLK_32KHZ                        | CLK_24<br>(output of CLK_48/2)                                                                                           | 732.4219                     | CLK_24 /<br><clk32_div></clk32_div> | 732.4219  | 0.032768      | 366.2109                | 0.032768      |
+
+<sup>(1)</sup> For limitations using OPP50, see AM335x ARM Cortex-A8 Microprocessors (MPUs) Silicon Errata (literature number SPRZ360).
+
+<sup>(2)</sup> Not all interfaces and peripheral modules are available in OPP50. For more information, see AM335x ARM Cortex-A8 Microprocessors (MPUs) Silicon Errata (literature number SPRZ360).
+
+
+The ADPLLLJ module supports two different bypass modes via their internal MNBypass mode and their external Low Power Idle bypass mode. The PLLs are in the MNBypass mode after power-on reset and can be configured by software to enter Low Power Idle bypass mode for power-down.
+
+The PER PLL can use the Low Power Idle bypass mode. When the internal bypass mode is selected, the CLKOUT output is driven by CLKINP/(N2+1) where N2 is driven by the PRCM. CLKINP defaults to the master oscillator input (typically 24 MHz)
+
+# *8.1.6.8.1 Configuring the Peripheral PLL*
+
+The following steps detail how to configure the peripheral PLL.
+
+- 1. Switch PLL to bypass mode by setting CM\_CLKMODE\_DPLL\_PER.DPLL\_EN to 0x4.
+- 2. Wait for CM\_IDLEST\_DPLL\_PER.ST\_MN\_BYPASS = 1 to ensure PLL is in bypass (CM\_IDLEST\_DPLL\_PER.ST\_DPLL\_CLK should also change to 0 to denote the PLL is unlocked).
+- 3. Configure Multiply and Divide values by setting CM\_CLKSEL\_DPLL\_PER.DPLL\_MULT and DPLL\_DIV to the desired values.
+- 4. Configure M2 divider by setting CM\_DIV\_M2\_DPLL\_PER.DPLL\_CLKOUT\_DIV to the desired value.
+- 5. Switch over to lock mode by setting CM\_CLKMODE\_DPLL\_PER.DPLL\_EN to 0x7.
+- 6. Wait for CM\_IDLEST\_DPLL\_PER.ST\_DPLL\_CLK = 1 to ensure PLL is locked (CM\_IDLEST\_DPLL\_PER.ST\_MN\_BYPASS should also change to 0 to denote the PLL is out of bypass mode).
+
+**Note:** M2 divider can also be changed on-the-fly (ie., there is no need to put the PLL in bypass and back to lock mode). After changing CM\_DIV\_M2\_DPLL\_PER.DPLL\_CLKOUT\_DIV, check CM\_DIV\_M2\_DPLL\_PER.DPLL\_CLKOUT\_DIVCHACK for a toggle (a change from 0 to 1 or 1 to 0) to see if the change was acknowledged by the PLL.
+
+# **8.1.6.9 MPU PLL Description**
+
+The Cortex A8 MPU subsystem includes an internal ADPLLS for generating the required Cortex A8 MPU clocks. This PLL is driven by the master oscillator output with control provided by PRCM registers.
+
+
+#### For example:
+
+For a frequency for MPU, say 600 MHz, the ADPLLS is configured (PLL locked at 1200 MHz and M2 Divider =1) so as to expect CLKOUT = 600 MHz .
+
+The ULOWCLKEN input from a programmable PRCM register selects whether CLKINP or CLKINPULOW is the bypass clock source. This is a glitch free switch. When CLKINP is selected it is sourced through the ADPLLS 1/(N2+1) divider. The PRCM register defaults to 0 on power-up to select the CLKINP source.
+
+The CLKINPULOW input may be sourced from the CORE\_CLKOUTM6 from the Core PLL, or PER\_CLKOUTM2 from the Per PLL. These PLL output clocks can be used as alternate clock sources in low power active use cases for the MPU Subsystem clock when the PLL is in bypass mode.
+
+### *8.1.6.9.1 Configuring the MPU PLL*
+
+The following steps detail how to configure the MPU PLL.
+
+- 1. Switch PLL to bypass mode by setting CM\_CLKMODE\_DPLL\_MPU.DPLL\_EN to 0x4.
+- 2. Wait for CM\_IDLEST\_DPLL\_MPU.ST\_MN\_BYPASS = 1 to ensure PLL is in bypass (CM\_IDLEST\_DPLL\_MPU.ST\_DPLL\_CLK should also change to 0 to denote the PLL is unlocked).
+- 3. Configure Multiply and Divide values by setting CM\_CLKSEL\_DPLL\_MPU.DPLL\_MULT and DPLL\_DIV to the desired values.
+- 4. Configure M2 divider by setting CM\_DIV\_M2\_DPLL\_MPU.DPLL\_CLKOUT\_DIV to the desired value.
+- 5. Switch over to lock mode by setting CM\_CLKMODE\_DPLL\_MPU.DPLL\_EN to 0x7.
+- 6. Wait for CM\_IDLEST\_DPLL\_MPU.ST\_DPLL\_CLK = 1 to ensure PLL is locked (CM\_IDLEST\_DPLL\_MPU.ST\_MN\_BYPASS should also change to 0 to denote the PLL is out of bypass mode).
+
+**Note:** M2 divider can also be changed on-the-fly (ie., there is no need to put the PLL in bypass and back to lock mode). After changing CM\_DIV\_M2\_DPLL\_MPU.DPLL\_CLKOUT\_DIV, check CM\_DIV\_M2\_DPLL\_MPU.DPLL\_CLKOUT\_DIVCHACK for a toggle (a change from 0 to 1 or 1 to 0) to see if the change was acknowledged by the PLL.
+
+
+### **8.1.6.10 Display PLL Description**
+
+The Display PLL provides the pixel clock required for the LCD display and is independent from the other peripheral and infrastructure clocks. The PLL is clocked from the Master Oscillator. The ADPLLS M2 divider determines the output clock frequency which is clock gated by the PRCM as shown in [Figure](#page-35-0) 8-16.
+
+PRCM LCD\_CLK 0 1 2 CORE\_CLKOUTM5 PER\_CLKOUTM2 Display PLL (ADPLLS) CLKOUT CLKDCOLDO CLKOUTHIF CLKINP CLKINPULOW ULOWPRIORITY 0 1 2 0 1 Master Osc (CLK\_M\_OSC) ALT\_CLK1 ALT\_CLK2 TEST.CDR (via P1500) ULOWCLKEN 0: CLKINP 1: CLKINPULOW CORE\_CLKOUTM6 PER\_CLKOUTM2 CONTROL.PLL\_CLKINPULOW\_CTRL.DISP\_ PLL\_CLKINPULOW\_SEL (Reset default = 0) PRCM.CM\_CLKSEL\_DPLL\_DISP. DPLL\_BYP\_CLKSEL (Reset default = 0) CLKOUTx2 PRCM.CLKSEL\_LCDC\_PIXEL\_CLK (Reset default = 0)
+
+
+For example: say frequency for pixel clock 100 MHz, the ADPLLS is configured (PLL locked at 200 MHz and M2 Divider =1) so as to expect CLKOUT = 100 MHz.
+
+The ULOWCLKEN input from a programmable PRCM register selects whether CLKINP or CLKINPULOW is the bypass clock source. This is a glitch free switch. When CLKINP is selected it is sourced through the ADPLLS 1/(N2+1) divider. The PRCM register defaults to 0 on power-up to select the CLKINP source.
+
+The CLKINPULOW input is sourced from the CORE\_CLKOUTM6 from the Core PLL or PER\_CLKOUTM2 from the Per PLL. This PLL output clock can be used as an alternate clock source in low power active use cases for the pixel clock when the Display PLL is in bypass mode.
+
+#### *8.1.6.10.1 Configuring the Display PLL*
+
+The following steps detail how to configure the display PLL.
+
+- 1. Switch PLL to bypass mode by setting CM\_CLKMODE\_DPLL\_DISP.DPLL\_EN to 0x4.
+- 2. Wait for CM\_IDLEST\_DPLL\_DISP.ST\_MN\_BYPASS = 1 to ensure PLL is in bypass (CM\_IDLEST\_DPLL\_DISP.ST\_DPLL\_CLK should also change to 0 to denote the PLL is unlocked).
+- 3. Configure Multiply and Divide values by setting CM\_CLKSEL\_DPLL\_DISP.DPLL\_MULT and DPLL\_DIV to the desired values.
+- 4. Configure M2 divider by setting CM\_DIV\_M2\_DPLL\_DISP.DPLL\_CLKOUT\_DIV to the desired value.
+- 5. Switch over to lock mode by setting CM\_CLKMODE\_DPLL\_DISP.DPLL\_EN to 0x7.
+- 6. Wait for CM\_IDLEST\_DPLL\_DISP.ST\_DPLL\_CLK = 1 to ensure PLL is locked (CM\_IDLEST\_DPLL\_DISP.ST\_MN\_BYPASS should also change to 0 to denote the PLL is out of bypass mode).
+
+
+**Note:** M2 divider can also be changed on-the-fly (ie., there is no need to put the PLL in bypass and back to lock mode). After changing CM\_DIV\_M2\_DPLL\_DISP.DPLL\_CLKOUT\_DIV, check CM\_DIV\_M2\_DPLL\_DISP.DPLL\_CLKOUT\_DIVCHACK for a toggle (a change from 0 to 1 or 1 to 0) to see if the change was acknowledged by the PLL.
+
+### **8.1.6.11 DDR PLL Description**
+
+The DDR PLL provides the clocks required by the DDR macros and the EMIF and is independent from the other peripheral and infrastructure clocks. The PLL is clocked from the Master Oscillator. The ADPLLS M2 divider determines the output clock frequency which is connected directly to the DDR Macros. The clock is also routed through the PRCM where a fixed /2 divider is used to create the M\_CLK used by the EMIF as shown in [Figure](#page-36-0) 8-17.
+
+
+For OPP information, see the device-specific data manual.
+
+Example frequency for DDR clock, say 266 MHz, the ADPLLS is configured (PLL locked at 532 MHz and M2 Divider =1) so as to expect CLKOUT = 266 MHz.
+
+The ULOWCLKEN input from a programmable PRCM register selects whether CLKINP or CLKINPULOW is the bypass clock source. This is a glitch free switch. When CLKINP is selected it is sourced through the ADPLLS 1/(N2+1) divider. The PRCM register defaults to 0 on power-up to select the CLKINP source.
+
+The CLKINPULOW input may be sourced from the CORE\_CLKOUTM6 from the Core PLL, or PER\_CLKOUTM2 from the Per PLL. These PLL output clocks can be used as alternate clock sources in low power active use cases for the DDR clocks when PLL is in bypass mode
+
+#### *8.1.6.11.1 Configuring the DDR PLL*
+
+The following steps detail how to configure the DDR PLL.
+
+- 1. Switch PLL to bypass mode by setting CM\_CLKMODE\_DPLL\_DDR.DPLL\_EN to 0x4.
+- 2. Wait for CM\_IDLEST\_DPLL\_DDR.ST\_MN\_BYPASS = 1 to ensure PLL is in bypass (CM\_IDLEST\_DPLL\_DDR.ST\_DPLL\_CLK should also change to 0 to denote the PLL is unlocked).
+- 3. Configure Multiply and Divide values by setting CM\_CLKSEL\_DPLL\_DDR.DPLL\_MULT and DPLL\_DIV to the desired values.
+- 4. Configure M2 divider by setting CM\_DIV\_M2\_DPLL\_DDR.DPLL\_CLKOUT\_DIV to the desired value.
+- 5. Switch over to lock mode by setting CM\_CLKMODE\_DPLL\_DDR.DPLL\_EN to 0x7.
+- 6. Wait for CM\_IDLEST\_DPLL\_DDR.ST\_DPLL\_CLK = 1 to ensure PLL is locked (CM\_IDLEST\_DPLL\_DDR.ST\_MN\_BYPASS should also change to 0 to denote the PLL is out of bypass mode).
+
+
+**Note:** M2 divider can also be changed on-the-fly (i.e., there is no need to put the PLL in bypass and back to lock mode). After changing CM\_DIV\_M2\_DPLL\_DDR.DPLL\_CLKOUT\_DIV, check CM\_DIV\_M2\_DPLL\_DDR.DPLL\_CLKOUT\_DIVCHACK for a toggle (a change from 0 to 1 or 1 to 0) to see if the change was acknowledged by the PLL.
+
+#### **8.1.6.12 CLKOUT Signals**
+
+The CLKOUT1 and CLKOUT2 signals go device pads and should mainly be used as debug testpoints. Using these signals for time-critical external circuits is discouraged because of unpredictable jitter performance. For more information, see the device datasheet, *AM335x Sitara Processors* (literature number [SPRS717\)](http://www.ti.com/lit/pdf/SPRS717). CLKOUT1 is created from the master oscillator. CLKOUT2 can be sourced from the 32-KHz crystal oscillator or any of the PLL (except MPU PLL) outputs. The selected output can be further modified by a programmable divider to create the desired output frequency.
+
+
+#### **8.1.6.13 Timer Clock Structure**
+
+The CLK\_32KHZ clock is an accurate 32.768-kHz clock derived from the PER PLL and can also be selected for the WDT1. The DMTIMER0 can only be clocked from the internal RC oscillator (CLK\_RC32K). The clock options are shown in [Figure](#page-37-0) 8-19.
+
+
+PRCM ~32,768 Hz CLK\_32KHZ From PRCM 32,768 Hz 0 1 0 1 2 3 0 1 Device Xtal TCLKIN Master Osc (CLK\_M\_OSC) To WDT0 (Secure) CONTROL.SEC\_CLK\_ CTRL.SECWDCLKSEL (Default: 0) To WDT1 PRCM.CLKSEL\_WDT1\_ CLK.CLKSEL (Default: 0) To DMTIMER0 CONTROL.SEC\_CLK\_CTRL. SECTIMERCLKSEL (Default: 0) On-Chip 32K RC Osc (CLK\_RC32K)
+
+
+All mux selections are in PRCM unless explicitly shown otherwise in the diagrams.
+
+The clock selections for the other device Timer modules are shown in [Figure](#page-39-0) 8-21. CLK\_32KHZ, the master oscillator, and the external pin (TCLKIN) are optional clocks available for timers which may be selected based on end use application.
+
+DMTIMER1 is implemented using the DMTimer\_1ms module which is capable of generating an accurate 1ms tick using a 32.768 KHz clock. During low power modes, the Master Oscillator is disabled. CLK\_32KHZ also would not be available in this scenario since it is sourced from the Master Osc based PER PLL. Hence, in low power modes DMTIMER1 in the WKUP domain can use the 32K RC oscillator for generating the OS (operating system) 1ms tick generation and timer based wakeup. Since most applications expect an accurate 1ms OS tick which the inaccurate 32K RC (16-60 KHz) oscillator cannot provide, a separate 32768 Hz oscillator (32K Osc) is provided as another option.
+
+
+PRCM 2 1 4 3 2 1 0 0 x6 <sup>6</sup> 6 6 6 TCLKIN 32,768 Hz Xtal Device Xtal CLK\_32KHZ From PLL 32,768 Hz ~32,768 Hz 32,768 Hz To DMTIMER1\_1ms PRCMCLKSEL\_TIME R1MS\_CLK.CLKSEL (Default: 0) To DMTIMER{2-7} PRCMCLKSEL\_TIME Rn\_CLK.CLKSEL (Default: 1) Master Osc (CLK\_M\_OSC) On-Chip 32K RC Osc (CLK\_RC32K) 32K Osc (CLK\_32K\_RTC)
+
+
+All mux selections are in PRCM unless explicitly shown otherwise in the diagrams.
+
+The RTC, Debounce and VTP clock options are shown in [Figure](#page-40-0) 8-22. In low power modes, the debounce for GPIO0 in WKUP domain can use the accurate 32768 Hz crystal oscillator or the inaccurate (16 KHz to 60 KHz) 32K RC oscillator when the Master Osc is powered down.
+
+The 32K Osc requires an external 32768-Hz crystal.
+
+All mux selections are in PRCM unless explicitly shown otherwise in the diagrams.
+
+
+All mux selections are in PRCM unless explicitly shown otherwise in the diagrams.
+
+### 8.1.7 Reset Management
+
+#### 8.1.7.1 Overview
+
+The PRCM manages the resets to all power domains inside device and generation of a single reset output signal through device pin, WARMRSTn, for external use. The PRCM has no knowledge of or control over resets generated locally within a module, e.g., via the OCP configuration register bit IPName SYSCONFIG.SoftReset.
+
+All PRM reset outputs are asynchronously asserted. These outputs are active-low except for the PLL resets. Deassertion is synchronous to the clock which runs a counter used to stall, or delay, reset deassertion upon source deactivation. This clock will be CLK\_M\_OSC used by all the reset managers. All modules receiving a PRCM generated reset are expected to treat the reset as asynchronous and implement local re-synchronization upon de-activation as needed.
+
+One or more Reset Managers are required per power domain. Independent management of multiple reset domains is required to meet the reset sequencing requirements of all modules in the power domain
+
+#### 8.1.7.2 Reset Concepts and Definitions
+
+The PRCM collects many sources of reset. Here below is a list of qualifiers of the source of reset:
+
+- Cold reset: it affects all the logic in a given entity
+- Warm reset: it is a partial reset which doesn't affect all the logic in a given entity
+- · Global reset: it affects the entire device
+- Local reset: it affects part of the device (1 power domain for example)
+- S/W reset: it is initiated by software
+- H/W reset: it is hardware driven
+
+Each reset source is specified as being a cold or warm type. Cold types are synonymous with power-on-reset (POR) types. Such sources are applied globally within each receiving entity (i.e., sub-system, module, macro-cell) upon assertion. Cold reset events include: device power-up, power-domain power-up, and eFuse programming failures.
+
+
+Warm reset types are not necessarily applied globally within each receiving entity. A module may use a warm reset to reset a subset of its logic. This is often done to speed-up reset recovery time, i.e., the time to transition to a safe operating state, compared to the time required upon receipt of a cold reset. Warm reset events include: software initiated per power-domain, watch-dog time-out, security violation, externally triggered, and emulation initiated.
+
+Reset sources, warm or cold types, intended for device-wide effect are classified as global sources. Reset sources intended for regional effect are classified as local sources.
+
+Each Reset Manager provides two reset outputs. One is a cold reset generated from the group of global and local cold reset sources it receives. The other is a warm+cold reset generated from the combined groups of, global and local, cold and warm reset sources it receives.
+
+The Reset Manager asserts one, or both, of its reset outputs asynchronously upon reset source assertion. Reset deassertion is extended beyond the time the source gets de-asserted. The reset manager will then extend the active period of the reset outputs beyond the release of the reset source, according to the PRCM's internal constraints and device's constraints. Some reset durations can be software-configured. Most (but not all) reset sources are logged by PRCM's reset status registers. The same reset output can generally be activated by several reset sources and the same reset source can generally activate several reset outputs. All the reset signals output of the PRCM are active low. Several conventions are used in this document for signal and port names. They include:
+
+- "\_RST" in a signal or port name is used to denote reset signal.
+- "\_PWRON\_RST" in a signal or port name is used to denote a cold reset source
+
+#### **8.1.7.3 Global Power On Reset (Cold Reset)**
+
+There are several cold reset sources. See [Table](#page-48-0) 8-25 for a summary of the different reset sources.
+
+# *8.1.7.3.1 Power On Reset (PORz)*
+
+The source of power on reset is PORz signal on the device. Everything on device is reset with assertion of power on reset. This reset is non-blockable. PORz can be driven by external power management devices or power supervisor circuitry. During power-up, when power supplies to the device are ramping up, PORz needs to be driven Low. When the ramp-up is complete and supplies reach their steady-state values, PORz need to be driven High. During normal operation when any of the device power supplies are turned OFF, PORz must be driven Low.
+
+#### *8.1.7.3.2 PORz Sequence*
+
+- PORz pin at chip boundary gets asserted (goes low). **Note**: The state of nRESETIN\_OUT during PORz assertion should be a don't care, it should not affect PORz (only implication is if they are both asserted and nRESETIN\_OUT is deasserted after PORz you will get re-latching of boot config pins and may see warm nRESETIN\_OUT flag set in PRCM versus POR).
+- All IOs will go to a known state, as defined in the device datasheet, *AM335x Sitara Processors* (literature number [SPRS717\)](http://www.ti.com/lit/pdf/SPRS717)
+- When power comes-up, PORz value will propagate to the PRCM.
+- PRCM will fan out reset to the complete chip and all logic which uses async reset will get reset. nRESETIN\_OUT will go low to indicate reset-in-progress.
+- External clocks will start toggling and PRCM will propagate these clocks to the chip keeping PLLs in bypass mode.
+- All logic using sync reset will get reset.
+- When power and clocks to the chip are stable, PORz must be de-asserted.
+- Boot configuration pins are latched upon de-assertion of PORz pin
+- IO cell controls from IPs for all the IOs with a few exceptions (see datasheet for details) are driven by GPIO module. GPIO puts all IOs in input mode.
+- FuseFarm reset will be de-asserted to start eFuse scanning.
+- Once eFuse scanning is complete, reset to the host processor and to all other peripherals (peripherals without local processor) will be de-asserted.
+
+
+- nRESETIN\_OUT will be de-asserted after time defined by PRM\_RSTTIME.RSTTIME1.
+- Once host processors finish booting then all remaining peripherals will see reset de-assertion.
+
+Note that all modules with local CPUs will have local reset asserted by default at PORz and reset deassertion would require host processor to write to respective registers in PRCM.
+
+
+- (1) nRESETIN\_OUT is not defined (can either be driven low or pulled up high) until all supplies are fully ramped up. For nRESETIN\_OUT to maintain a valid low state until the supples are ramped, an external buffer should be implemented, as shown in [Figure](#page-42-0) 8-24.
+- (2) For information on tsx, see *AM335x Sitara Processors* (literature number [SPRS717\)](http://www.ti.com/lit/pdf/SPRS717).
+
+
+### *8.1.7.3.3 Bad Device Reset*
+
+This reset is asserted whenever the DEVICE\_TYPE encodes an unsupported device type, such as the code for a "bad" device.
+
+
+# *8.1.7.3.4 ICEPICK Power On Reset*
+
+The internal emulation module, ICE-Pick, generates ICEPICK\_POR\_RST. This reset is used in emulation mode only. The PRCM is required to provide an output port, ACT\_LIKE\_SECURE, which is asynchronously set to logic high upon ICEPICK\_POR\_RST assertion. This state must be maintained until a normal system POR occurs.
+
+# *8.1.7.3.5 Global Cold Software Reset (GLOBAL\_COLD\_SW\_RST)*
+
+The source for GLOBAL\_COLD\_SW\_RST is generated internally by the PRM. It is activated upon setting the PRM\_RSTCTRL.RST\_GLOBAL\_COLD\_SW bit in the PRM memory map. This bit is self-clearing, i.e., it is automatically cleared by the hardware.
+
+#### **8.1.7.4 Global Warm Reset**
+
+### *8.1.7.4.1 External Warm Reset*
+
+nRESETIN\_OUT is a bidirectional warm reset signal. As an input, it is typically used by an external source as a device reset. Refer to Table 8-24 for a summary of the differences between a warm reset and cold reset. Some of these differences are:
+
+- The warm reset can be blocked to the EMAC switch and its reference clock source PLL using the RESET\_ISO register in the Control Module.
+- The warm reset assumes that clocks and power to the chip are stable from assertion through deassertion, whereas during the cold reset, the power supplies can become stable during assertion
+- Some PRCM and Control module registers are warm reset insensitive and maintain their value throughout a warm reset
+- SYSBOOT pins are not latched with a warm reset. The device will boot with the SYSBOOT values from the previous cold reset.
+- Most debug subsystem logic is not affected by warm reset. This allows you to maintain any debug sessions throughout a warm reset event.
+- PLLs are not affected by warm reset
+
+As an output, nRESETIN\_OUT can be used to reset external devices. nRESET\_OUT will drive low during a cold reset or an internally generated warm reset. After completion of a cold or warm reset, nRESETIN\_OUT will continue to drive low for a period defined by PRM\_RSTTIME.RSTTIME1. RSTTIME1 is a timer that counts down to zero at a rate equal to the high frequency system input clock CLK\_M\_OSC. This allows external devices to be held in reset for some time after the AM335x comes out of reset.
+
+Caution must be used when implementing the nRESETIN\_OUT as an bi-directional reset signal. Because of the short maximum time allowed using RSTTIME1, it does not supply an adequate debounce time for an external push button circuit. The processor could potentially start running while external components are still in reset. It is recommended that this signal be used as input only (do not connect to other devices as a reset) to implement a push button reset circuit to the AM335x, or an output only to be able to reset other devices after an AM335x reset completes.
+
+#### *8.1.7.4.1.1 Warm Reset Input/Reset Output (nRESETIN\_OUT)*
+
+Any global reset source (internal or external) causes nRESETIN\_OUT to be driven and maintained at the boundary of the device for at least the amount of time configured in the PRCM.PRM\_RSTTIME. RSTTIME1 bit field. This ensures that the device and its related peripherals are reset together. The nRESETIN\_OUT output buffer is configured as an open-drain; consequently, an external pull-up resistor is required.
+
+After the de-assertion, the bi-directional pin nRESETIN\_OUT is tri-stated to allow for assertion from off chip source (externally).
+
+
+Device PRM PRCM nRESETOUT nRESETIN Global reset source nRESET\_IN\_OUT VDDSHV6 1.8 or 3.3 V Pullup Reset button RESET to peripherals on board
+
+
+Note: It is recommended to implement warm reset as an input only (for example, push button) or an output only (to reset external peripherals), not both.
+
+The device will have one pin nRESETIN\_OUT which reflects chip reset status. This output will always assert asynchronously when any chip watchdog timer reset occurs if any of the following reset events occurs:
+
+- POR (only internal stretched portion of reset event after bootstrap is latched)
+- External Warm reset (nRESETIN\_OUT pin, only internal stretched portion of reset event after bootstrap is latched)
+- Emulation reset (Cold or warm from ICEPICK)
+- Reset requestor
+- SW cold/warm reset
+
+This output will remain asserted as long as PRCM keeps reset to the host processor asserted.
+
+**Note:** TRST does not cause RSTOUTn assertion
+
+#### *8.1.7.4.1.2 Warm Reset Sequence*
+
+- 1. nRESETIN\_OUT pin at chip boundary gets asserted (goes low). NOTE: For Warm Reset sequence to work as described, it is expected that PORz pin is always inactive, otherwise you will get PORz functionality as described in previous section.
+- 2. All IOs (except test and emulation) will go to tri-state immediately.
+- 3. Chip clocks are not affected as both PLL and dividers are intact.
+- 4. nRESETIN\_OUT gets de-asserted after 30 cycles
+- 5. PRCM de-asserts reset to the host processor and all other peripherals without local CPUs.
+- 6. Note that all IPs with local CPUs will have local reset asserted by default at Warm Reset and reset deassertion would require host processor to write to respective registers in PRCM.
+
+[Figure](#page-45-0) 8-26 shows the nRESETIN\_OUT waveform when using nRESETIN\_OUT as warm reset source. For the duration when external warm reset switch is closed, both the device and chip will be driving zero.
+
+
+PORz Internal Chip Resetn Warm reset source assertion High frequency system input clock External warm reset assertion detected on the nRESETIN\_OUT pin Warm reset out driven on nRESETIN\_OUT pin Duration defined by PRCM.PRM\_RSTTIME[7:0] RSTTIME1 Duration defined by PRCM.PRM\_RSTTIME[12:8] RSTTIME2 EMIF FIFO drains and DRAM is put in self-refresh Maximum 50 cycles Tri-stated with weak pullup CLK\_M\_OSC
+
+
+[Figure](#page-45-1) 8-27 shows the nRESETIN\_OUT waveform when any one of the warm reset sources captured except using nRESETIN\_OUT itself as warm reset source.
+
+
+#### *8.1.7.4.2 Watchdog Timer*
+
+There is one watchdog timer on the device. There is a chip level register in control module register space which contains a sticky bit (cleared only by PORz) for each reset. The reset is not blockable. For more information, see section 20.4 Watchdog.
+
+
+# *8.1.7.4.3 Global Warm Software Reset (GLOBAL\_SW\_WARM\_RST)*
+
+GLOBAL\_WARM\_SW\_RST is internally generated by the PRCM. Activation is triggered upon setting the memory-mapped register bit, PRM\_RSTCTRL. RST\_GLOBAL\_WARM\_SW. This bit is self-clearing, and automatically cleared by the hardware.
+
+### *8.1.7.4.4 Test Reset (TRSTz)*
+
+This reset is triggered from TRSTz pin on JTAG interface. This is a non-blockable reset and it resets test and emulation logic.
+
+**NOTE:** A PORz reset assertion should cause entire device to reset including all test and emulation logic regardless of the state of TRSTz Therefore, PORz assertion will achieve full reset of the device even if TRSTz pin is pulled permanently high and no special toggling of TRSTz pin is required during power ramp to achieve full POR reset to the device. Further, it is acceptable for TRSTz input to be pulled permanently low during normal functional usage of the device in the end-system to ensure that all test and emulation logic is kept in reset.
+
+
+# **8.1.7.5 Reset Characteristics**
+
+The following table shows characteristic of each reset source.
+
+
+#### **Table 8-25. Reset Sources**
+
+|                                                             |             | Cold<br>Reset<br>Sources |               | Warm<br>Reset<br>sources |                   |                     |       |  |
+|-------------------------------------------------------------|-------------|--------------------------|---------------|--------------------------|-------------------|---------------------|-------|--|
+| Characteristic                                              | Pin<br>PORz | SW<br>Cold<br>Reset      | Bad<br>Device | Pin<br>Warm<br>Reset     | Watchdog<br>Timer | SW<br>Warm<br>Reset | TRSTz |  |
+| Boot<br>pins<br>latched                                     | Y           | N                        | N             | N                        | N                 | N                   | N     |  |
+| Resets<br>Standard<br>Efuses                                | Y           | N                        | N             | N                        | N                 | N                   | N     |  |
+| Resets<br>Customer<br>Efuses                                | Y           | Y                        | Y             | Y                        | Y                 | Y                   | N     |  |
+| DRAM<br>contents<br>preserved                               | N           | N                        | N             | (1)<br>Y                 | (1)<br>Y          | (1)<br>Y            | Y     |  |
+| PLLs(2)<br>Resets                                           | Y           | Y                        | Y             | N                        | N                 | N                   | N     |  |
+| Resets<br>Clock<br>Dividers(2)                              | Y           | Y                        | Y             | N                        | N                 | N                   | N     |  |
+| PLLs<br>enter<br>bypass<br>mode(2)                          | Y           | Y                        | Y             | Y                        | Y                 | Y                   | N     |  |
+| Reset<br>source<br>blockable<br>by<br>emulation             | N           | N                        | N             | Y                        | Y                 | Y                   | Y     |  |
+| Resets<br>test<br>and<br>emulation<br>logic                 | Y           | Y                        | Y             | N                        | N                 | N                   | N     |  |
+| Resets<br>GMAC<br>switch<br>and<br>related<br>chip<br>logic | Y           | (3)<br>N                 | Y             | (3)<br>N                 | (3)<br>N          | (3)<br>N            |       |  |
+| Resets<br>Chip<br>Logic(4)<br>Functional                    | Y           | Y                        | Y             | Y                        | Y                 | Y                   | N     |  |
+| Puts<br>IOs<br>in<br>Tri-state                              | Y           | Y                        | Y             | Y                        | Y                 | Y                   | N     |  |
+| Resets<br>Pinmux<br>Registers                               | Y           | Y                        | (5)<br>Y      | (5)<br>Y                 | (5)<br>Y          | (5)<br>Y            | N     |  |
+| Reset<br>out<br>Assertion<br>(nRESETIN_OUT<br>Pin)          | Y           | Y                        | (5)<br>Y      | (5)<br>Y                 | (5)<br>Y          | (5)<br>Y            | N     |  |
+| Resets<br>RTC                                               | N           | N                        | N             | N                        | N                 | N                   | N     |  |
+
+<sup>(1)</sup> The ROM software does not utilize this feature of DRAM content preservation. Hence, the AM335x re-boots like a cold boot for warm reset as well.
+
+**Note:** The Bandgap macros for the LDOs will be reset on PORz only.
+
+<sup>(2)</sup> CORE PLL is an exception when EMAC switch reset isolation is enabled
+
+<sup>(3)</sup> Only true if GMAC switch reset isolation is enabled in control registers, otherwise will be reset.
+
+<sup>(4)</sup> There are exception details in control module & PRCM registers which are captured in the register specifications in [Chapter](#page-0-0) 8 and Chapter 9. This includes some pinmux registers which are warm reset in-sensitive.
+
+<sup>(5)</sup> Some special IOs/Muxing registers like test, emulation, GEMAC Switch (When under reset isolation mode), etc related will not be affected under warm reset conditions.
+
+
+### **Table 8-26. Reset Sources**
+
+|                                                             |             | Cold<br>Reset       | Sources              |               | Warm<br>Reset<br>sources |                      |                   |                     |                       |       |  |
+|-------------------------------------------------------------|-------------|---------------------|----------------------|---------------|--------------------------|----------------------|-------------------|---------------------|-----------------------|-------|--|
+| Characteristic                                              | Pin<br>PORz | SW<br>Cold<br>Reset | EMU<br>Cold<br>Reset | Bad<br>Device | Pin<br>Warm<br>Reset     | EMU<br>Warm<br>Reset | Watchdog<br>Timer | SW<br>Warm<br>Reset | Security<br>Violation | TRSTz |  |
+| Boot<br>pins<br>latched                                     | Y           | N                   | N                    | N             | N                        | N                    | N                 | N                   | N                     | N     |  |
+| Resets<br>Standard<br>Efuses                                | Y           | N                   | N                    | N             | N                        | N                    | N                 | N                   | N                     | N     |  |
+| Resets<br>Customer<br>Efuses                                | Y           | Y                   | Y                    | Y             | Y                        | Y                    | Y                 | Y                   | Y                     | N     |  |
+| DRAM<br>contents<br>preserved                               | N           | N                   | N                    | N             | (1)<br>Y                 | (1)<br>Y             | (1)<br>Y          | (1)<br>Y            | (1)<br>Y              | Y     |  |
+| PLLs(2)<br>Resets                                           | Y           | Y                   | Y                    | Y             | N                        | N                    | N                 | N                   | N                     | N     |  |
+| Resets<br>Clock<br>Dividers(2)                              | Y           | Y                   | Y                    | Y             | N                        | N                    | N                 | N                   | N                     | N     |  |
+| PLLs<br>enter<br>mode(2)<br>bypass                          | Y           | Y                   | Y                    | Y             | Y                        | Y                    | Y                 | Y                   | Y                     | N     |  |
+| Reset<br>source<br>blockable<br>by<br>emulation             | N           | N                   | N                    | N             | Y                        | Y                    | (3)<br>Y          | Y                   | N                     | Y     |  |
+| Resets<br>test<br>and<br>emulation<br>logic                 | Y           | Y                   | Y                    | Y             | N                        | N                    | N                 | N                   | N                     | N     |  |
+| Resets<br>GMAC<br>switch<br>and<br>related<br>chip<br>logic | Y           | (4)<br>N            | Y                    | Y             | (4)<br>N                 | (4)<br>N             | (4)<br>N          | (4)<br>N            | N                     |       |  |
+| Resets<br>Chip<br>Functional<br>Logic(5)(6)                 | Y           | Y                   | Y                    | Y             | Y                        | Y                    | Y                 | Y                   | Y                     | N     |  |
+| Puts<br>IOs<br>in<br>Tri<br>state                           | Y           | Y                   | Y                    | Y             | Y                        | Y                    | Y                 | Y                   | Y                     | N     |  |
+| Resets<br>Pinmux<br>Registers                               | Y           | Y                   | (7)<br>Y             | (7)<br>Y      | (7)<br>Y                 | (7)<br>Y             | (7)<br>Y          | (7)<br>Y            | (7)<br>Y              | N     |  |
+
+<sup>(1)</sup> The ROM software does not utilize this feature of DRAM content preservation. Hence, the AM335x re-boots like a cold boot for warm reset as well.
+
+<sup>(2)</sup> CORE PLL is an exception when EMAC switch reset isolation is enabled
+
+<sup>(3)</sup> Watchdog0 (secure watchdog) reset is not block-able by emulation
+
+<sup>(4)</sup> Only true if GMAC switch reset isolation is enabled in control registers, otherwise will be reset.
+
+<sup>(5)</sup> There are exception details in control module & PRCM registers which are captured in the register specifications in [Chapter](#page-0-0) 8 and Chapter 9. This includes some pinmux registers which are warm reset in-sensitive.
+
+<sup>(6)</sup> Exception details for debugss logic are captured in debugss specification.
+
+<sup>(7)</sup> Some special IOs/Muxing registers like test, emulation, GEMAC Switch (When under reset isolation mode), etc related will not be affected under warm reset conditions.
+
+
+### **Table 8-26. Reset Sources (continued)**
+
+| Reset<br>out<br>Assertion<br>(nRESETIN_O<br>UT<br>Pin) | Y | Y | (7)<br>Y | (7)<br>Y | (7)<br>Y | (7)<br>Y | (7)<br>Y | (7)<br>Y | (7)<br>Y | N |
+|--------------------------------------------------------|---|---|----------|----------|----------|----------|----------|----------|----------|---|
+| Resets<br>RTC                                          | N | N | N        | N        | N        | N        | N        | N        | N        | N |
+
+
+# **8.1.7.6 EMAC Switch Reset Isolation**
+
+The device will support reset isolation for the Ethernet Switch IP. This allows the device to undergo a warm reset without disrupting the switch or traffic being routed through the switch during the reset condition.
+
+If configured by registers in control module that EMAC reset isolation is active, then behavior is as follows:
+
+Any "Warm" reset source(except the software warm reset) will be blocked to the EMAC switch logic in the IP (the IP has two reset inputs to support such isolation) and to PLL (and it's control bits) which is sourcing the EMAC switch clocks as required by the IP (50- or 125-MHz reference clocks). Also, the EMAC switch related IO pins must retain their pin muxing and not glitch (continuously controlled by the EMAC switch IP) by blocking reset to the controlling register bits.
+
+If configured by registers in control module that EMAC reset isolation is NOT active (default state), then the warm reset sources are allowed to propagate as normal including to the EMAC Switch IP (both reset inputs to the IP).
+
+All cold or POR resets will always propagate to the EMAC switch IP as normal (as otherwise defined in this document).
+
+### **8.1.7.7 Reset Priority**
+
+If more than one of these reset sources are asserted simultaneously then the following priority order should be used:
+
+- 1. POR
+- 2. TRSTz
+- 3. External warm reset
+- 4. Emulation
+- 5. Reset requestors
+- 6. Software resets
+
+#### **8.1.7.8 Trace Functionality Across Reset**
+
+Other than POR, TRSTz and SW cold reset, none of the other resets will affect trace functionality. This requires that Debug\_SS has required reset isolation for the trace logic. Also the Ios and muxing control (if any) for trace Ios should not get affected by any other reset. Since none of the PLLs getting reset with other resets, clocks will be any way stable.
+
+### **8.1.7.9 RTC PORz**
+
+AM335x supports RTC only mode by supplying dedicated power to RTC module. The RTC module has a dedicated PORz signal (RTC\_PORz) to reset RTC logic and circuitry during powerup. RTC\_PORz is expected to be driven low when the RTC power supply is ramping up. After the power supply reaches its stable value, the RTC\_PORz can be de-asserted. The RTC module is not affected by the device PORz. Similarly RTC\_PORz does not affect the device reset.
+
+For power-up sequencing with respect to RTC\_PORz, see the device specific datasheet.
+
+### *8.1.8 Power-Up/Down Sequence*
+
+Each power domain has dedicated warm and cold reset.
+
+Warm reset gets asserted each time there is any warm reset source requesting reset. Warm reset is also asserted when power domain moves from ON to OFF state.
+
+Cold reset for the domain is asserted in response to cold reset sources. When domain moves from OFF to ON state then also cold reset gets asserted as this is similar to power-up condition for that domain.
+
+
+# *8.1.9 IO State*
+
+All IOs except for JTAG i/f and Reset output (and any special cases mentioned in pinlist) should have their output drivers tri-state and internal pulls enabled during assertion of all reset sources. JTAG i/f IO is affected only by TRSTz.
+
+**Note**: The PRUs and Cortex M3 processor are held under reset after global warm reset by assertion of software source of reset. Other domains are held under reset after global warm reset until the MPU software enables their respective interface clock.
+
+# *8.1.10 Voltage and Power Domains*
+
+The following table shows how the device core logic is partitioned into two core logic voltage domains and four power domains. The table lists which voltage and power domain a functional module belongs.
+
+**Table 8-27. Core Logic Voltage and Power Domains**
+
+| Logic Voltage Domain Name | Module           |  |  |
+|---------------------------|------------------|--|--|
+| CORE                      | All Core Modules |  |  |
+| RTC                       | RTC              |  |  |
+
+## **8.1.10.1 Voltage Domains**
+
+The core logic is divided into two voltage domains: VDD\_CORE and VDD\_RTC.
+
+# **8.1.10.2 Power Domains**
+
+In order to reduce power due to leakage, the core logic supply voltage to 4 of these power domains can be turned OFF with internal power switches. The internal power switches are controlled through memory mapped registers in Control Module.
+
+In a use case whereby all the modules within a power domain are not used that power domain can be placed in the OFF state.
+
+Error: Reference source not found shows the allowable combination power domain ON/OFF states and which power domains are switched via internal power switches. At power-on-reset, all domains except always-on will be in the power domain OFF state.
+
+**Table 8-28. Power Domain State Table**
+
+|                                  |        | POWER DOMAIN |            |            |            |            |  |  |  |  |  |  |
+|----------------------------------|--------|--------------|------------|------------|------------|------------|--|--|--|--|--|--|
+| MODE                             | WAKEUP | MPU          | GFX        | PER        | RTC        | EFUSE      |  |  |  |  |  |  |
+| No Voltage<br>Supply             | N/A    | N/A          | N/A        | N/A        | N/A        | N/A        |  |  |  |  |  |  |
+| Power On Reset                   | ON     | OFF          | OFF        | OFF        | OFF        | OFF        |  |  |  |  |  |  |
+| ALL OTHER<br>FUNCTIONAL<br>MODES | ON     | DON'T CARE   | DON'T CARE | DON'T CARE | DON'T CARE | DON'T CARE |  |  |  |  |  |  |
+| Internal Power<br>Switch         | NO     | YES          | YES        | YES        | YES        | YES        |  |  |  |  |  |  |
+
+
+# *8.1.11 Device Modules and Power Management Attributes List*
+
+# **Table 8-29. Power Domain of Various Modules**
+
+| Power Supply | Power Domain                                     | Modules OR Supply Destinations<br>(sinks)                              |
+|--------------|--------------------------------------------------|------------------------------------------------------------------------|
+|              |                                                  | Wake-Cortex M3 Subsystem                                               |
+|              |                                                  | L4_WKUP peripherals                                                    |
+|              |                                                  | PRCM                                                                   |
+|              |                                                  | Control Module                                                         |
+|              |                                                  | GPIO0                                                                  |
+|              |                                                  | DMTIMER0_dmc                                                           |
+|              |                                                  | DMTIMER1                                                               |
+|              |                                                  | UART0                                                                  |
+|              |                                                  | I2C0                                                                   |
+|              |                                                  | TSC                                                                    |
+|              |                                                  | WDT0                                                                   |
+|              |                                                  | WDT1                                                                   |
+| VDD_CORE     | PD_WKUP                                          | SmartReflex_c2_0                                                       |
+|              | This is non-switchable and cannot be shut<br>OFF | SmartReflex_c2_1                                                       |
+|              |                                                  | L4_WKUP                                                                |
+|              |                                                  | Top level: Pinmux gates/logic,<br>oscillator wake logic                |
+|              |                                                  | DDR PHY (DIDs)                                                         |
+|              |                                                  | WKUP_DFTSS                                                             |
+|              |                                                  | Debugs                                                                 |
+|              |                                                  | Digital section (VDD) of CORE PLL, PER<br>PLL, Display PLL and DDR PLL |
+|              |                                                  | Emulation sections of MPU                                              |
+|              |                                                  | VDD of all IOs including crystal oscillators                           |
+|              |                                                  | RC Oscillator                                                          |
+
+
+**Table 8-29. Power Domain of Various Modules (continued)**
+
+| Power Supply | Power Domain | Modules OR Supply Destinations<br>(sinks)                                 |
+|--------------|--------------|---------------------------------------------------------------------------|
+|              |              | Infrastructure                                                            |
+|              |              | L3                                                                        |
+|              |              | L4_PER, L4_Fast                                                           |
+|              |              | EMIF4                                                                     |
+|              |              | EDMA                                                                      |
+|              |              | GPMC                                                                      |
+|              |              | OCMC controller                                                           |
+|              |              | L3 / L4_PER / L4_Fast Peripherals                                         |
+|              |              | PRU-ICSS                                                                  |
+|              |              | LCD controller                                                            |
+|              |              | Ethernet Switch                                                           |
+|              |              | USB Controller                                                            |
+| VDD_CORE     | PD_PER       | GPMC                                                                      |
+|              |              | MMC0-2                                                                    |
+|              |              | DMTIMER2-7                                                                |
+|              |              | UART1-5                                                                   |
+|              |              | SPI0, 1                                                                   |
+|              |              | I2C1, 2                                                                   |
+|              |              | DCAN0, 1                                                                  |
+|              |              | McASP0, 1                                                                 |
+|              |              | ePWM0-2                                                                   |
+|              |              | eCAP0-2                                                                   |
+|              |              | eQEP0,1                                                                   |
+|              |              | GPIO1-3                                                                   |
+|              |              | ELM                                                                       |
+|              |              | AES0, 1, SHA, PKA, RNG                                                    |
+|              |              | Mailbox0, Spinlock                                                        |
+|              |              | OCP_WP                                                                    |
+|              |              | Others                                                                    |
+|              |              | USB2PHYCORE (VDD/digital section)                                         |
+|              |              | USB2PHYCM (VDD/digital section)                                           |
+|              | PD_GFX       | SGX530                                                                    |
+|              | PD_MPU       | CPU, L1, L2 of MPU                                                        |
+| VDD_MPU      | PD_WKUP      | Interrupt controller of MPU Subsystem<br>Digital Portion (VDD) of MPU PLL |
+|              |              | 1. RTC                                                                    |
+| VDD_RTC      | PD_RTC       | VDD for 32 768 Hz Crystal Osc                                             |
+|              |              | VDD for IO for the alarm pin                                              |
+
+
+### **8.1.11.1 Power Domain Power Down Sequence**
+
+The following sequence of steps happen during the power down of a power domain
+
+All IPs (belonging to a power domain) with STANDBY interface will assert STANDBY. STANDBY assertion should get triggered by IP based on its activity on OCP initiator port. IP should assert STANDBY whenever initiator port is IDLE. Some of the IPs may not have this feature and they will require SW write to standby-mode register to get STANDBY assertion from IP.
+
+- 1. SW will request all modules in given power domain to go to disable state by programming module control register inside PRCM.
+- 2. PRCM will start and wait for completion of power management handshake with IPs (IdleReq/IdleAck).
+- 3. PRCM will gate-off all the clocks to the power domain.
+- 4. SW will request all clock domains in given power domain to go to "force sleep" mode by programming functional clock domain register in PRCM. Note that PRCM has already gated-off clocks and this register programming may look redundant.
+- 5. SW will request PRCM to take this power domain to OFF state by programming PWRSTCTRL register. Note that this step can be skipped if PWRSTCTRL is permanently programmed to OFF state. When this is done, functional clock domain register decides when power domain will be taken to OFF state. Only reason not to have OFF state in PWRSTCTRL is to take power domain to just clock gate state without power gating.
+- 6. PSCON specific to this power domain will assert isolation enable for the domain.
+- 7. PRCM will assert warm and cold reset to the power domain.
+- 8. PSCON will assert control signals to switch-off power using on-die switches.
+- 9. On-die switches will send acknowledge back to PSCON.
+
+# **8.1.11.2 Power Domain Power-Up Sequence**
+
+The following sequence of steps occurs during power-up of a power domain. This sequence is not relevant to always-on domain as this domain will never go to OFF state as long as the device is powered. This sequence will be repeated each time a domain is taken to ON state from OFF (including first time power-up). Note that some of the details are intentionally taken out here to simplify things.
+
+There can be multiple reasons to start power-up sequence for a domain. For example it can be due to an interrupt from one of the IPs which is powered-up.
+
+- 1. SW will request required clock domains inside this power domain to go to force wake-up state by programming functional clock domain register.
+- 2. PRCM will enable clocks to the required clock domains.
+- 3. PSCON specific to this power domain will assert control signal to un-gate the power.
+- 4. Once power is un-gated, on die switches will send acknowledge back to PSCON.
+- 5. PRCM will de-assert cold and warm reset to the power domain.
+- 6. PRCM will turn-off isolation cells.
+- 7. SW will request PRCM to enable required module in the power domain by programming module control register.
+- 8. PRCM will initiate and wait for completion of PM protocol to enable the modules (IdleReq/IdleAck).
+
+
+# *8.1.12 Clock Module Registers*
+
+# **8.1.12.1 CM\_PER Registers**
+
+[Table](#page-56-0) 8-30 lists the memory-mapped registers for the CM\_PER. All register offset addresses not listed in [Table](#page-56-0) 8-30 should be considered as reserved locations and the register contents should not be modified.
+
+**Table 8-30. CM\_PER REGISTERS**
+
+
+| Offset | Acronym                 | Register Name | Section             |
+|--------|-------------------------|---------------|---------------------|
+| 0h     | CM_PER_L4LS_CLKSTCTRL   |               | Section 8.1.12.1.1  |
+| 4h     | CM_PER_L3S_CLKSTCTRL    |               | Section 8.1.12.1.2  |
+| Ch     | CM_PER_L3_CLKSTCTRL     |               | Section 8.1.12.1.3  |
+| 14h    | CM_PER_CPGMAC0_CLKCTRL  |               | Section 8.1.12.1.4  |
+| 18h    | CM_PER_LCDC_CLKCTRL     |               | Section 8.1.12.1.5  |
+| 1Ch    | CM_PER_USB0_CLKCTRL     |               | Section 8.1.12.1.6  |
+| 24h    | CM_PER_TPTC0_CLKCTRL    |               | Section 8.1.12.1.7  |
+| 28h    | CM_PER_EMIF_CLKCTRL     |               | Section 8.1.12.1.8  |
+| 2Ch    | CM_PER_OCMCRAM_CLKCTRL  |               | Section 8.1.12.1.9  |
+| 30h    | CM_PER_GPMC_CLKCTRL     |               | Section 8.1.12.1.10 |
+| 34h    | CM_PER_MCASP0_CLKCTRL   |               | Section 8.1.12.1.11 |
+| 38h    | CM_PER_UART5_CLKCTRL    |               | Section 8.1.12.1.12 |
+| 3Ch    | CM_PER_MMC0_CLKCTRL     |               | Section 8.1.12.1.13 |
+| 40h    | CM_PER_ELM_CLKCTRL      |               | Section 8.1.12.1.14 |
+| 44h    | CM_PER_I2C2_CLKCTRL     |               | Section 8.1.12.1.15 |
+| 48h    | CM_PER_I2C1_CLKCTRL     |               | Section 8.1.12.1.16 |
+| 4Ch    | CM_PER_SPI0_CLKCTRL     |               | Section 8.1.12.1.17 |
+| 50h    | CM_PER_SPI1_CLKCTRL     |               | Section 8.1.12.1.18 |
+| 60h    | CM_PER_L4LS_CLKCTRL     |               | Section 8.1.12.1.19 |
+| 68h    | CM_PER_MCASP1_CLKCTRL   |               | Section 8.1.12.1.20 |
+| 6Ch    | CM_PER_UART1_CLKCTRL    |               | Section 8.1.12.1.21 |
+| 70h    | CM_PER_UART2_CLKCTRL    |               | Section 8.1.12.1.22 |
+| 74h    | CM_PER_UART3_CLKCTRL    |               | Section 8.1.12.1.23 |
+| 78h    | CM_PER_UART4_CLKCTRL    |               | Section 8.1.12.1.24 |
+| 7Ch    | CM_PER_TIMER7_CLKCTRL   |               | Section 8.1.12.1.25 |
+| 80h    | CM_PER_TIMER2_CLKCTRL   |               | Section 8.1.12.1.26 |
+| 84h    | CM_PER_TIMER3_CLKCTRL   |               | Section 8.1.12.1.27 |
+| 88h    | CM_PER_TIMER4_CLKCTRL   |               | Section 8.1.12.1.28 |
+| ACh    | CM_PER_GPIO1_CLKCTRL    |               | Section 8.1.12.1.29 |
+| B0h    | CM_PER_GPIO2_CLKCTRL    |               | Section 8.1.12.1.30 |
+| B4h    | CM_PER_GPIO3_CLKCTRL    |               | Section 8.1.12.1.31 |
+| BCh    | CM_PER_TPCC_CLKCTRL     |               | Section 8.1.12.1.32 |
+| C0h    | CM_PER_DCAN0_CLKCTRL    |               | Section 8.1.12.1.33 |
+| C4h    | CM_PER_DCAN1_CLKCTRL    |               | Section 8.1.12.1.34 |
+| CCh    | CM_PER_EPWMSS1_CLKCTRL  |               | Section 8.1.12.1.35 |
+| D4h    | CM_PER_EPWMSS0_CLKCTRL  |               | Section 8.1.12.1.36 |
+| D8h    | CM_PER_EPWMSS2_CLKCTRL  |               | Section 8.1.12.1.37 |
+| DCh    | CM_PER_L3_INSTR_CLKCTRL |               | Section 8.1.12.1.38 |
+| E0h    | CM_PER_L3_CLKCTRL       |               | Section 8.1.12.1.39 |
+| E4h    | CM_PER_IEEE5000_CLKCTRL |               | Section 8.1.12.1.40 |
+| E8h    | CM_PER_PRU_ICSS_CLKCTRL |               | Section 8.1.12.1.41 |
+| ECh    | CM_PER_TIMER5_CLKCTRL   |               | Section 8.1.12.1.42 |
+
+
+# **Table 8-30. CM\_PER REGISTERS (continued)**
+
+| Offset | Acronym                        | Register Name | Section             |
+|--------|--------------------------------|---------------|---------------------|
+| F0h    | CM_PER_TIMER6_CLKCTRL          |               | Section 8.1.12.1.43 |
+| F4h    | CM_PER_MMC1_CLKCTRL            |               | Section 8.1.12.1.44 |
+| F8h    | CM_PER_MMC2_CLKCTRL            |               | Section 8.1.12.1.45 |
+| FCh    | CM_PER_TPTC1_CLKCTRL           |               | Section 8.1.12.1.46 |
+| 100h   | CM_PER_TPTC2_CLKCTRL           |               | Section 8.1.12.1.47 |
+| 10Ch   | CM_PER_SPINLOCK_CLKCTRL        |               | Section 8.1.12.1.48 |
+| 110h   | CM_PER_MAILBOX0_CLKCTRL        |               | Section 8.1.12.1.49 |
+| 11Ch   | CM_PER_L4HS_CLKSTCTRL          |               | Section 8.1.12.1.50 |
+| 120h   | CM_PER_L4HS_CLKCTRL            |               | Section 8.1.12.1.51 |
+| 12Ch   | CM_PER_OCPWP_L3_CLKSTCT<br>RL  |               | Section 8.1.12.1.52 |
+| 130h   | CM_PER_OCPWP_CLKCTRL           |               | Section 8.1.12.1.53 |
+| 140h   | CM_PER_PRU_ICSS_CLKSTCTR<br>L  |               | Section 8.1.12.1.54 |
+| 144h   | CM_PER_CPSW_CLKSTCTRL          |               | Section 8.1.12.1.55 |
+| 148h   | CM_PER_LCDC_CLKSTCTRL          |               | Section 8.1.12.1.56 |
+| 14Ch   | CM_PER_CLKDIV32K_CLKCTRL       |               | Section 8.1.12.1.57 |
+| 150h   | CM_PER_CLK_24MHZ_CLKSTCT<br>RL |               | Section 8.1.12.1.58 |
+
+
+### *8.1.12.1.1 CM\_PER\_L4LS\_CLKSTCTRL Register (offset = 0h) [reset = C0102h]*
+
+CM\_PER\_L4LS\_CLKSTCTRL is shown in [Figure](#page-58-1) 8-28 and described in [Table](#page-58-2) 8-31.
+
+This register enables the domain power state transition. It controls the SW supervised clock domain state transition between ON-PER and ON-INPER states. It also hold one status bit per clock input of the domain.
+
+
+| 31                          | 30                          | 29                                | 28                                | 27                                | 26                         | 25                        | 24                          |  |  |  |  |
+|-----------------------------|-----------------------------|-----------------------------------|-----------------------------------|-----------------------------------|----------------------------|---------------------------|-----------------------------|--|--|--|--|
+|                             | Reserved                    |                                   | CLKACTIVITY_<br>TIMER6_GCLK       | CLKACTIVITY_<br>TIMER5_GCLK       | Reserved                   | CLKACTIVITY_<br>SPI_GCLK  | CLKACTIVITY_<br>I2C_FCLK    |  |  |  |  |
+|                             | R-0h                        |                                   | R-0h                              | R-0h                              | R-0h                       | R-0h                      | R-0h                        |  |  |  |  |
+| 23                          | 22                          | 21                                | 20                                | 19                                | 18                         | 17                        | 16                          |  |  |  |  |
+| Reserved                    | Reserved                    | CLKACTIVITY_<br>GPIO_3_GDBC<br>LK | CLKACTIVITY_<br>GPIO_2_GDBC<br>LK | CLKACTIVITY_<br>GPIO_1_GDBC<br>LK | Reserved                   | CLKACTIVITY_<br>LCDC_GCLK | CLKACTIVITY_<br>TIMER4_GCLK |  |  |  |  |
+| R-0h                        | R-0h                        | R-0h                              | R-0h                              | R-1h                              | R-1h                       | R-0h                      | R-0h                        |  |  |  |  |
+| 15                          | 14                          | 13                                | 12                                | 11                                | 10                         | 9                         | 8                           |  |  |  |  |
+| CLKACTIVITY_<br>TIMER3_GCLK | CLKACTIVITY_<br>TIMER2_GCLK | CLKACTIVITY_<br>TIMER7_GCLK       | Reserved                          | CLKACTIVITY_<br>CAN_CLK           | CLKACTIVITY_<br>UART_GFCLK | Reserved                  | CLKACTIVITY_<br>L4LS_GCLK   |  |  |  |  |
+| R-0h                        | R-0h                        | R-0h                              | R-0h                              | R-0h                              | R-0h                       | R-0h                      | R-1h                        |  |  |  |  |
+| 7                           | 6                           | 5                                 | 4                                 | 3                                 | 2                          | 1                         | 0                           |  |  |  |  |
+|                             | Reserved                    |                                   |                                   |                                   |                            |                           |                             |  |  |  |  |
+
+
+LEGEND: R/W = Read/Write; R = Read only; W1toCl = Write 1 to clear bit; *-n* = value after reset
+
+**Table 8-31. CM\_PER\_L4LS\_CLKSTCTRL Register Field Descriptions**
+
+R-0h R/W-2h
+
+
+| Bit   | Field                         | Type | Reset | Description                                                                                                                                                              |
+|-------|-------------------------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-29 | Reserved                      | R    | 0h    |                                                                                                                                                                          |
+| 28    | CLKACTIVITY_TIMER6_<br>GCLK   | R    | 0h    | This field indicates the state of the TIMER6 CLKTIMER clock in the<br>domain.                                                                                            |
+|       |                               |      |       | 0x0 = Inact : Corresponding clock is gated<br>0x1 = Act : Corresponding clock is active                                                                                  |
+| 27    | CLKACTIVITY_TIMER5_<br>GCLK   | R    | 0h    | This field indicates the state of the TIMER5 CLKTIMER clock in the<br>domain.<br>0x0 = Inact : Corresponding clock is gated<br>0x1 = Act : Corresponding clock is active |
+| 26    | Reserved                      | R    | 0h    | Reserved.                                                                                                                                                                |
+| 25    | CLKACTIVITY_SPI_GCL<br>K      | R    | 0h    | This field indicates the state of the SPI_GCLK clock in the domain.<br>0x0 = Inact : Corresponding clock is gated<br>0x1 = Act : Corresponding clock is active           |
+| 24    | CLKACTIVITY_I2C_FCLK          | R    | 0h    | This field indicates the state of the I2C _FCLK clock in the domain.<br>0x0 = Inact : Corresponding clock is gated<br>0x1 = Act : Corresponding clock is active          |
+| 23    | Reserved                      | R    | 0h    |                                                                                                                                                                          |
+| 22    | Reserved                      | R    | 0h    | Reserved.                                                                                                                                                                |
+| 21    | CLKACTIVITY_GPIO_3_<br>GDBCLK | R    | 0h    | This field indicates the state of the GPIO3_GDBCLK clock in the<br>domain.<br>0x0 = Inact : Corresponding clock is gated<br>0x1 = Act : Corresponding clock is active    |
+
+
+**Table 8-31. CM\_PER\_L4LS\_CLKSTCTRL Register Field Descriptions (continued)**
+
+| Bit | Field                         | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                                         |
+|-----|-------------------------------|------|-------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 20  | CLKACTIVITY_GPIO_2_<br>GDBCLK | R    | 0h    | This field indicates the state of the GPIO2_ GDBCLK clock in the<br>domain.<br>0x0 = Inact : Corresponding clock is gated<br>0x1 = Act : Corresponding clock is active                                                                                                                                                                                                                                              |
+| 19  | CLKACTIVITY_GPIO_1_<br>GDBCLK | R    | 1h    | This field indicates the state of the GPIO1_GDBCLK clock in the<br>domain.<br>0x0 = Inact : Corresponding clock is gated<br>0x1 = Act : Corresponding clock is active                                                                                                                                                                                                                                               |
+| 18  | Reserved                      | R    | 1h    | Reserved.                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 17  | CLKACTIVITY_LCDC_GC<br>LK     | R    | 0h    | This field indicates the state of the LCD clock in the domain.<br>0x0 = Inact : Corresponding clock is gated<br>0x1 = Act : Corresponding clock is active                                                                                                                                                                                                                                                           |
+| 16  | CLKACTIVITY_TIMER4_<br>GCLK   | R    | 0h    | This field indicates the state of the TIMER4 CLKTIMER clock in the<br>domain.<br>0x0 = Inact : Corresponding clock is gated<br>0x1 = Act : Corresponding clock is active                                                                                                                                                                                                                                            |
+| 15  | CLKACTIVITY_TIMER3_<br>GCLK   | R    | 0h    | This field indicates the state of the TIMER3 CLKTIMER clock in the<br>domain.<br>0x0 = Inact : Corresponding clock is gated<br>0x1 = Act : Corresponding clock is active                                                                                                                                                                                                                                            |
+| 14  | CLKACTIVITY_TIMER2_<br>GCLK   | R    | 0h    | This field indicates the state of the TIMER2 CLKTIMER clock in the<br>domain.<br>0x0 = Inact : Corresponding clock is gated<br>0x1 = Act : Corresponding clock is active                                                                                                                                                                                                                                            |
+| 13  | CLKACTIVITY_TIMER7_<br>GCLK   | R    | 0h    | This field indicates the state of the TIMER7 CLKTIMER clock in the<br>domain.<br>0x0 = Inact : Corresponding clock is gated<br>0x1 = Act : Corresponding clock is active                                                                                                                                                                                                                                            |
+| 12  | Reserved                      | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 11  | CLKACTIVITY_CAN_CLK           | R    | 0h    | This field indicates the state of the CAN_CLK clock in the domain.<br>0x0 = Inact : Corresponding clock is gated<br>0x1 = Act : Corresponding clock is active                                                                                                                                                                                                                                                       |
+| 10  | CLKACTIVITY_UART_GF<br>CLK    | R    | 0h    | This field indicates the state of the UART_GFCLK clock in the<br>domain.<br>0x0 = Inact : Corresponding clock is gated<br>0x1 = Act : Corresponding clock is active                                                                                                                                                                                                                                                 |
+| 9   | Reserved                      | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 8   | CLKACTIVITY_L4LS_GC<br>LK     | R    | 1h    | This field indicates the state of the L4LS_GCLK clock in the domain.<br>0x0 = Inact : Corresponding clock is gated<br>0x1 = Act : Corresponding clock is active                                                                                                                                                                                                                                                     |
+| 7-2 | Reserved                      | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 1-0 | CLKTRCTRL                     | R/W  | 2h    | Controls the clock state transition of the L4 SLOW clock domain in<br>PER power domain.<br>0x0 = NO_SLEEP : NO_SLEEP: Sleep transition cannot be initiated.<br>Wakeup transition may however occur.<br>0x1 = SW_SLEEP : SW_SLEEP: Start a software forced sleep<br>transition on the domain.<br>0x2 = SW_WKUP : SW_WKUP: Start a software forced wake-up<br>transition on the domain.<br>0x3 = Reserved : Reserved. |
+
+
+### *8.1.12.1.2 CM\_PER\_L3S\_CLKSTCTRL Register (offset = 4h) [reset = Ah]*
+
+CM\_PER\_L3S\_CLKSTCTRL is shown in [Figure](#page-60-1) 8-29 and described in [Table](#page-60-2) 8-32.
+
+This register enables the domain power state transition. It controls the SW supervised clock domain state transition between ON-ACTIVE and ON-INACTIVE states. It also hold one status bit per clock input of the domain.
+
+
+### **Table 8-32. CM\_PER\_L3S\_CLKSTCTRL Register Field Descriptions**
+
+R-0h R-0h R-1h R-0h R/W-2h
+
+
+| Bit   | Field                    | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                  |
+|-------|--------------------------|------|-------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-26 | Reserved                 | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                              |
+| 25-11 | Reserved                 | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                              |
+| 10    | Reserved                 | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                              |
+| 9     | Reserved                 | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                              |
+| 8     | Reserved                 | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                              |
+| 7-5   | Reserved                 | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                              |
+| 4     | Reserved                 | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                              |
+| 3     | CLKACTIVITY_L3S_GCL<br>K | R    | 1h    | This field indicates the state of the L3S_GCLK clock in the domain.<br>0x0 = Inact<br>0x1 = Act                                                                                                                                                                                                                                                                                              |
+| 2     | Reserved                 | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                              |
+| 1-0   | CLKTRCTRL                | R/W  | 2h    | Controls the clock state transition of the L3 Slow clock domain.<br>0x0 = NO_SLEEP : NO_SLEEP: Sleep transition cannot be initiated.<br>Wakeup transition may however occur.<br>0x1 = SW_SLEEP : SW_SLEEP: Start a software forced sleep<br>transition on the domain.<br>0x2 = SW_WKUP : SW_WKUP: Start a software forced wake-up<br>transition on the domain.<br>0x3 = Reserved : Reserved. |
+
+
+### *8.1.12.1.3 CM\_PER\_L3\_CLKSTCTRL Register (offset = Ch) [reset = 12h]*
+
+CM\_PER\_L3\_CLKSTCTRL is shown in [Figure](#page-61-1) 8-30 and described in [Table](#page-61-2) 8-33.
+
+This register enables the domain power state transition. It controls the SW supervised clock domain state transition between ON-ACTIVE and ON-INACTIVE states. It also hold one status bit per clock input of the domain.
+
+
+**Table 8-33. CM\_PER\_L3\_CLKSTCTRL Register Field Descriptions**
+
+
+| Bit  | Field                         | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                             |
+|------|-------------------------------|------|-------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-8 | Reserved                      | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                         |
+| 7    | CLKACTIVITY_MCASP_<br>GCLK    | R    | 0h    | This field indicates the state of the MCASP_GCLK clock in the<br>domain.<br>0x0 = Inact<br>0x1 = Act                                                                                                                                                                                                                                                                                    |
+| 6    | CLKACTIVITY_CPTS_RF<br>T_GCLK | R    | 0h    | This field indicates the state of the<br>CLKACTIVITY_CPTS_RFT_GCLK clock in the domain.<br>0x0 = Inact<br>0x1 = Act                                                                                                                                                                                                                                                                     |
+| 5    | Reserved                      | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                         |
+| 4    | CLKACTIVITY_L3_GCLK           | R    | 1h    | This field indicates the state of the L3_GCLK clock in the domain.<br>0x0 = Inact<br>0x1 = Act                                                                                                                                                                                                                                                                                          |
+| 3    | CLKACTIVITY_MMC_FCL<br>K      | R    | 0h    | This field indicates the state of the MMC_GCLK clock in the domain.<br>0x0 = Inact<br>0x1 = Act                                                                                                                                                                                                                                                                                         |
+| 2    | CLKACTIVITY_EMIF_GC<br>LK     | R    | 0h    | This field indicates the state of the EMIF_GCLK clock in the domain.<br>0x0 = Inact<br>0x1 = Act                                                                                                                                                                                                                                                                                        |
+| 1-0  | CLKTRCTRL                     | R/W  | 2h    | Controls the clock state transition of the L3 clock domain.<br>0x0 = NO_SLEEP : NO_SLEEP: Sleep transition cannot be initiated.<br>Wakeup transition may however occur.<br>0x1 = SW_SLEEP : SW_SLEEP: Start a software forced sleep<br>transition on the domain.<br>0x2 = SW_WKUP : SW_WKUP: Start a software forced wake-up<br>transition on the domain.<br>0x3 = Reserved : Reserved. |
+
+
+### *8.1.12.1.4 CM\_PER\_CPGMAC0\_CLKCTRL Register (offset = 14h) [reset = 70000h]*
+
+CM\_PER\_CPGMAC0\_CLKCTRL is shown in [Figure](#page-62-1) 8-31 and described in [Table](#page-62-2) 8-34. This register manages the CPSW clocks.
+
+#### **Table 8-34. CM\_PER\_CPGMAC0\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                          |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-19 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 18    | STBYST     | R    | 1h    | Module standby status.<br>This bit is warm reset insensitive when CPSW RESET_ISO is<br>enabled                                                                                                                                                                                       |
+|       |            |      |       | 0x0 = Func : Module is functional (not in standby)                                                                                                                                                                                                                                   |
+|       |            |      |       | 0x1 = Standby : Module is in standby                                                                                                                                                                                                                                                 |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.<br>This bit is warm reset insensitive when CPSW RESET_ISO is<br>enabled                                                                                                                                                                                          |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                               |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                          |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                            |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.<br>This bit is warm reset insensitive when CPSW RESET_ISO is<br>enabled                                                                                                                                                                |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                        |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                          |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen. |
+|       |            |      |       | 0x3 = RESERVED : Reserved                                                                                                                                                                                                                                                            |
+
+
+### *8.1.12.1.5 CM\_PER\_LCDC\_CLKCTRL Register (offset = 18h) [reset = 70000h]*
+
+CM\_PER\_LCDC\_CLKCTRL is shown in [Figure](#page-63-1) 8-32 and described in [Table](#page-63-2) 8-35.
+
+This register manages the LCD clocks.
+
+#### **Table 8-35. CM\_PER\_LCDC\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |  |  |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--|--|
+| 31-19 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |  |  |
+| 18    | STBYST     | R    | 1h    | Module standby status.<br>0x0 = Func : Module is functional (not in standby)<br>0x1 = Standby : Module is in standby                                                                                                                                                                                                                                                                                                                                                                                                                                               |  |  |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.<br>0x0 = Func : Module is fully functional, including OCP<br>0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion<br>0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock<br>0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                 |  |  |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |  |  |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.<br>0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).<br>0x1 = RESERVED_1 : Reserved<br>0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |  |  |
+
+
+### *8.1.12.1.6 CM\_PER\_USB0\_CLKCTRL Register (offset = 1Ch) [reset = 70000h]*
+
+CM\_PER\_USB0\_CLKCTRL is shown in [Figure](#page-64-1) 8-33 and described in [Table](#page-64-2) 8-36.
+
+This register manages the USB clocks.
+
+#### **Table 8-36. CM\_PER\_USB0\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |  |  |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--|--|
+| 31-19 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |  |  |
+| 18    | STBYST     | R    | 1h    | Module standby status.<br>0x0 = Func : Module is functional (not in standby)<br>0x1 = Standby : Module is in standby                                                                                                                                                                                                                                                                                                                                                                                                                                               |  |  |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.<br>0x0 = Func : Module is fully functional, including OCP<br>0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion<br>0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock<br>0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                 |  |  |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |  |  |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.<br>0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).<br>0x1 = RESERVED_1 : Reserved<br>0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |  |  |
+
+
+### *8.1.12.1.7 CM\_PER\_TPTC0\_CLKCTRL Register (offset = 24h) [reset = 70000h]*
+
+CM\_PER\_TPTC0\_CLKCTRL is shown in [Figure](#page-65-1) 8-34 and described in [Table](#page-65-2) 8-37.
+
+This register manages the TPTC clocks.
+
+#### **Table 8-37. CM\_PER\_TPTC0\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |  |  |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--|--|
+| 31-19 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |  |  |
+| 18    | STBYST     | R    | 1h    | Module standby status.<br>0x0 = Func : Module is functional (not in standby)<br>0x1 = Standby : Module is in standby                                                                                                                                                                                                                                                                                                                                                                                                                                               |  |  |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.<br>0x0 = Func : Module is fully functional, including OCP<br>0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion<br>0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock<br>0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                 |  |  |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |  |  |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.<br>0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).<br>0x1 = RESERVED_1 : Reserved<br>0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |  |  |
+
+
+### *8.1.12.1.8 CM\_PER\_EMIF\_CLKCTRL Register (offset = 28h) [reset = 30000h]*
+
+CM\_PER\_EMIF\_CLKCTRL is shown in [Figure](#page-66-1) 8-35 and described in [Table](#page-66-2) 8-38.
+
+This register manages the EMIF clocks.
+
+#### **Table 8-38. CM\_PER\_EMIF\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                       |
+|-------|------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                                               |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                                                            |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                                             |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                                       |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                                                         |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                                     |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                                                     |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                                                       |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+### *8.1.12.1.9 CM\_PER\_OCMCRAM\_CLKCTRL Register (offset = 2Ch) [reset = 30000h]*
+
+CM\_PER\_OCMCRAM\_CLKCTRL is shown in [Figure](#page-67-1) 8-36 and described in [Table](#page-67-2) 8-39.
+
+This register manages the OCMC clocks.
+
+#### **Table 8-39. CM\_PER\_OCMCRAM\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                          |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                  |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                               |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                          |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                            |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                        |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                        |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                          |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen. |
+|       |            |      |       | 0x3 = RESERVED : Reserved                                                                                                                                                                                                                                                            |
+
+
+### *8.1.12.1.10 CM\_PER\_GPMC\_CLKCTRL Register (offset = 30h) [reset = 30002h]*
+
+CM\_PER\_GPMC\_CLKCTRL is shown in [Figure](#page-68-1) 8-37 and described in [Table](#page-68-2) 8-40.
+
+This register manages the GPMC clocks.
+
+#### **Table 8-40. CM\_PER\_GPMC\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                       |
+|-------|------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                                               |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                                                            |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                                             |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                                       |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                                                         |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 1-0   | MODULEMODE | R/W  | 2h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                                     |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                                                     |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                                                       |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+### *8.1.12.1.11 CM\_PER\_MCASP0\_CLKCTRL Register (offset = 34h) [reset = 30000h]*
+
+CM\_PER\_MCASP0\_CLKCTRL is shown in [Figure](#page-69-1) 8-38 and described in [Table](#page-69-2) 8-41.
+
+This register manages the MCASP0 clocks.
+
+
+**Table 8-41. CM\_PER\_MCASP0\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                          |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                  |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                               |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                          |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                            |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                        |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                        |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                          |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen. |
+|       |            |      |       | 0x3 = RESERVED : Reserved                                                                                                                                                                                                                                                            |
+
+
+### *8.1.12.1.12 CM\_PER\_UART5\_CLKCTRL Register (offset = 38h) [reset = 30000h]*
+
+CM\_PER\_UART5\_CLKCTRL is shown in [Figure](#page-70-1) 8-39 and described in [Table](#page-70-2) 8-42.
+
+This register manages the UART5 clocks.
+
+#### **Table 8-42. CM\_PER\_UART5\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                       |
+|-------|------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                                               |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                                                            |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                                             |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                                       |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                                                         |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                                     |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                                                     |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                                                       |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+### *8.1.12.1.13 CM\_PER\_MMC0\_CLKCTRL Register (offset = 3Ch) [reset = 30000h]*
+
+CM\_PER\_MMC0\_CLKCTRL is shown in [Figure](#page-71-1) 8-40 and described in [Table](#page-71-2) 8-43. This register manages the MMC0 clocks.
+
+#### **Table 8-43. CM\_PER\_MMC0\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                          |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-19 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 18    | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                  |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                               |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                          |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                            |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                        |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                        |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                          |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen. |
+|       |            |      |       | 0x3 = RESERVED : Reserved                                                                                                                                                                                                                                                            |
+
+
+### *8.1.12.1.14 CM\_PER\_ELM\_CLKCTRL Register (offset = 40h) [reset = 30000h]*
+
+CM\_PER\_ELM\_CLKCTRL is shown in [Figure](#page-72-1) 8-41 and described in [Table](#page-72-2) 8-44.
+
+This register manages the ELM clocks.
+
+#### **Table 8-44. CM\_PER\_ELM\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                       |
+|-------|------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                                               |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                                                            |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                                             |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                                       |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                                                         |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                                     |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                                                     |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                                                       |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+### *8.1.12.1.15 CM\_PER\_I2C2\_CLKCTRL Register (offset = 44h) [reset = 30000h]*
+
+CM\_PER\_I2C2\_CLKCTRL is shown in [Figure](#page-73-1) 8-42 and described in [Table](#page-73-2) 8-45.
+
+This register manages the I2C2 clocks.
+
+#### **Table 8-45. CM\_PER\_I2C2\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                          |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                  |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                               |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                          |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                            |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                        |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                        |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                          |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen. |
+|       |            |      |       | 0x3 = RESERVED : Reserved                                                                                                                                                                                                                                                            |
+
+
+### *8.1.12.1.16 CM\_PER\_I2C1\_CLKCTRL Register (offset = 48h) [reset = 30000h]*
+
+CM\_PER\_I2C1\_CLKCTRL is shown in [Figure](#page-74-1) 8-43 and described in [Table](#page-74-2) 8-46.
+
+This register manages the I2C1 clocks.
+
+#### **Table 8-46. CM\_PER\_I2C1\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                       |
+|-------|------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                                               |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                                                            |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                                             |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                                       |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                                                         |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                                     |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                                                     |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                                                       |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+### *8.1.12.1.17 CM\_PER\_SPI0\_CLKCTRL Register (offset = 4Ch) [reset = 30000h]*
+
+CM\_PER\_SPI0\_CLKCTRL is shown in [Figure](#page-75-1) 8-44 and described in [Table](#page-75-2) 8-47.
+
+This register manages the SPI0 clocks.
+
+**Table 8-47. CM\_PER\_SPI0\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                          |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                  |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                               |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                          |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                            |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                        |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                        |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                          |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen. |
+|       |            |      |       | 0x3 = RESERVED : Reserved                                                                                                                                                                                                                                                            |
+
+
+### *8.1.12.1.18 CM\_PER\_SPI1\_CLKCTRL Register (offset = 50h) [reset = 30000h]*
+
+CM\_PER\_SPI1\_CLKCTRL is shown in [Figure](#page-76-1) 8-45 and described in [Table](#page-76-2) 8-48.
+
+This register manages the SPI1 clocks.
+
+#### **Table 8-48. CM\_PER\_SPI1\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                       |
+|-------|------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                                               |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                                                            |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                                             |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                                       |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                                                         |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                                     |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                                                     |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                                                       |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+### *8.1.12.1.19 CM\_PER\_L4LS\_CLKCTRL Register (offset = 60h) [reset = 2h]*
+
+CM\_PER\_L4LS\_CLKCTRL is shown in [Figure](#page-77-1) 8-46 and described in [Table](#page-77-2) 8-49.
+
+This register manages the L4LS clocks.
+
+#### **Table 8-49. CM\_PER\_L4LS\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                          |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 17-16 | IDLEST     | R    | 0h    | Module idle status.                                                                                                                                                                                                                                                                  |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                               |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                          |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                            |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 1-0   | MODULEMODE | R/W  | 2h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                        |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                        |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                          |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen. |
+|       |            |      |       | 0x3 = RESERVED : Reserved                                                                                                                                                                                                                                                            |
+
+
+### *8.1.12.1.20 CM\_PER\_MCASP1\_CLKCTRL Register (offset = 68h) [reset = 30000h]*
+
+CM\_PER\_MCASP1\_CLKCTRL is shown in [Figure](#page-78-1) 8-47 and described in [Table](#page-78-2) 8-50.
+
+This register manages the MCASP1 clocks.
+
+#### **Table 8-50. CM\_PER\_MCASP1\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                       |
+|-------|------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                                               |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                                                            |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                                             |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                                       |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                                                         |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                                     |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                                                     |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                                                       |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+### *8.1.12.1.21 CM\_PER\_UART1\_CLKCTRL Register (offset = 6Ch) [reset = 30000h]*
+
+CM\_PER\_UART1\_CLKCTRL is shown in [Figure](#page-79-1) 8-48 and described in [Table](#page-79-2) 8-51.
+
+This register manages the UART1 clocks.
+
+#### **Table 8-51. CM\_PER\_UART1\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                          |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                  |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                               |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                          |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                            |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                        |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                        |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                          |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen. |
+|       |            |      |       | 0x3 = RESERVED : Reserved                                                                                                                                                                                                                                                            |
+
+
+### *8.1.12.1.22 CM\_PER\_UART2\_CLKCTRL Register (offset = 70h) [reset = 30000h]*
+
+CM\_PER\_UART2\_CLKCTRL is shown in [Figure](#page-80-1) 8-49 and described in [Table](#page-80-2) 8-52.
+
+This register manages the UART2 clocks.
+
+#### **Table 8-52. CM\_PER\_UART2\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                       |
+|-------|------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                                               |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                                                            |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                                             |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                                       |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                                                         |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                                     |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                                                     |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                                                       |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+### *8.1.12.1.23 CM\_PER\_UART3\_CLKCTRL Register (offset = 74h) [reset = 30000h]*
+
+CM\_PER\_UART3\_CLKCTRL is shown in [Figure](#page-81-1) 8-50 and described in [Table](#page-81-2) 8-53.
+
+This register manages the UART3 clocks.
+
+
+#### **Table 8-53. CM\_PER\_UART3\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                          |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                  |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                               |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                          |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                            |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                        |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                        |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                          |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen. |
+|       |            |      |       | 0x3 = RESERVED : Reserved                                                                                                                                                                                                                                                            |
+
+
+### *8.1.12.1.24 CM\_PER\_UART4\_CLKCTRL Register (offset = 78h) [reset = 30000h]*
+
+CM\_PER\_UART4\_CLKCTRL is shown in [Figure](#page-82-1) 8-51 and described in [Table](#page-82-2) 8-54.
+
+This register manages the UART4 clocks.
+
+
+#### **Table 8-54. CM\_PER\_UART4\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                       |
+|-------|------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                                               |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                                                            |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                                             |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                                       |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                                                         |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                                     |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                                                     |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                                                       |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+### *8.1.12.1.25 CM\_PER\_TIMER7\_CLKCTRL Register (offset = 7Ch) [reset = 30000h]*
+
+CM\_PER\_TIMER7\_CLKCTRL is shown in [Figure](#page-83-1) 8-52 and described in [Table](#page-83-2) 8-55.
+
+This register manages the TIMER7 clocks.
+
+
+
+#### **Table 8-55. CM\_PER\_TIMER7\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                          |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                  |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                               |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                          |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                            |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                        |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                        |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                          |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen. |
+|       |            |      |       | 0x3 = RESERVED : Reserved                                                                                                                                                                                                                                                            |
+
+
+### *8.1.12.1.26 CM\_PER\_TIMER2\_CLKCTRL Register (offset = 80h) [reset = 30000h]*
+
+CM\_PER\_TIMER2\_CLKCTRL is shown in [Figure](#page-84-1) 8-53 and described in [Table](#page-84-2) 8-56.
+
+This register manages the TIMER2 clocks.
+
+#### **Table 8-56. CM\_PER\_TIMER2\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                       |
+|-------|------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                                               |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                                                            |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                                             |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                                       |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                                                         |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                                     |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                                                     |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                                                       |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+### *8.1.12.1.27 CM\_PER\_TIMER3\_CLKCTRL Register (offset = 84h) [reset = 30000h]*
+
+CM\_PER\_TIMER3\_CLKCTRL is shown in [Figure](#page-85-1) 8-54 and described in [Table](#page-85-2) 8-57.
+
+This register manages the TIMER3 clocks.
+
+
+**Table 8-57. CM\_PER\_TIMER3\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                          |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                  |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                               |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                          |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                            |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                        |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                        |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                          |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen. |
+|       |            |      |       | 0x3 = RESERVED : Reserved                                                                                                                                                                                                                                                            |
+
+
+### *8.1.12.1.28 CM\_PER\_TIMER4\_CLKCTRL Register (offset = 88h) [reset = 30000h]*
+
+CM\_PER\_TIMER4\_CLKCTRL is shown in [Figure](#page-86-1) 8-55 and described in [Table](#page-86-2) 8-58.
+
+This register manages the TIMER4 clocks.
+
+#### **Table 8-58. CM\_PER\_TIMER4\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                       |
+|-------|------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                                               |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                                                            |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                                             |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                                       |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                                                         |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                                     |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                                                     |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                                                       |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+### *8.1.12.1.29 CM\_PER\_GPIO1\_CLKCTRL Register (offset = ACh) [reset = 30000h]*
+
+CM\_PER\_GPIO1\_CLKCTRL is shown in [Figure](#page-87-1) 8-56 and described in [Table](#page-87-2) 8-59.
+
+This register manages the GPIO1 clocks.
+
+#### **Table 8-59. CM\_PER\_GPIO1\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field                       | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+|-------|-----------------------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-19 | Reserved                    | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 18    | OPTFCLKEN_GPIO_1_G<br>DBCLK | R/W  | 0h    | Optional functional clock control.<br>0x0 = FCLK_DIS : Optional functional clock is disabled<br>0x1 = FCLK_EN : Optional functional clock is enabled                                                                                                                                                                                                                                                                                                                                                                                                               |
+| 17-16 | IDLEST                      | R    | 3h    | Module idle status.<br>0x0 = Func : Module is fully functional, including OCP<br>0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion<br>0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock<br>0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                 |
+| 15-2  | Reserved                    | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 1-0   | MODULEMODE                  | R/W  | 0h    | Control the way mandatory clocks are managed.<br>0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).<br>0x1 = RESERVED_1 : Reserved<br>0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guaranteed to stay present. As long as<br>in this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+### *8.1.12.1.30 CM\_PER\_GPIO2\_CLKCTRL Register (offset = B0h) [reset = 30000h]*
+
+CM\_PER\_GPIO2\_CLKCTRL is shown in [Figure](#page-88-1) 8-57 and described in [Table](#page-88-2) 8-60.
+
+This register manages the GPIO2 clocks.
+
+#### **Table 8-60. CM\_PER\_GPIO2\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field                       | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+|-------|-----------------------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-19 | Reserved                    | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 18    | OPTFCLKEN_GPIO_2_G<br>DBCLK | R/W  | 0h    | Optional functional clock control.<br>0x0 = FCLK_DIS : Optional functional clock is disabled<br>0x1 = FCLK_EN : Optional functional clock is enabled                                                                                                                                                                                                                                                                                                                                                                                                               |
+| 17-16 | IDLEST                      | R    | 3h    | Module idle status.<br>0x0 = Func : Module is fully functional, including OCP<br>0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion<br>0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock<br>0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                 |
+| 15-2  | Reserved                    | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 1-0   | MODULEMODE                  | R/W  | 0h    | Control the way mandatory clocks are managed.<br>0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).<br>0x1 = RESERVED_1 : Reserved<br>0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+### *8.1.12.1.31 CM\_PER\_GPIO3\_CLKCTRL Register (offset = B4h) [reset = 30000h]*
+
+CM\_PER\_GPIO3\_CLKCTRL is shown in [Figure](#page-89-1) 8-58 and described in [Table](#page-89-2) 8-61.
+
+This register manages the GPIO3 clocks.
+
+#### **Table 8-61. CM\_PER\_GPIO3\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field                       | Type | Reset                                                                                                                                                                                                                                                                                                                                                    | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+|-------|-----------------------------|------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-19 | Reserved                    | R    | 0h                                                                                                                                                                                                                                                                                                                                                       |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 18    | OPTFCLKEN_GPIO_3_G<br>DBCLK | R/W  | 0h                                                                                                                                                                                                                                                                                                                                                       | Optional functional clock control.<br>0x0 = FCLK_DIS : Optional functional clock is disabled<br>0x1 = FCLK_EN : Optional functional clock is enabled                                                                                                                                                                                                                                                                                                                                                                                                               |
+| 17-16 | IDLEST                      | R    | 3h<br>Module idle status.<br>0x0 = Func : Module is fully functional, including OCP<br>0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion<br>0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock<br>0x3 = Disable : Module is disabled and cannot be accessed |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 15-2  | Reserved                    | R    | 0h                                                                                                                                                                                                                                                                                                                                                       |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 1-0   | MODULEMODE                  | R/W  | 0h                                                                                                                                                                                                                                                                                                                                                       | Control the way mandatory clocks are managed.<br>0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).<br>0x1 = RESERVED_1 : Reserved<br>0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+### *8.1.12.1.32 CM\_PER\_TPCC\_CLKCTRL Register (offset = BCh) [reset = 30000h]*
+
+CM\_PER\_TPCC\_CLKCTRL is shown in [Figure](#page-90-1) 8-59 and described in [Table](#page-90-2) 8-62.
+
+This register manages the TPCC clocks.
+
+
+#### **Table 8-62. CM\_PER\_TPCC\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                       |
+|-------|------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                                               |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                                                            |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                                             |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                                       |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                                                         |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                                     |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                                                     |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                                                       |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+### *8.1.12.1.33 CM\_PER\_DCAN0\_CLKCTRL Register (offset = C0h) [reset = 30000h]*
+
+CM\_PER\_DCAN0\_CLKCTRL is shown in [Figure](#page-91-1) 8-60 and described in [Table](#page-91-2) 8-63.
+
+This register manages the DCAN0 clocks.
+
+#### **Table 8-63. CM\_PER\_DCAN0\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                       |
+|-------|------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-19 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 18    | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                                               |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                                                            |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                                             |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                                       |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                                                         |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                                     |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                                                     |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                                                       |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+# *8.1.12.1.34 CM\_PER\_DCAN1\_CLKCTRL Register (offset = C4h) [reset = 30000h]*
+
+CM\_PER\_DCAN1\_CLKCTRL is shown in [Figure](#page-92-1) 8-61 and described in [Table](#page-92-2) 8-64.
+
+This register manages the DCAN1 clocks.
+
+#### **Table 8-64. CM\_PER\_DCAN1\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                          |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-19 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 18    | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                  |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                               |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                          |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                            |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                        |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                        |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                          |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen. |
+|       |            |      |       | 0x3 = RESERVED : Reserved                                                                                                                                                                                                                                                            |
+
+
+### *8.1.12.1.35 CM\_PER\_EPWMSS1\_CLKCTRL Register (offset = CCh) [reset = 30000h]*
+
+CM\_PER\_EPWMSS1\_CLKCTRL is shown in [Figure](#page-93-1) 8-62 and described in [Table](#page-93-2) 8-65. This register manages the PWMSS1 clocks.
+
+
+#### **Table 8-65. CM\_PER\_EPWMSS1\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                          |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                  |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                               |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                          |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                            |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                        |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                        |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                          |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen. |
+|       |            |      |       | 0x3 = RESERVED : Reserved                                                                                                                                                                                                                                                            |
+
+
+### *8.1.12.1.36 CM\_PER\_EPWMSS0\_CLKCTRL Register (offset = D4h) [reset = 30000h]*
+
+CM\_PER\_EPWMSS0\_CLKCTRL is shown in [Figure](#page-94-1) 8-63 and described in [Table](#page-94-2) 8-66. This register manages the PWMSS0 clocks.
+
+
+#### **Table 8-66. CM\_PER\_EPWMSS0\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                       |
+|-------|------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                                               |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                                                            |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                                             |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                                       |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                                                         |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                                     |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                                                     |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                                                       |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+### *8.1.12.1.37 CM\_PER\_EPWMSS2\_CLKCTRL Register (offset = D8h) [reset = 30000h]*
+
+CM\_PER\_EPWMSS2\_CLKCTRL is shown in [Figure](#page-95-1) 8-64 and described in [Table](#page-95-2) 8-67. This register manages the PWMSS2 clocks.
+
+
+#### **Table 8-67. CM\_PER\_EPWMSS2\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                          |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                  |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                               |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                          |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                            |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                        |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                        |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                          |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen. |
+|       |            |      |       | 0x3 = RESERVED : Reserved                                                                                                                                                                                                                                                            |
+
+
+### *8.1.12.1.38 CM\_PER\_L3\_INSTR\_CLKCTRL Register (offset = DCh) [reset = 2h]*
+
+CM\_PER\_L3\_INSTR\_CLKCTRL is shown in [Figure](#page-96-1) 8-65 and described in [Table](#page-96-2) 8-68.
+
+This register manages the L3 INSTR clocks.
+
+
+#### **Table 8-68. CM\_PER\_L3\_INSTR\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                       |
+|-------|------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 17-16 | IDLEST     | R    | 0h    | Module idle status.                                                                                                                                                                                                                                                                                               |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                                                            |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                                             |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                                       |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                                                         |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 1-0   | MODULEMODE | R/W  | 2h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                                     |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                                                     |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                                                       |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+### *8.1.12.1.39 CM\_PER\_L3\_CLKCTRL Register (offset = E0h) [reset = 2h]*
+
+CM\_PER\_L3\_CLKCTRL is shown in [Figure](#page-97-1) 8-66 and described in [Table](#page-97-2) 8-69.
+
+This register manages the L3 Interconnect clocks.
+
+#### **Table 8-69. CM\_PER\_L3\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                          |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 17-16 | IDLEST     | R    | 0h    | Module idle status.                                                                                                                                                                                                                                                                  |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                               |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                          |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                            |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 1-0   | MODULEMODE | R/W  | 2h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                        |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                        |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                          |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen. |
+|       |            |      |       | 0x3 = RESERVED : Reserved                                                                                                                                                                                                                                                            |
+
+
+### *8.1.12.1.40 CM\_PER\_IEEE5000\_CLKCTRL Register (offset = E4h) [reset = 70002h]*
+
+CM\_PER\_IEEE5000\_CLKCTRL is shown in [Figure](#page-98-1) 8-67 and described in [Table](#page-98-2) 8-70.
+
+This register manages the IEEE1500 clocks.
+
+
+
+#### **Table 8-70. CM\_PER\_IEEE5000\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-19 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 18    | STBYST     | R    | 1h    | Module standby status.<br>0x0 = Func : Module is functional (not in standby)<br>0x1 = Standby : Module is in standby                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.<br>0x0 = Func : Module is fully functional, including OCP<br>0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion<br>0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock<br>0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                 |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 1-0   | MODULEMODE | R/W  | 2h    | Control the way mandatory clocks are managed.<br>0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).<br>0x1 = RESERVED_1 : Reserved<br>0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+### *8.1.12.1.41 CM\_PER\_PRU\_ICSS\_CLKCTRL Register (offset = E8h) [reset = 70000h]*
+
+CM\_PER\_PRU\_ICSS\_CLKCTRL is shown in [Figure](#page-99-1) 8-68 and described in [Table](#page-99-2) 8-71. This register manages the PRU-ICSS clocks.
+
+#### **Table 8-71. CM\_PER\_PRU\_ICSS\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-19 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 18    | STBYST     | R    | 1h    | Module standby status.<br>0x0 = Func : Module is functional (not in standby)<br>0x1 = Standby : Module is in standby                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.<br>0x0 = Func : Module is fully functional, including OCP<br>0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion<br>0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock<br>0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                 |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.<br>0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).<br>0x1 = RESERVED_1 : Reserved<br>0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+### *8.1.12.1.42 CM\_PER\_TIMER5\_CLKCTRL Register (offset = ECh) [reset = 30000h]*
+
+CM\_PER\_TIMER5\_CLKCTRL is shown in [Figure](#page-100-1) 8-69 and described in [Table](#page-100-2) 8-72.
+
+This register manages the TIMER5 clocks.
+
+#### **Table 8-72. CM\_PER\_TIMER5\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                       |
+|-------|------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                                               |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                                                            |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                                             |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                                       |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                                                         |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                                     |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                                                     |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                                                       |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+### *8.1.12.1.43 CM\_PER\_TIMER6\_CLKCTRL Register (offset = F0h) [reset = 30000h]*
+
+CM\_PER\_TIMER6\_CLKCTRL is shown in [Figure](#page-101-1) 8-70 and described in [Table](#page-101-2) 8-73.
+
+This register manages the TIMER6 clocks.
+
+
+#### **Table 8-73. CM\_PER\_TIMER6\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                          |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                  |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                               |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                          |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                            |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                        |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                        |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                          |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen. |
+|       |            |      |       | 0x3 = RESERVED : Reserved                                                                                                                                                                                                                                                            |
+
+
+### *8.1.12.1.44 CM\_PER\_MMC1\_CLKCTRL Register (offset = F4h) [reset = 30000h]*
+
+CM\_PER\_MMC1\_CLKCTRL is shown in [Figure](#page-102-1) 8-71 and described in [Table](#page-102-2) 8-74.
+
+This register manages the MMC1 clocks.
+
+
+#### **Table 8-74. CM\_PER\_MMC1\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                       |
+|-------|------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-19 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 18    | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                                               |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                                                            |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                                             |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                                       |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                                                         |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                                     |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                                                     |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                                                       |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+### *8.1.12.1.45 CM\_PER\_MMC2\_CLKCTRL Register (offset = F8h) [reset = 30000h]*
+
+CM\_PER\_MMC2\_CLKCTRL is shown in [Figure](#page-103-1) 8-72 and described in [Table](#page-103-2) 8-75.
+
+This register manages the MMC2 clocks.
+
+
+#### **Table 8-75. CM\_PER\_MMC2\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                       |
+|-------|------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-19 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 18    | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                                               |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                                                            |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                                             |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                                       |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                                                         |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                                     |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).<br>0x1 = RESERVED_1 : Reserved                                                                                                                      |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+### *8.1.12.1.46 CM\_PER\_TPTC1\_CLKCTRL Register (offset = FCh) [reset = 70000h]*
+
+CM\_PER\_TPTC1\_CLKCTRL is shown in [Figure](#page-104-1) 8-73 and described in [Table](#page-104-2) 8-76.
+
+This register manages the TPTC1 clocks.
+
+
+#### **Table 8-76. CM\_PER\_TPTC1\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |  |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--|
+| 31-19 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |  |
+| 18    | STBYST     | R    | 1h    | Module standby status.<br>0x0 = Func : Module is functional (not in standby)<br>0x1 = Standby : Module is in standby                                                                                                                                                                                                                                                                                                                                                                                                                                               |  |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.<br>0x0 = Func : Module is fully functional, including OCP<br>0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion<br>0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock<br>0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                 |  |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |  |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.<br>0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).<br>0x1 = RESERVED_1 : Reserved<br>0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |  |
+
+
+### *8.1.12.1.47 CM\_PER\_TPTC2\_CLKCTRL Register (offset = 100h) [reset = 70000h]*
+
+CM\_PER\_TPTC2\_CLKCTRL is shown in [Figure](#page-105-1) 8-74 and described in [Table](#page-105-2) 8-77.
+
+This register manages the TPTC2 clocks.
+
+
+#### **Table 8-77. CM\_PER\_TPTC2\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |  |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--|
+| 31-19 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |  |
+| 18    | STBYST     | R    | 1h    | Module standby status.<br>0x0 = Func : Module is functional (not in standby)<br>0x1 = Standby : Module is in standby                                                                                                                                                                                                                                                                                                                                                                                                                                               |  |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.<br>0x0 = Func : Module is fully functional, including OCP<br>0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion<br>0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock<br>0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                 |  |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |  |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.<br>0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).<br>0x1 = RESERVED_1 : Reserved<br>0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |  |
+
+
+### *8.1.12.1.48 CM\_PER\_SPINLOCK\_CLKCTRL Register (offset = 10Ch) [reset = 30000h]*
+
+CM\_PER\_SPINLOCK\_CLKCTRL is shown in [Figure](#page-106-1) 8-75 and described in [Table](#page-106-2) 8-78. This register manages the SPINLOCK clocks.
+
+#### **Table 8-78. CM\_PER\_SPINLOCK\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                       |
+|-------|------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                                               |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                                                            |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                                             |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                                       |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                                                         |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                                     |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                                                     |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                                                       |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+### *8.1.12.1.49 CM\_PER\_MAILBOX0\_CLKCTRL Register (offset = 110h) [reset = 30000h]*
+
+CM\_PER\_MAILBOX0\_CLKCTRL is shown in [Figure](#page-107-1) 8-76 and described in [Table](#page-107-2) 8-79. This register manages the MAILBOX0 clocks.
+
+
+#### **Table 8-79. CM\_PER\_MAILBOX0\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                          |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                  |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                               |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                          |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                            |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                        |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                        |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                          |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen. |
+|       |            |      |       | 0x3 = RESERVED : Reserved                                                                                                                                                                                                                                                            |
+
+
+### *8.1.12.1.50 CM\_PER\_L4HS\_CLKSTCTRL Register (offset = 11Ch) [reset = 7Ah]*
+
+CM\_PER\_L4HS\_CLKSTCTRL is shown in [Figure](#page-108-1) 8-77 and described in [Table](#page-108-2) 8-80.
+
+This register enables the domain power state transition. It controls the SW supervised clock domain state transition between ON-ACTIVE and ON-INACTIVE states. It also hold one status bit per clock input of the domain.
+
+
+#### **Table 8-80. CM\_PER\_L4HS\_CLKSTCTRL Register Field Descriptions**
+
+
+| Bit  | Field                            | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                  |
+|------|----------------------------------|------|-------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-7 | Reserved                         | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                              |
+| 6    | CLKACTIVITY_CPSW_5<br>MHZ_GCLK   | R    | 1h    | This field indicates the state of the CPSW_5MHZ_GCLK clock in the<br>domain.<br>0x0 = Inact<br>0x1 = Act                                                                                                                                                                                                                                                                                     |
+| 5    | CLKACTIVITY_CPSW_50<br>MHZ_GCLK  | R    | 1h    | This field indicates the state of the CPSW_50MHZ_GCLK clock in<br>the domain.<br>0x0 = Inact<br>0x1 = Act                                                                                                                                                                                                                                                                                    |
+| 4    | CLKACTIVITY_CPSW_25<br>0MHZ_GCLK | R    | 1h    | This field indicates the state of the CPSW_250MHZ_GCLK clock in<br>the domain.<br>0x0 = Inact<br>0x1 = Act                                                                                                                                                                                                                                                                                   |
+| 3    | CLKACTIVITY_L4HS_GC<br>LK        | R    | 1h    | This field indicates the state of the L4HS_GCLK clock in the domain.<br>0x0 = Inact<br>0x1 = Act                                                                                                                                                                                                                                                                                             |
+| 2    | Reserved                         | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                              |
+| 1-0  | CLKTRCTRL                        | R/W  | 2h    | Controls the clock state transition of the L4 Fast clock domain.<br>0x0 = NO_SLEEP : NO_SLEEP: Sleep transition cannot be initiated.<br>Wakeup transition may however occur.<br>0x1 = SW_SLEEP : SW_SLEEP: Start a software forced sleep<br>transition on the domain.<br>0x2 = SW_WKUP : SW_WKUP: Start a software forced wake-up<br>transition on the domain.<br>0x3 = Reserved : Reserved. |
+
+
+### *8.1.12.1.51 CM\_PER\_L4HS\_CLKCTRL Register (offset = 120h) [reset = 2h]*
+
+CM\_PER\_L4HS\_CLKCTRL is shown in [Figure](#page-109-1) 8-78 and described in [Table](#page-109-2) 8-81.
+
+This register manages the L4 Fast clocks.
+
+
+#### **Table 8-81. CM\_PER\_L4HS\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                          |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 17-16 | IDLEST     | R    | 0h    | Module idle status.                                                                                                                                                                                                                                                                  |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                               |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                          |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                            |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 1-0   | MODULEMODE | R/W  | 2h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                        |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                        |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                          |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen. |
+|       |            |      |       | 0x3 = RESERVED : Reserved                                                                                                                                                                                                                                                            |
+
+
+### *8.1.12.1.52 CM\_PER\_OCPWP\_L3\_CLKSTCTRL Register (offset = 12Ch) [reset = 2h]*
+
+CM\_PER\_OCPWP\_L3\_CLKSTCTRL is shown in [Figure](#page-110-1) 8-79 and described in [Table](#page-110-2) 8-82.
+
+This register enables the domain power state transition. It controls the SW supervised clock domain state transition between ON-ACTIVE and ON-INACTIVE states. It also hold one status bit per clock input of the domain.
+
+
+**Table 8-82. CM\_PER\_OCPWP\_L3\_CLKSTCTRL Register Field Descriptions**
+
+
+| Bit  | Field                         | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                |
+|------|-------------------------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-6 | Reserved                      | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                            |
+| 5    | CLKACTIVITY_OCPWP_<br>L4_GCLK | R    | 0h    | This field indicates the state of the OCPWP L4 clock in the domain.<br>0x0 = Inact<br>0x1 = Act                                                                                                                                                                                                                                                                                            |
+| 4    | CLKACTIVITY_OCPWP_<br>L3_GCLK | R    | 0h    | This field indicates the state of the OCPWP L3 clock in the domain.<br>0x0 = Inact<br>0x1 = Act                                                                                                                                                                                                                                                                                            |
+| 3-2  | Reserved                      | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                            |
+| 1-0  | CLKTRCTRL                     | R/W  | 2h    | Controls the clock state transition of the OCPWP clock domain.<br>0x0 = NO_SLEEP : NO_SLEEP: Sleep transition cannot be initiated.<br>Wakeup transition may however occur.<br>0x1 = SW_SLEEP : SW_SLEEP: Start a software forced sleep<br>transition on the domain.<br>0x2 = SW_WKUP : SW_WKUP: Start a software forced wake-up<br>transition on the domain.<br>0x3 = Reserved : Reserved. |
+
+
+### *8.1.12.1.53 CM\_PER\_OCPWP\_CLKCTRL Register (offset = 130h) [reset = 70002h]*
+
+CM\_PER\_OCPWP\_CLKCTRL is shown in [Figure](#page-111-1) 8-80 and described in [Table](#page-111-2) 8-83.
+
+This register manages the OCPWP clocks.
+
+
+#### **Table 8-83. CM\_PER\_OCPWP\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-19 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 18    | STBYST     | R    | 1h    | Module standby status.<br>0x0 = Func : Module is functional (not in standby)<br>0x1 = Standby : Module is in standby                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.<br>0x0 = Func : Module is fully functional, including OCP<br>0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion<br>0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock<br>0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                 |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 1-0   | MODULEMODE | R/W  | 2h    | Control the way mandatory clocks are managed.<br>0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).<br>0x1 = RESERVED_1 : Reserved<br>0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+### *8.1.12.1.54 CM\_PER\_PRU\_ICSS\_CLKSTCTRL Register (offset = 140h) [reset = 2h]*
+
+CM\_PER\_PRU\_ICSS\_CLKSTCTRL is shown in [Figure](#page-112-1) 8-81 and described in [Table](#page-112-2) 8-84.
+
+This register enables the clock domain state transition. It controls the SW supervised clock domain state transition between ON-ACTIVE and ON-INACTIVE states. It also hold one status bit per clock input of the domain.
+
+
+#### **Table 8-84. CM\_PER\_PRU\_ICSS\_CLKSTCTRL Register Field Descriptions**
+
+
+| Bit  | Field                              | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                          |
+|------|------------------------------------|------|-------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-7 | Reserved                           | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 6    | CLKACTIVITY_PRU_ICS<br>S_UART_GCLK | R    | 0h    | This field indicates the state of the PRU-ICSS UART clock in the<br>domain.<br>0x0 = Inact<br>0x1 = Act                                                                                                                                                                                                                                                                                              |
+| 5    | CLKACTIVITY_PRU_ICS<br>S_IEP_GCLK  | R    | 0h    | This field indicates the state of the PRU-ICSS IEP clock in the<br>domain.<br>0x0 = Inact<br>0x1 = Act                                                                                                                                                                                                                                                                                               |
+| 4    | CLKACTIVITY_PRU_ICS<br>S_OCP_GCLK  | R    | 0h    | This field indicates the state of the PRU-ICSS OCP clock in the<br>domain.<br>0x0 = Inact<br>0x1 = Act                                                                                                                                                                                                                                                                                               |
+| 3-2  | Reserved                           | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                      |
+| 1-0  | CLKTRCTRL                          | R/W  | 2h    | Controls the clock state transition of the PRU-ICSS OCP clock<br>domain.<br>0x0 = NO_SLEEP : NO_SLEEP: Sleep transition cannot be initiated.<br>Wakeup transition may however occur.<br>0x1 = SW_SLEEP : SW_SLEEP: Start a software forced sleep<br>transition on the domain.<br>0x2 = SW_WKUP : SW_WKUP: Start a software forced wake-up<br>transition on the domain.<br>0x3 = Reserved : Reserved. |
+
+
+### *8.1.12.1.55 CM\_PER\_CPSW\_CLKSTCTRL Register (offset = 144h) [reset = 2h]*
+
+CM\_PER\_CPSW\_CLKSTCTRL is shown in [Figure](#page-113-1) 8-82 and described in [Table](#page-113-2) 8-85.
+
+This register enables the clock domain state transition. It controls the SW supervised clock domain state transition between ON-ACTIVE and ON-INACTIVE states. It also hold one status bit per clock input of the domain.
+
+
+#### **Table 8-85. CM\_PER\_CPSW\_CLKSTCTRL Register Field Descriptions**
+
+
+| Bit  | Field                            | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                   |
+|------|----------------------------------|------|-------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-5 | Reserved                         | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                               |
+| 4    | CLKACTIVITY_CPSW_12<br>5MHz_GCLK | R    | 0h    | This field indicates the state of the CPSW 125 MHz OCP clock in the<br>domain.<br>0x0 = Inact<br>0x1 = Act                                                                                                                                                                                                                                                                                    |
+| 3-2  | Reserved                         | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                               |
+| 1-0  | CLKTRCTRL                        | R/W  | 2h    | Controls the clock state transition of the CPSW OCP clock domain.<br>0x0 = NO_SLEEP : NO_SLEEP: Sleep transition cannot be initiated.<br>Wakeup transition may however occur.<br>0x1 = SW_SLEEP : SW_SLEEP: Start a software forced sleep<br>transition on the domain.<br>0x2 = SW_WKUP : SW_WKUP: Start a software forced wake-up<br>transition on the domain.<br>0x3 = Reserved : Reserved. |
+
+
+### *8.1.12.1.56 CM\_PER\_LCDC\_CLKSTCTRL Register (offset = 148h) [reset = 2h]*
+
+CM\_PER\_LCDC\_CLKSTCTRL is shown in [Figure](#page-114-1) 8-83 and described in [Table](#page-114-2) 8-86.
+
+This register enables the clock domain state transition. It controls the SW supervised clock domain state transition between ON-ACTIVE and ON-INACTIVE states. It also hold one status bit per clock input of the domain.
+
+#### **Table 8-86. CM\_PER\_LCDC\_CLKSTCTRL Register Field Descriptions**
+
+
+| Bit  | Field                            | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                     |
+|------|----------------------------------|------|-------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-6 | Reserved                         | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                 |
+| 5    | CLKACTIVITY_LCDC_L4<br>_OCP_GCLK | R    | 0h    | This field indicates the state of the LCDC L4 OCP clock in the<br>domain.                                                                                                                                                                                                                                                                                       |
+|      |                                  |      |       | 0x0 = Inact                                                                                                                                                                                                                                                                                                                                                     |
+|      |                                  |      |       | 0x1 = Act                                                                                                                                                                                                                                                                                                                                                       |
+| 4    | CLKACTIVITY_LCDC_L3<br>_OCP_GCLK | R    | 0h    | This field indicates the state of the LCDC L3 OCP clock in the<br>domain.                                                                                                                                                                                                                                                                                       |
+|      |                                  |      |       | 0x0 = Inact                                                                                                                                                                                                                                                                                                                                                     |
+|      |                                  |      |       | 0x1 = Act                                                                                                                                                                                                                                                                                                                                                       |
+| 3-2  | Reserved                         | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                 |
+| 1-0  | CLKTRCTRL                        | R/W  | 2h    | Controls the clock state transition of the LCDC OCP clock domain.<br>0x0 = NO_SLEEP : NO_SLEEP: Sleep transition cannot be initiated.<br>Wakeup transition may however occur.<br>0x1 = SW_SLEEP : SW_SLEEP: Start a software forced sleep<br>transition on the domain.<br>0x2 = SW_WKUP : SW_WKUP: Start a software forced wake-up<br>transition on the domain. |
+|      |                                  |      |       | 0x3 = Reserved : Reserved.                                                                                                                                                                                                                                                                                                                                      |
+
+
+### *8.1.12.1.57 CM\_PER\_CLKDIV32K\_CLKCTRL Register (offset = 14Ch) [reset = 30000h]*
+
+CM\_PER\_CLKDIV32K\_CLKCTRL is shown in [Figure](#page-115-1) 8-84 and described in [Table](#page-115-2) 8-87. This register manages the CLKDIV32K clocks.
+
+
+#### **Table 8-87. CM\_PER\_CLKDIV32K\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                          |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                  |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                               |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                          |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                            |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                        |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                        |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                          |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen. |
+|       |            |      |       | 0x3 = RESERVED : Reserved                                                                                                                                                                                                                                                            |
+
+
+### *8.1.12.1.58 CM\_PER\_CLK\_24MHZ\_CLKSTCTRL Register (offset = 150h) [reset = 2h]*
+
+CM\_PER\_CLK\_24MHZ\_CLKSTCTRL is shown in [Figure](#page-116-1) 8-85 and described in [Table](#page-116-2) 8-88.
+
+This register enables the clock domain state transition. It controls the SW supervised clock domain state transition between ON-ACTIVE and ON-INACTIVE states. It also hold one status bit per clock input of the domain.
+
+
+|  |  |  | Table 8-88. CM_PER_CLK_24MHZ_CLKSTCTRL Register Field Descriptions |  |
+|--|--|--|--------------------------------------------------------------------|--|
+|--|--|--|--------------------------------------------------------------------|--|
+
+
+
+| Bit  | Field                          | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                |
+|------|--------------------------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-5 | Reserved                       | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                            |
+| 4    | CLKACTIVITY_CLK_24M<br>HZ_GCLK | R    | 0h    | This field indicates the state of the 24MHz clock in the domain.<br>0x0 = Inact<br>0x1 = Act                                                                                                                                                                                                                                                                                               |
+| 3-2  | Reserved                       | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                            |
+| 1-0  | CLKTRCTRL                      | R/W  | 2h    | Controls the clock state transition of the 24MHz clock domain.<br>0x0 = NO_SLEEP : NO_SLEEP: Sleep transition cannot be initiated.<br>Wakeup transition may however occur.<br>0x1 = SW_SLEEP : SW_SLEEP: Start a software forced sleep<br>transition on the domain.<br>0x2 = SW_WKUP : SW_WKUP: Start a software forced wake-up<br>transition on the domain.<br>0x3 = Reserved : Reserved. |
+
+#### **8.1.12.2 CM\_WKUP Registers**
+
+[Table](#page-116-3) 8-89 lists the memory-mapped registers for the CM\_WKUP. All register offset addresses not listed in [Table](#page-116-3) 8-89 should be considered as reserved locations and the register contents should not be modified.
+
+**Table 8-89. CM\_WKUP Registers**
+
+
+| Offset | Acronym                 | Register Name | Section            |
+|--------|-------------------------|---------------|--------------------|
+| 0h     | CM_WKUP_CLKSTCTRL       |               | Section 8.1.12.2.1 |
+| 4h     | CM_WKUP_CONTROL_CLKCTRL |               | Section 8.1.12.2.2 |
+| 8h     | CM_WKUP_GPIO0_CLKCTRL   |               | Section 8.1.12.2.3 |
+| Ch     | CM_WKUP_L4WKUP_CLKCTRL  |               | Section 8.1.12.2.4 |
+| 10h    | CM_WKUP_TIMER0_CLKCTRL  |               | Section 8.1.12.2.5 |
+
+
+# **Table 8-89. CM\_WKUP Registers (continued)**
+
+| Offset | Acronym<br>Register Name    | Section                |
+|--------|-----------------------------|------------------------|
+| 14h    | CM_WKUP_DEBUGSS_CLKCTRL     | Section 8.1.12.2.6     |
+| 18h    | CM_L3_AON_CLKSTCTRL         | Section 8.1.12.2.7     |
+| 1Ch    | CM_AUTOIDLE_DPLL_MPU        | Section 8.1.12.2.8     |
+| 20h    | CM_IDLEST_DPLL_MPU          | Section 8.1.12.2.9     |
+| 24h    | CM_SSC_DELTAMSTEP_DPLL_MPU  | Section<br>8.1.12.2.10 |
+| 28h    | CM-SSC_MODFREQDIV_DPLL_MPU  | Section<br>8.1.12.2.11 |
+| 2Ch    | CM_CLKSEL_DPLL_MPU          | Section<br>8.1.12.2.12 |
+| 30h    | CM_AUTOIDLE_DPLL_DDR        | Section<br>8.1.12.2.13 |
+| 34h    | CM_IDLEST_DPLL_DDR          | Section<br>8.1.12.2.14 |
+| 38h    | CM_SSC_DELTAMSTEP_DPLL_DDR  | Section<br>8.1.12.2.15 |
+| 3Ch    | CM_SSC_MODFREQDIV_DPLL_DDR  | Section<br>8.1.12.2.16 |
+| 40h    | CM_CLKSEL_DPLL_DDR          | Section<br>8.1.12.2.17 |
+| 44h    | CM_AUTOIDLE_DPLL_DISP       | Section<br>8.1.12.2.18 |
+| 48h    | CM_IDLEST_DPLL_DISP         | Section<br>8.1.12.2.19 |
+| 4Ch    | CM_SSC_DELTAMSTEP_DPLL_DISP | Section<br>8.1.12.2.20 |
+| 50h    | CM_SSC_MODFREQDIV_DPLL_DISP | Section<br>8.1.12.2.21 |
+| 54h    | CM_CLKSEL_DPLL_DISP         | Section<br>8.1.12.2.22 |
+| 58h    | CM_AUTOIDLE_DPLL_CORE       | Section<br>8.1.12.2.23 |
+| 5Ch    | CM_IDLEST_DPLL_CORE         | Section<br>8.1.12.2.24 |
+| 60h    | CM_SSC_DELTAMSTEP_DPLL_CORE | Section<br>8.1.12.2.25 |
+| 64h    | CM_SSC_MODFREQDIV_DPLL_CORE | Section<br>8.1.12.2.26 |
+| 68h    | CM_CLKSEL_DPLL_CORE         | Section<br>8.1.12.2.27 |
+| 6Ch    | CM_AUTOIDLE_DPLL_PER        | Section<br>8.1.12.2.28 |
+| 70h    | CM_IDLEST_DPLL_PER          | Section<br>8.1.12.2.29 |
+| 74h    | CM_SSC_DELTAMSTEP_DPLL_PER  | Section<br>8.1.12.2.30 |
+| 78h    | CM_SSC_MODFREQDIV_DPLL_PER  | Section<br>8.1.12.2.31 |
+| 7Ch    | CM_CLKDCOLDO_DPLL_PER       | Section<br>8.1.12.2.32 |
+| 80h    | CM_DIV_M4_DPLL_CORE         | Section<br>8.1.12.2.33 |
+| 84h    | CM_DIV_M5_DPLL_CORE         | Section<br>8.1.12.2.34 |
+| 88h    | CM_CLKMODE_DPLL_MPU         | Section<br>8.1.12.2.35 |
+
+
+# **Table 8-89. CM\_WKUP Registers (continued)**
+
+| Offset | Acronym                          | Register Name | Section                |
+|--------|----------------------------------|---------------|------------------------|
+| 8Ch    | CM_CLKMODE_DPLL_PER              |               | Section<br>8.1.12.2.36 |
+| 90h    | CM_CLKMODE_DPLL_CORE             |               | Section<br>8.1.12.2.37 |
+| 94h    | CM_CLKMODE_DPLL_DDR              |               | Section<br>8.1.12.2.38 |
+| 98h    | CM_CLKMODE_DPLL_DISP             |               | Section<br>8.1.12.2.39 |
+| 9Ch    | CM_CLKSEL_DPLL_PERIPH            |               | Section<br>8.1.12.2.40 |
+| A0h    | CM_DIV_M2_DPLL_DDR               |               | Section<br>8.1.12.2.41 |
+| A4h    | CM_DIV_M2_DPLL_DISP              |               | Section<br>8.1.12.2.42 |
+| A8h    | CM_DIV_M2_DPLL_MPU               |               | Section<br>8.1.12.2.43 |
+| ACh    | CM_DIV_M2_DPLL_PER               |               | Section<br>8.1.12.2.44 |
+| B0h    | CM_WKUP_WKUP_M3_CLKCTRL          |               | Section<br>8.1.12.2.45 |
+| B4h    | CM_WKUP_UART0_CLKCTRL            |               | Section<br>8.1.12.2.46 |
+| B8h    | CM_WKUP_I2C0_CLKCTRL             |               | Section<br>8.1.12.2.47 |
+| BCh    | CM_WKUP_ADC_TSC_CLKCTRL          |               | Section<br>8.1.12.2.48 |
+| C0h    | CM_WKUP_SMARTREFLEX0_CLKCT<br>RL |               | Section<br>8.1.12.2.49 |
+| C4h    | CM_WKUP_TIMER1_CLKCTRL           |               | Section<br>8.1.12.2.50 |
+| C8h    | CM_WKUP_SMARTREFLEX1_CLKCT<br>RL |               | Section<br>8.1.12.2.51 |
+| CCh    | CM_L4_WKUP_AON_CLKSTCTRL         |               | Section<br>8.1.12.2.52 |
+| D4h    | CM_WKUP_WDT1_CLKCTRL             |               | Section<br>8.1.12.2.53 |
+| D8h    | CM_DIV_M6_DPLL_CORE              |               | Section<br>8.1.12.2.54 |
+
+
+### *8.1.12.2.1 CM\_WKUP\_CLKSTCTRL Register (offset = 0h) [reset = 6h]*
+
+Register mask: FFFFFFFFh
+
+CM\_WKUP\_CLKSTCTRL is shown in [Figure](#page-119-1) 8-86 and described in [Table](#page-119-2) 8-90.
+
+This register enables the domain power state transition. It controls the SW supervised clock domain state transition between ON-ACTIVE and ON-INACTIVE states. It also hold one status bit per clock input of the domain.
+
+
+#### **Table 8-90. CM\_WKUP\_CLKSTCTRL Register Field Descriptions**
+
+
+| Bit   | Field                        | Type       | Reset | Description                                                                                                                                                     |
+|-------|------------------------------|------------|-------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-15 | RESERVED                     | Rreturns0s | 0h    |                                                                                                                                                                 |
+| 14    | CLKACTIVITY_ADC_FCL<br>K     | R          | 0h    | This field indicates the state of the ADC clock in the domain.<br>0h (R) = Corresponding clock is gated<br>1h (R) = Corresponding clock is active               |
+| 13    | CLKACTIVITY_TIMER1_<br>GCLK  | R          | 0h    | This field indicates the state of the TIMER1 clock in the domain.<br>0h (R) = Corresponding clock is gated<br>1h (R) = Corresponding clock is active            |
+| 12    | CLKACTIVITY_UART0_G<br>FCLK  | R          | 0h    | This field indicates the state of the UART0 clock in the domain.<br>0h (R) = Corresponding clock is gated<br>1h (R) = Corresponding clock is active             |
+| 11    | CLKACTIVITY_I2C0_GFC<br>LK   | R          | 0h    | This field indicates the state of the I2C0 clock in the domain.<br>0h (R) = Corresponding clock is gated<br>1h (R) = Corresponding clock is active              |
+| 10    | CLKACTIVITY_TIMER0_<br>GCLK  | R          | 0h    | This field indicates the state of the WKUPTIMER_GCLK clock in the<br>domain.<br>0h (R) = Corresponding clock is gated<br>1h (R) = Corresponding clock is active |
+| 9     | RESERVED                     | R          | 0h    |                                                                                                                                                                 |
+| 8     | CLKACTIVITY_GPIO0_G<br>DBCLK | R          | 0h    | This field indicates the state of the WKUPGPIO_DBGICLK clock in<br>the domain.                                                                                  |
+|       |                              |            |       | 0h (R) = Corresponding clock is gated                                                                                                                           |
+|       |                              |            |       | 1h (R) = Corresponding clock is active                                                                                                                          |
+| 7-5   | RESERVED                     | Rreturns0s | 0h    |                                                                                                                                                                 |
+
+
+# **Table 8-90. CM\_WKUP\_CLKSTCTRL Register Field Descriptions (continued)**
+
+| Bit | Field                     | Type | Reset | Description                                                                                        |
+|-----|---------------------------|------|-------|----------------------------------------------------------------------------------------------------|
+| 4   | CLKACTIVITY_WDT1_G<br>CLK | R    | 0h    | This field indicates the state of the WDT1_GCLK clock in the<br>domain.                            |
+|     |                           |      |       | 0h (R) = Corresponding clock is gated                                                              |
+|     |                           |      |       | 1h (R) = Corresponding clock is active                                                             |
+| 3   | CLKACTIVITY_SR_SYSC<br>LK | R    | 0h    | This field indicates the state of the SMARTREFGLEX SYSCLK clock<br>in the domain.                  |
+|     |                           |      |       | 0h (R) = Corresponding clock is gated                                                              |
+|     |                           |      |       | 1h (R) = Corresponding clock is active                                                             |
+| 2   | CLKACTIVITY_L4_WKUP       | R    | 1h    | This field indicates the state of the L4_WKUP clock in the domain.                                 |
+|     | _GCLK                     |      |       | 0h (R) = Corresponding clock is gated                                                              |
+|     |                           |      |       | 1h (R) = Corresponding clock is active                                                             |
+| 1-0 | CLKTRCTRL                 | R/W  | 2h    | Controls the clock state transition of the always on clock domain.                                 |
+|     |                           |      |       | 0h (R/W) = NO_SLEEP: Sleep transition cannot be initiated. Wakeup<br>transition may however occur. |
+|     |                           |      |       | 1h (R/W) = SW_SLEEP: Start a software forced sleep transition on<br>the domain.                    |
+|     |                           |      |       | 2h (R/W) = SW_WKUP: Start a software forced wake-up transition<br>on the domain.                   |
+|     |                           |      |       | 3h (R/W) = Reserved.                                                                               |
+
+
+# *8.1.12.2.2 CM\_WKUP\_CONTROL\_CLKCTRL Register (offset = 4h) [reset = 30000h]*
+
+Register mask: FFFFFFFFh
+
+CM\_WKUP\_CONTROL\_CLKCTRL is shown in [Figure](#page-121-1) 8-87 and described in [Table](#page-121-2) 8-91.
+
+This register manages the Control Module clocks.
+
+
+#### **Table 8-91. CM\_WKUP\_CONTROL\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type       | Reset | Description                                                                                                                                                                                                                                                                      |
+|-------|------------|------------|-------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-19 | RESERVED   | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                  |
+| 18    | RESERVED   | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                  |
+| 17-16 | IDLEST     | R          | 3h    | Module idle status.                                                                                                                                                                                                                                                              |
+|       |            |            |       | 0h (R) = Module is fully functional, including OCP                                                                                                                                                                                                                               |
+|       |            |            |       | 1h (R) = Module is performing transition: wakeup, or sleep, or sleep<br>abortion                                                                                                                                                                                                 |
+|       |            |            |       | 2h (R) = Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                          |
+|       |            |            |       | 3h (R) = Module is disabled and cannot be accessed                                                                                                                                                                                                                               |
+| 15-2  | RESERVED   | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                  |
+| 1-0   | MODULEMODE | R/W        | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                    |
+|       |            |            |       | 0h (R/W) = Module is disable by SW. Any OCP access to module<br>results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                          |
+|       |            |            |       | 1h (R/W) = Reserved                                                                                                                                                                                                                                                              |
+|       |            |            |       | 2h (R/W) = Module is explicitly enabled. Interface clock (if not used<br>for functions) may be gated according to the clock domain state.<br>Functional clocks are guarantied to stay present. As long as in this<br>configuration, power domain sleep transition cannot happen. |
+|       |            |            |       | 3h (R) = Reserved                                                                                                                                                                                                                                                                |
+
+
+# *8.1.12.2.3 CM\_WKUP\_GPIO0\_CLKCTRL Register (offset = 8h) [reset = 30000h]*
+
+Register mask: FFFFFFFFh
+
+CM\_WKUP\_GPIO0\_CLKCTRL is shown in [Figure](#page-122-1) 8-88 and described in [Table](#page-122-2) 8-92.
+
+This register manages the GPIO0 clocks.
+
+
+# **Table 8-92. CM\_WKUP\_GPIO0\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field                      | Type       | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+|-------|----------------------------|------------|-------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-19 | RESERVED                   | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| 18    | OPTFCLKEN_GPIO0_GD<br>BCLK | R/W        | 0h    | Optional functional clock control.<br>0h (R/W) = Optional functional clock is disabled<br>1h (R/W) = Optional functional clock is enabled                                                                                                                                                                                                                                                                                                                                                                                                |
+| 17-16 | IDLEST                     | R          | 3h    | Module idle status.<br>0h (R) = Module is fully functional, including OCP<br>1h (R) = Module is performing transition: wakeup, or sleep, or sleep<br>abortion<br>2h (R) = Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock<br>3h (R) = Module is disabled and cannot be accessed                                                                                                                                                                                                           |
+| 15-2  | RESERVED                   | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| 1-0   | MODULEMODE                 | R/W        | 0h    | Control the way mandatory clocks are managed.<br>0h (R/W) = Module is disable by SW. Any OCP access to module<br>results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).<br>1h (R/W) = Reserved<br>2h (R/W) = Module is explicitly enabled. Interface clock (if not used<br>for functions) may be gated according to the clock domain state.<br>Functional clocks are guarantied to stay present. As long as in this<br>configuration, power domain sleep transition cannot happen.<br>3h (R) = Reserved |
+
+
+### *8.1.12.2.4 CM\_WKUP\_L4WKUP\_CLKCTRL Register (offset = Ch) [reset = 2h]*
+
+Register mask: FFFFFFFFh
+
+CM\_WKUP\_L4WKUP\_CLKCTRL is shown in [Figure](#page-123-1) 8-89 and described in [Table](#page-123-2) 8-93.
+
+This register manages the L4WKUP clocks.
+
+
+### **Table 8-93. CM\_WKUP\_L4WKUP\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type       | Reset | Description                                                                                             |
+|-------|------------|------------|-------|---------------------------------------------------------------------------------------------------------|
+| 31-19 | RESERVED   | Rreturns0s | 0h    |                                                                                                         |
+| 18    | RESERVED   | Rreturns0s | 0h    |                                                                                                         |
+| 17-16 | IDLEST     | R          | 0h    | Module idle status.<br>0h (R) = Module is fully functional, including OCP                               |
+|       |            |            |       | 1h (R) = Module is performing transition: wakeup, or sleep, or sleep<br>abortion                        |
+|       |            |            |       | 2h (R) = Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock |
+|       |            |            |       | 3h (R) = Module is disabled and cannot be accessed                                                      |
+| 15-2  | RESERVED   | Rreturns0s | 0h    |                                                                                                         |
+| 1-0   | MODULEMODE | R          | 2h    | Control the way mandatory clocks are managed.                                                           |
+
+
+# *8.1.12.2.5 CM\_WKUP\_TIMER0\_CLKCTRL Register (offset = 10h) [reset = 30002h]*
+
+Register mask: FFFFFFFFh
+
+CM\_WKUP\_TIMER0\_CLKCTRL is shown in [Figure](#page-124-1) 8-90 and described in [Table](#page-124-2) 8-94.
+
+This register manages the TIMER0 clocks.
+
+
+# **Table 8-94. CM\_WKUP\_TIMER0\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type       | Reset | Description                                                                                                                                                                                                                                                                                           |
+|-------|------------|------------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-19 | RESERVED   | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                       |
+| 18    | RESERVED   | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                       |
+| 17-16 | IDLEST     | R          | 3h    | Module idle status.                                                                                                                                                                                                                                                                                   |
+|       |            |            |       | 0h (R) = Module is fully functional, including OCP                                                                                                                                                                                                                                                    |
+|       |            |            |       | 1h (R) = Module is performing transition: wakeup, or sleep, or sleep<br>abortion                                                                                                                                                                                                                      |
+|       |            |            |       | 2h (R) = Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                               |
+|       |            |            |       | 3h (R) = Module is disabled and cannot be accessed                                                                                                                                                                                                                                                    |
+| 15-2  | RESERVED   | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                       |
+| 1-0   | MODULEMODE | R/W        | 2h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                         |
+|       |            |            |       | 0h (R/W) = Module is disable by SW. Any OCP access to module<br>results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                                               |
+|       |            |            |       | 1h (R/W) = Reserved                                                                                                                                                                                                                                                                                   |
+|       |            |            |       | 2h (R/W) = Module is explicitly enabled. Interface clock (if not used<br>for functions) may be gated according to the clock domain state.<br>Functional clocks are guarantied to stay present. As long as in this<br>configuration, power domain sleep transition cannot happen.<br>3h (R) = Reserved |
+|       |            |            |       |                                                                                                                                                                                                                                                                                                       |
+
+
+# *8.1.12.2.6 CM\_WKUP\_DEBUGSS\_CLKCTRL Register (offset = 14h) [reset = 52580002h]*
+
+Register mask: FFFFFFFFh
+
+CM\_WKUP\_DEBUGSS\_CLKCTRL is shown in [Figure](#page-125-1) 8-91 and described in [Table](#page-125-2) 8-95.
+
+This register manages the DEBUGSS clocks.
+
+**Table 8-95. CM\_WKUP\_DEBUGSS\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field                   | Type       | Reset | Description                                                                                                                                                                                                                                                                                                                    |
+|-------|-------------------------|------------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31    | RESERVED                | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                                                |
+| 30    | OPTCLK_DEBUG_CLKA       | R/W        | 1h    | Optional functional clock control.<br>0h = Optional functional clock is disabled.<br>1h = Optional functional clock is enabled.                                                                                                                                                                                                |
+| 29-27 | STM_PMD_CLKDIVSEL       | R/W        | 2h    |                                                                                                                                                                                                                                                                                                                                |
+| 26-24 | TRC_PMD_CLKDIVSEL       | R/W        | 2h    |                                                                                                                                                                                                                                                                                                                                |
+| 23-22 | STM_PMD_CLKSEL          | R/W        | 1h    |                                                                                                                                                                                                                                                                                                                                |
+| 21-20 | TRC_PMD_CLKSEL          | R/W        | 1h    |                                                                                                                                                                                                                                                                                                                                |
+| 19    | OPTFCLKEN_DBGSYSC<br>LK | R/W        | 1h    | Optional functional clock control.<br>0h (R/W) = Optional functional clock is disabled<br>1h (R/W) = Optional functional clock is enabled                                                                                                                                                                                      |
+| 18    | STBYST                  | R          | 0h    | Module standby status.<br>0h (R) = Module is functional (not in standby)<br>1h (R) = Module is in standby                                                                                                                                                                                                                      |
+| 17-16 | IDLEST                  | R          | 0h    | Module idle status.<br>0h (R) = Module is fully functional, including OCP<br>1h (R) = Module is performing transition: wakeup, or sleep, or sleep<br>abortion<br>2h (R) = Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock<br>3h (R) = Module is disabled and cannot be accessed |
+| 15-2  | RESERVED                | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                                                |
+
+
+# **Table 8-95. CM\_WKUP\_DEBUGSS\_CLKCTRL Register Field Descriptions (continued)**
+
+| Bit | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+|-----|------------|------|-------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1-0 | MODULEMODE | R/W  | 2h    | Control the way mandatory clocks are managed.<br>0h (R/W) = Module is disable by SW. Any OCP access to module<br>results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).<br>1h (R/W) = Reserved<br>2h (R/W) = Module is explicitly enabled. Interface clock (if not used<br>for functions) may be gated according to the clock domain state.<br>Functional clocks are guarantied to stay present. As long as in this<br>configuration, power domain sleep transition cannot happen.<br>3h (R) = Reserved |
+
+
+### *8.1.12.2.7 CM\_L3\_AON\_CLKSTCTRL Register (offset = 18h) [reset = 1Ah]*
+
+Register mask: FFFFFFFFh
+
+CM\_L3\_AON\_CLKSTCTRL is shown in [Figure](#page-127-1) 8-92 and described in [Table](#page-127-2) 8-96.
+
+This register enables the domain power state transition. It controls the SW supervised clock domain state transition between ON-ACTIVE and ON-INACTIVE states. It also hold one status bit per clock input of the domain.
+
+#### **Table 8-96. CM\_L3\_AON\_CLKSTCTRL Register Field Descriptions**
+
+
+| Bit   | Field                       | Type       | Reset | Description                                                                                                                                                                                                                                                                                                                                                          |
+|-------|-----------------------------|------------|-------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-26 | RESERVED                    | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                                                                                      |
+| 25-11 | RESERVED                    | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                                                                                      |
+| 10-8  | RESERVED                    | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                                                                                      |
+| 7-5   | RESERVED                    | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                                                                                      |
+| 4     | CLKACTIVITY_DEBUG_C<br>LKA  | R          | 1h    | This field indicates the state of the Debugss CLKA clock in the<br>domain.<br>0h (R) = Corresponding clock is gated.<br>1h (R) = Corresponding clock is active.                                                                                                                                                                                                      |
+| 3     | CLKACTIVITY_L3_AON_<br>GCLK | R          | 1h    | This field indicates the state of the L3_AON clock in the domain.<br>0h (R) = Corresponding clock is gated<br>1h (R) = Corresponding clock is active                                                                                                                                                                                                                 |
+| 2     | CLKACTIVITY_DBGSYS<br>CLK   | R          | 0h    | This field indicates the state of the Debugss sysclk clock in the<br>domain.<br>0h (R) = Corresponding clock is gated<br>1h (R) = Corresponding clock is active                                                                                                                                                                                                      |
+| 1-0   | CLKTRCTRL                   | R/W        | 2h    | Controls the clock state transition of the L3 AON clock domain.<br>0h (R/W) = NO_SLEEP: Sleep transition cannot be initiated. Wakeup<br>transition may however occur.<br>1h (R/W) = SW_SLEEP: Start a software forced sleep transition on<br>the domain.<br>2h (R/W) = SW_WKUP: Start a software forced wake-up transition<br>on the domain.<br>3h (R/W) = Reserved. |
+
+
+# *8.1.12.2.8 CM\_AUTOIDLE\_DPLL\_MPU Register (offset = 1Ch) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+CM\_AUTOIDLE\_DPLL\_MPU is shown in [Figure](#page-128-1) 8-93 and described in [Table](#page-128-2) 8-97.
+
+This register provides automatic control over the DPLL activity.
+
+# **Table 8-97. CM\_AUTOIDLE\_DPLL\_MPU Register Field Descriptions**
+
+
+| Bit  | Field          | Type       | Reset | Description                    |
+|------|----------------|------------|-------|--------------------------------|
+| 31-3 | RESERVED       | Rreturns0s | 0h    |                                |
+| 2-0  | AUTO_DPLL_MODE | R/W        | 0h    | This feature is not supported. |
+
+
+# *8.1.12.2.9 CM\_IDLEST\_DPLL\_MPU Register (offset = 20h) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+CM\_IDLEST\_DPLL\_MPU is shown in [Figure](#page-129-1) 8-94 and described in [Table](#page-129-2) 8-98.
+
+This register allows monitoring the master clock activity. This register is read only and automatically updated.[warm reset insensitive]
+
+### **Table 8-98. CM\_IDLEST\_DPLL\_MPU Register Field Descriptions**
+
+
+| Bit  | Field        | Type       | Reset | Description                                                                                               |
+|------|--------------|------------|-------|-----------------------------------------------------------------------------------------------------------|
+| 31-9 | RESERVED     | Rreturns0s | 0h    |                                                                                                           |
+| 8    | ST_MN_BYPASS | R          | 0h    | DPLL MN_BYPASS status<br>0h (R) = DPLL is not in MN_Bypass<br>1h (R) = DPLL is in MN_Bypass               |
+| 7-1  | RESERVED     | Rreturns0s | 0h    |                                                                                                           |
+| 0    | ST_DPLL_CLK  | R          | 0h    | DPLL clock activity<br>0h (R) = DPLL is either in bypass mode or in stop mode.<br>1h (R) = DPLL is LOCKED |
+
+
+### *8.1.12.2.10 CM\_SSC\_DELTAMSTEP\_DPLL\_MPU Register (offset = 24h) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+CM\_SSC\_DELTAMSTEP\_DPLL\_MPU is shown in [Figure](#page-130-1) 8-95 and described in [Table](#page-130-2) 8-99.
+
+Control the DeltaMStep parameter for Spread Spectrum Clocking technique DeltaMStep is split into fractional and integer part. [warm reset insensitive]
+
+
+| 31 | 30 | 29            | 28 | 27                  | 26                 | 25 | 24                  |
+|----|----|---------------|----|---------------------|--------------------|----|---------------------|
+|    |    |               |    | RESERVED            |                    |    |                     |
+|    |    |               |    | Rreturns0s-0h       |                    |    |                     |
+| 23 | 22 | 21            | 20 | 19                  | 18                 | 17 | 16                  |
+|    |    | RESERVED      |    |                     | DELTAMSTEP_INTEGER |    | DELTAMSTEP_FRACTION |
+|    |    | Rreturns0s-0h |    |                     | R/W-0h             |    | R/W-0h              |
+| 15 | 14 | 13            | 12 | 11                  | 10                 | 9  | 8                   |
+|    |    |               |    | DELTAMSTEP_FRACTION |                    |    |                     |
+|    |    |               |    | R/W-0h              |                    |    |                     |
+| 7  | 6  | 5             | 4  | 3                   | 2                  | 1  | 0                   |
+|    |    |               |    | DELTAMSTEP_FRACTION |                    |    |                     |
+|    |    |               |    | R/W-0h              |                    |    |                     |
+|    |    |               |    |                     |                    |    |                     |
+
+LEGEND: R/W = Read/Write; R = Read only; W1toCl = Write 1 to clear bit; *-n* = value after reset
+
+### **Table 8-99. CM\_SSC\_DELTAMSTEP\_DPLL\_MPU Register Field Descriptions**
+
+
+| Bit   | Field                   | Type       | Reset | Description                            |
+|-------|-------------------------|------------|-------|----------------------------------------|
+| 31-20 | RESERVED                | Rreturns0s | 0h    |                                        |
+| 19-18 | DELTAMSTEP_INTEGER      | R/W        | 0h    | Integer part for DeltaM coefficient    |
+| 17-0  | DELTAMSTEP_FRACTIO<br>N | R/W        | 0h    | Fractional part for DeltaM coefficient |
+
+
+# *8.1.12.2.11 CM-SSC\_MODFREQDIV\_DPLL\_MPU Register (offset = 28h) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+CM-SSC\_MODFREQDIV\_DPLL\_MPU is shown in [Figure](#page-131-1) 8-96 and described in Table [8-100.](#page-131-2)
+
+Control the Modulation Frequency (Fm) for Spread Spectrum Clocking technique by defining it as a ratio of DPLL\_REFCLK/4 Fm = [DPLL\_REFCLK/4]/MODFREQDIV MODFREQDIV = MODFREQDIV\_MANTISSA \* 2^MODFREQDIV\_EXPONENT [warm reset insensitive]
+
+
+
+#### **Table 8-100. CM-SSC\_MODFREQDIV\_DPLL\_MPU Register Field Descriptions**
+
+
+| Bit   | Field                   | Type       | Reset | Description                                     |
+|-------|-------------------------|------------|-------|-------------------------------------------------|
+| 31-11 | RESERVED                | Rreturns0s | 0h    |                                                 |
+| 10-8  | MODFREQDIV_EXPONE<br>NT | R/W        | 0h    | Set the Exponent component of MODFREQDIV factor |
+| 7     | RESERVED                | Rreturns0s | 0h    |                                                 |
+| 6-0   | MODFREQDIV_MANTISS<br>A | R/W        | 0h    | Set the Mantissa component of MODFREQDIV factor |
+
+
+### *8.1.12.2.12 CM\_CLKSEL\_DPLL\_MPU Register (offset = 2Ch) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+CM\_CLKSEL\_DPLL\_MPU is shown in [Figure](#page-132-1) 8-97 and described in Table [8-101](#page-132-2).
+
+This register provides controls over the DPLL.
+
+
+### **Table 8-101. CM\_CLKSEL\_DPLL\_MPU Register Field Descriptions**
+
+
+| Bit   | Field           | Type       | Reset | Description                                                                                                                                                                                                                                                                                                 |
+|-------|-----------------|------------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-24 | RESERVED        | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                             |
+| 23    | DPLL_BYP_CLKSEL | R/W        | 0h    | Selects CLKINP or CLKINPULOW as Bypass Clock<br>0h (R/W) = Selects CLKINP Clock as BYPASS Clock<br>1h (R/W) = Selects CLKINPULOW as Bypass Clock                                                                                                                                                            |
+| 22-19 | RESERVED        | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                             |
+| 18-8  | DPLL_MULT       | R/W        | 0h    | DPLL multiplier factor (2 to 2047).<br>This register is automatically cleared to 0 when the DPLL_EN field in<br>the *CLKMODE_DPLL* register is set to select MN Bypass mode.<br>(equal to input M of DPLL<br>M=2 to<br>2047 => DPLL multiplies by M).<br>0h (R/W) = 0 : Reserved<br>1h (R/W) = 1 : Reserved |
+| 7     | RESERVED        | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                             |
+| 6-0   | DPLL_DIV        | R/W        | 0h    | DPLL divider factor (0 to 127) (equal to input N of DPLL<br>actual division factor is N+1).                                                                                                                                                                                                                 |
+
+
+# *8.1.12.2.13 CM\_AUTOIDLE\_DPLL\_DDR Register (offset = 30h) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+CM\_AUTOIDLE\_DPLL\_DDR is shown in [Figure](#page-133-1) 8-98 and described in Table [8-102](#page-133-2).
+
+This register provides automatic control over the DPLL activity.
+
+
+# **Table 8-102. CM\_AUTOIDLE\_DPLL\_DDR Register Field Descriptions**
+
+
+| Bit  | Field          | Type       | Reset | Description                      |
+|------|----------------|------------|-------|----------------------------------|
+| 31-3 | RESERVED       | Rreturns0s | 0h    |                                  |
+| 2-0  | AUTO_DPLL_MODE | R/W        | 0h    | AUTO_DPLL_MODE is not supported. |
+
+
+### *8.1.12.2.14 CM\_IDLEST\_DPLL\_DDR Register (offset = 34h) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+CM\_IDLEST\_DPLL\_DDR is shown in [Figure](#page-134-1) 8-99 and described in Table [8-103](#page-134-2).
+
+This register allows monitoring the master clock activity. This register is read only and automatically updated. [warm reset insensitive]
+
+
+
+### **Table 8-103. CM\_IDLEST\_DPLL\_DDR Register Field Descriptions**
+
+
+| Bit  | Field        | Type       | Reset | Description                                                                                               |
+|------|--------------|------------|-------|-----------------------------------------------------------------------------------------------------------|
+| 31-9 | RESERVED     | Rreturns0s | 0h    |                                                                                                           |
+| 8    | ST_MN_BYPASS | R          | 0h    | DPLL MN_BYPASS status<br>0h (R) = DPLL is not in MN_Bypass<br>1h (R) = DPLL is in MN_Bypass               |
+| 7-1  | RESERVED     | Rreturns0s | 0h    |                                                                                                           |
+| 0    | ST_DPLL_CLK  | R          | 0h    | DPLL clock activity<br>0h (R) = DPLL is either in bypass mode or in stop mode.<br>1h (R) = DPLL is LOCKED |
+
+
+### *8.1.12.2.15 CM\_SSC\_DELTAMSTEP\_DPLL\_DDR Register (offset = 38h) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+CM\_SSC\_DELTAMSTEP\_DPLL\_DDR is shown in [Figure](#page-135-1) 8-100 and described in Table [8-104.](#page-135-2)
+
+Control the DeltaMStep parameter for Spread Spectrum Clocking technique DeltaMStep is split into fractional and integer part. [warm reset insensitive]
+
+
+
+#### **Table 8-104. CM\_SSC\_DELTAMSTEP\_DPLL\_DDR Register Field Descriptions**
+
+
+| Bit   | Field                   | Type       | Reset | Description                                 |
+|-------|-------------------------|------------|-------|---------------------------------------------|
+| 31-20 | RESERVED                | Rreturns0s | 0h    |                                             |
+| 19-18 | DELTAMSTEP_INTEGER      | R/W        | 0h    | Integer part for DeltaM coefficient         |
+| 17-0  | DELTAMSTEP_FRACTIO<br>N | R/W        | 0h    | Fractional setting for DeltaMStep parameter |
+
+
+### *8.1.12.2.16 CM\_SSC\_MODFREQDIV\_DPLL\_DDR Register (offset = 3Ch) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+CM\_SSC\_MODFREQDIV\_DPLL\_DDR is shown in [Figure](#page-136-1) 8-101 and described in Table [8-105.](#page-136-2)
+
+Control the Modulation Frequency (Fm) for Spread Spectrum Clocking technique by defining it as a ratio of DPLL\_REFCLK/4 Fm = [DPLL\_REFCLK/4]/MODFREQDIV MODFREQDIV = MODFREQDIV\_MANTISSA \* 2^MODFREQDIV\_EXPONENT [warm reset insensitive]
+
+
+| 31            | 30 | 29            | 28 | 27                  | 26 | 25                  | 24 |
+|---------------|----|---------------|----|---------------------|----|---------------------|----|
+|               |    |               |    | RESERVED            |    |                     |    |
+|               |    |               |    | Rreturns0s-0h       |    |                     |    |
+| 23            | 22 | 21            | 20 | 19                  | 18 | 17                  | 16 |
+|               |    |               |    | RESERVED            |    |                     |    |
+|               |    |               |    | Rreturns0s-0h       |    |                     |    |
+| 15            | 14 | 13            | 12 | 11                  | 10 | 9                   | 8  |
+|               |    | RESERVED      |    |                     |    | MODFREQDIV_EXPONENT |    |
+|               |    | Rreturns0s-0h |    |                     |    | R/W-0h              |    |
+| 7             | 6  | 5             | 4  | 3                   | 2  | 1                   | 0  |
+| RESERVED      |    |               |    | MODFREQDIV_MANTISSA |    |                     |    |
+| Rreturns0s-0h |    |               |    | R/W-0h              |    |                     |    |
+
+LEGEND: R/W = Read/Write; R = Read only; W1toCl = Write 1 to clear bit; *-n* = value after reset
+
+#### **Table 8-105. CM\_SSC\_MODFREQDIV\_DPLL\_DDR Register Field Descriptions**
+
+
+| Bit   | Field                   | Type       | Reset | Description                                     |
+|-------|-------------------------|------------|-------|-------------------------------------------------|
+| 31-11 | RESERVED                | Rreturns0s | 0h    |                                                 |
+| 10-8  | MODFREQDIV_EXPONE<br>NT | R/W        | 0h    | Set the Exponent component of MODFREQDIV factor |
+| 7     | RESERVED                | Rreturns0s | 0h    |                                                 |
+| 6-0   | MODFREQDIV_MANTISS<br>A | R/W        | 0h    | Set the Mantissa component of MODFREQDIV factor |
+
+
+# *8.1.12.2.17 CM\_CLKSEL\_DPLL\_DDR Register (offset = 40h) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+CM\_CLKSEL\_DPLL\_DDR is shown in [Figure](#page-137-1) 8-102 and described in Table [8-106](#page-137-2).
+
+This register provides controls over the DPLL.
+
+
+### **Table 8-106. CM\_CLKSEL\_DPLL\_DDR Register Field Descriptions**
+
+
+| Bit   | Field           | Type       | Reset | Description                                                                                                                                                                                                                                                                                                 |
+|-------|-----------------|------------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-24 | RESERVED        | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                             |
+| 23    | DPLL_BYP_CLKSEL | R/W        | 0h    | Select CLKINP orr CLKINPULOW as bypass clock<br>0h (R/W) = Selects CLKINP Clock as BYPASS Clock<br>1h (R/W) = Selects CLKINPULOW as Bypass Clock                                                                                                                                                            |
+| 22-19 | RESERVED        | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                             |
+| 18-8  | DPLL_MULT       | R/W        | 0h    | DPLL multiplier factor (2 to 2047).<br>This register is automatically cleared to 0 when the DPLL_EN field in<br>the *CLKMODE_DPLL* register is set to select MN Bypass mode.<br>(equal to input M of DPLL<br>M=2 to<br>2047 => DPLL multiplies by M).<br>0h (R/W) = 0 : Reserved<br>1h (R/W) = 1 : Reserved |
+| 7     | RESERVED        | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                             |
+| 6-0   | DPLL_DIV        | R/W        | 0h    | DPLL divider factor (0 to 127) (equal to input N of DPLL<br>actual division factor is N+1).                                                                                                                                                                                                                 |
+
+
+### *8.1.12.2.18 CM\_AUTOIDLE\_DPLL\_DISP Register (offset = 44h) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+CM\_AUTOIDLE\_DPLL\_DISP is shown in [Figure](#page-138-1) 8-103 and described in Table [8-107.](#page-138-2)
+
+This register provides automatic control over the DPLL activity.
+
+
+# **Table 8-107. CM\_AUTOIDLE\_DPLL\_DISP Register Field Descriptions**
+
+
+| Bit  | Field          | Type       | Reset | Description                      |
+|------|----------------|------------|-------|----------------------------------|
+| 31-3 | RESERVED       | Rreturns0s | 0h    |                                  |
+| 2-0  | AUTO_DPLL_MODE | R/W        | 0h    | AUTO_DPLL_MODE is not supported. |
+
+
+### *8.1.12.2.19 CM\_IDLEST\_DPLL\_DISP Register (offset = 48h) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+CM\_IDLEST\_DPLL\_DISP is shown in [Figure](#page-139-1) 8-104 and described in Table [8-108.](#page-139-2)
+
+This register allows monitoring the master clock activity. This register is read only and automatically updated. [warm reset insensitive]
+
+
+### **Table 8-108. CM\_IDLEST\_DPLL\_DISP Register Field Descriptions**
+
+
+| Bit  | Field        | Type       | Reset | Description                                                                                               |
+|------|--------------|------------|-------|-----------------------------------------------------------------------------------------------------------|
+| 31-9 | RESERVED     | Rreturns0s | 0h    |                                                                                                           |
+| 8    | ST_MN_BYPASS | R          | 0h    | DPLL MN_BYPASS status<br>0h (R) = DPLL is not in MN_Bypass<br>1h (R) = DPLL is in MN_Bypass               |
+| 7-1  | RESERVED     | Rreturns0s | 0h    |                                                                                                           |
+| 0    | ST_DPLL_CLK  | R          | 0h    | DPLL clock activity<br>0h (R) = DPLL is either in bypass mode or in stop mode.<br>1h (R) = DPLL is LOCKED |
+
+
+### *8.1.12.2.20 CM\_SSC\_DELTAMSTEP\_DPLL\_DISP Register (offset = 4Ch) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+CM\_SSC\_DELTAMSTEP\_DPLL\_DISP is shown in [Figure](#page-140-1) 8-105 and described in Table [8-109](#page-140-2).
+
+Control the DeltaMStep parameter for Spread Spectrum Clocking technique DeltaMStep is split into fractional and integer part. [warm reset insensitive]
+
+
+
+### **Table 8-109. CM\_SSC\_DELTAMSTEP\_DPLL\_DISP Register Field Descriptions**
+
+
+| Bit   | Field                   | Type       | Reset | Description                                 |
+|-------|-------------------------|------------|-------|---------------------------------------------|
+| 31-20 | RESERVED                | Rreturns0s | 0h    |                                             |
+| 19-18 | DELTAMSTEP_INTEGER      | R/W        | 0h    | Integer part for DeltaM coefficient         |
+| 17-0  | DELTAMSTEP_FRACTIO<br>N | R/W        | 0h    | Fractional setting for DeltaMStep parameter |
+
+
+### *8.1.12.2.21 CM\_SSC\_MODFREQDIV\_DPLL\_DISP Register (offset = 50h) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+CM\_SSC\_MODFREQDIV\_DPLL\_DISP is shown in [Figure](#page-141-1) 8-106 and described in Table [8-110.](#page-141-2)
+
+Control the Modulation Frequency (Fm) for Spread Spectrum Clocking technique by defining it as a ratio of DPLL\_REFCLK/4 Fm = [DPLL\_REFCLK/4]/MODFREQDIV MODFREQDIV = MODFREQDIV\_MANTISSA \* 2^MODFREQDIV\_EXPONENT [warm reset insensitive]
+
+
+#### **Table 8-110. CM\_SSC\_MODFREQDIV\_DPLL\_DISP Register Field Descriptions**
+
+
+| Bit   | Field                   | Type       | Reset | Description                                     |
+|-------|-------------------------|------------|-------|-------------------------------------------------|
+| 31-11 | RESERVED                | Rreturns0s | 0h    |                                                 |
+| 10-8  | MODFREQDIV_EXPONE<br>NT | R/W        | 0h    | Set the Exponent component of MODFREQDIV factor |
+| 7     | RESERVED                | Rreturns0s | 0h    |                                                 |
+| 6-0   | MODFREQDIV_MANTISS<br>A | R/W        | 0h    | Set the Mantissa component of MODFREQDIV factor |
+
+
+### *8.1.12.2.22 CM\_CLKSEL\_DPLL\_DISP Register (offset = 54h) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+CM\_CLKSEL\_DPLL\_DISP is shown in [Figure](#page-142-1) 8-107 and described in Table [8-111](#page-142-2).
+
+This register provides controls over the DPLL.
+
+# **Table 8-111. CM\_CLKSEL\_DPLL\_DISP Register Field Descriptions**
+
+
+| Bit   | Field           | Type       | Reset | Description                                                                                                                                                                                                                                                                                                 |
+|-------|-----------------|------------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-24 | RESERVED        | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                             |
+| 23    | DPLL_BYP_CLKSEL | R/W        | 0h    | Select CLKINP or CLKINPULOW as bypass clock<br>0h (R/W) = Selects CLKINP Clock as BYPASS Clock<br>1h (R/W) = Selects CLKINPULOW as Bypass Clock                                                                                                                                                             |
+| 22-19 | RESERVED        | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                             |
+| 18-8  | DPLL_MULT       | R/W        | 0h    | DPLL multiplier factor (2 to 2047).<br>This register is automatically cleared to 0 when the DPLL_EN field in<br>the *CLKMODE_DPLL* register is set to select MN Bypass mode.<br>(equal to input M of DPLL<br>M=2 to<br>2047 => DPLL multiplies by M).<br>0h (R/W) = 0 : Reserved<br>1h (R/W) = 1 : Reserved |
+| 7     | RESERVED        | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                             |
+| 6-0   | DPLL_DIV        | R/W        | 0h    | DPLL divider factor (0 to 127) (equal to input N of DPLL<br>actual division factor is N+1).                                                                                                                                                                                                                 |
+
+
+# *8.1.12.2.23 CM\_AUTOIDLE\_DPLL\_CORE Register (offset = 58h) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+CM\_AUTOIDLE\_DPLL\_CORE is shown in [Figure](#page-143-1) 8-108 and described in Table [8-112](#page-143-2).
+
+This register provides automatic control over the DPLL activity.
+
+#### **Table 8-112. CM\_AUTOIDLE\_DPLL\_CORE Register Field Descriptions**
+
+
+| Bit  | Field          | Type       | Reset | Description                    |
+|------|----------------|------------|-------|--------------------------------|
+| 31-3 | RESERVED       | Rreturns0s | 0h    |                                |
+| 2-0  | AUTO_DPLL_MODE | R/W        | 0h    | This feature is not supported. |
+
+
+### *8.1.12.2.24 CM\_IDLEST\_DPLL\_CORE Register (offset = 5Ch) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+CM\_IDLEST\_DPLL\_CORE is shown in [Figure](#page-144-1) 8-109 and described in Table [8-113](#page-144-2).
+
+This register allows monitoring the master clock activity. This register is read only and automatically updated. [warm reset insensitive]
+
+
+
+# **Table 8-113. CM\_IDLEST\_DPLL\_CORE Register Field Descriptions**
+
+
+| Bit  | Field        | Type       | Reset | Description                                                                                               |
+|------|--------------|------------|-------|-----------------------------------------------------------------------------------------------------------|
+| 31-9 | RESERVED     | Rreturns0s | 0h    |                                                                                                           |
+| 8    | ST_MN_BYPASS | R          | 0h    | DPLL MN_BYPASS status<br>0h (R) = DPLL is not in MN_Bypass<br>1h (R) = DPLL is in MN_Bypass               |
+| 7-1  | RESERVED     | Rreturns0s | 0h    |                                                                                                           |
+| 0    | ST_DPLL_CLK  | R          | 0h    | DPLL clock activity<br>0h (R) = DPLL is either in bypass mode or in stop mode.<br>1h (R) = DPLL is LOCKED |
+
+
+# *8.1.12.2.25 CM\_SSC\_DELTAMSTEP\_DPLL\_CORE Register (offset = 60h) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+CM\_SSC\_DELTAMSTEP\_DPLL\_CORE is shown in [Figure](#page-145-1) 8-110 and described in Table [8-114.](#page-145-2)
+
+Control the DeltaMStep parameter for Spread Spectrum Clocking technique DeltaMStep is split into fractional and integer part. [warm reset insensitive]
+
+
+
+#### **Table 8-114. CM\_SSC\_DELTAMSTEP\_DPLL\_CORE Register Field Descriptions**
+
+
+| Bit   | Field                   | Type       | Reset | Description                                 |
+|-------|-------------------------|------------|-------|---------------------------------------------|
+| 31-20 | RESERVED                | Rreturns0s | 0h    |                                             |
+| 19-18 | DELTAMSTEP_INTEGER      | R/W        | 0h    | Integer part for DeltaM coefficient         |
+| 17-0  | DELTAMSTEP_FRACTIO<br>N | R/W        | 0h    | Fractional setting for DeltaMStep parameter |
+
+
+### *8.1.12.2.26 CM\_SSC\_MODFREQDIV\_DPLL\_CORE Register (offset = 64h) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+CM\_SSC\_MODFREQDIV\_DPLL\_CORE is shown in [Figure](#page-146-1) 8-111 and described in Table [8-115](#page-146-2).
+
+Control the Modulation Frequency (Fm) for Spread Spectrum Clocking technique by defining it as a ratio of DPLL\_REFCLK/4 Fm = [DPLL\_REFCLK/4]/MODFREQDIV MODFREQDIV = MODFREQDIV\_MANTISSA \* 2^MODFREQDIV\_EXPONENT [warm reset insensitive]
+
+
+### **Table 8-115. CM\_SSC\_MODFREQDIV\_DPLL\_CORE Register Field Descriptions**
+
+
+| Bit   | Field                   | Type       | Reset | Description                                     |
+|-------|-------------------------|------------|-------|-------------------------------------------------|
+| 31-11 | RESERVED                | Rreturns0s | 0h    |                                                 |
+| 10-8  | MODFREQDIV_EXPONE<br>NT | R/W        | 0h    | Set the Exponent component of MODFREQDIV factor |
+| 7     | RESERVED                | Rreturns0s | 0h    |                                                 |
+| 6-0   | MODFREQDIV_MANTISS<br>A | R/W        | 0h    | Set the Mantissa component of MODFREQDIV factor |
+
+
+# *8.1.12.2.27 CM\_CLKSEL\_DPLL\_CORE Register (offset = 68h) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+CM\_CLKSEL\_DPLL\_CORE is shown in [Figure](#page-147-1) 8-112 and described in Table [8-116.](#page-147-2)
+
+This register provides controls over the DPLL.
+
+# **Figure 8-112. CM\_CLKSEL\_DPLL\_CORE Register**
+
+t
+
+#### **Table 8-116. CM\_CLKSEL\_DPLL\_CORE Register Field Descriptions**
+
+
+| Bit   | Field     | Type       | Reset | Description                                                                                                                                                                                                                                                                                        |
+|-------|-----------|------------|-------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-23 | RESERVED  | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                    |
+| 22-19 | RESERVED  | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                    |
+| 18-8  | DPLL_MULT | R/W        | 0h    | DPLL multiplier factor (2 to 2047).<br>This register is automatically cleared to 0 when the DPLL_EN field in<br>the *CLKMODE_DPLL* register is set to select MN Bypass mode.<br>(equal to input M of DPLL<br>M=2 to<br>2047 => DPLL multiplies by M)<br>0h (R/W) = Reserved<br>1h (R/W) = Reserved |
+| 7     | RESERVED  | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                    |
+| 6-0   | DPLL_DIV  | R/W        | 0h    | DPLL divider factor (0 to 127) (equal to input N of DPLL<br>actual division factor is N+1).                                                                                                                                                                                                        |
+
+
+### *8.1.12.2.28 CM\_AUTOIDLE\_DPLL\_PER Register (offset = 6Ch) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+CM\_AUTOIDLE\_DPLL\_PER is shown in [Figure](#page-148-1) 8-113 and described in Table [8-117.](#page-148-2)
+
+This register provides automatic control over the DPLL activity.
+
+
+# **Table 8-117. CM\_AUTOIDLE\_DPLL\_PER Register Field Descriptions**
+
+
+| Bit  | Field          | Type       | Reset | Description                      |
+|------|----------------|------------|-------|----------------------------------|
+| 31-3 | RESERVED       | Rreturns0s | 0h    |                                  |
+| 2-0  | AUTO_DPLL_MODE | R/W        | 0h    | AUTO_DPLL_MODE is not supported. |
+
+
+### *8.1.12.2.29 CM\_IDLEST\_DPLL\_PER Register (offset = 70h) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+CM\_IDLEST\_DPLL\_PER is shown in [Figure](#page-149-1) 8-114 and described in Table [8-118.](#page-149-2)
+
+This register allows monitoring the master clock activity. This register is read only and automatically updated. [warm reset insensitive]
+
+
+### **Table 8-118. CM\_IDLEST\_DPLL\_PER Register Field Descriptions**
+
+
+| Bit  | Field        | Type       | Reset | Description                                                                                               |
+|------|--------------|------------|-------|-----------------------------------------------------------------------------------------------------------|
+| 31-9 | RESERVED     | Rreturns0s | 0h    |                                                                                                           |
+| 8    | ST_MN_BYPASS | R          | 0h    | DPLL MN_BYPASS status<br>0h (R) = DPLL is not in MN_Bypass<br>1h (R) = DPLL is in MN_Bypass               |
+| 7-1  | RESERVED     | Rreturns0s | 0h    |                                                                                                           |
+| 0    | ST_DPLL_CLK  | R          | 0h    | DPLL clock activity<br>0h (R) = DPLL is either in bypass mode or in stop mode.<br>1h (R) = DPLL is LOCKED |
+
+
+### *8.1.12.2.30 CM\_SSC\_DELTAMSTEP\_DPLL\_PER Register (offset = 74h) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+CM\_SSC\_DELTAMSTEP\_DPLL\_PER is shown in [Figure](#page-150-1) 8-115 and described in Table [8-119.](#page-150-2)
+
+Control the DeltaMStep parameter for Spread Spectrum Clocking technique DeltaMStep is split into fractional and integer part. [warm reset insensitive]
+
+
+
+### **Table 8-119. CM\_SSC\_DELTAMSTEP\_DPLL\_PER Register Field Descriptions**
+
+
+| Bit   | Field                   | Type       | Reset | Description                                 |
+|-------|-------------------------|------------|-------|---------------------------------------------|
+| 31-20 | RESERVED                | Rreturns0s | 0h    |                                             |
+| 19-18 | DELTAMSTEP_INTEGER      | R/W        | 0h    | Integer part for DeltaM coefficient         |
+| 17-0  | DELTAMSTEP_FRACTIO<br>N | R/W        | 0h    | Fractional setting for DeltaMStep parameter |
+
+
+### *8.1.12.2.31 CM\_SSC\_MODFREQDIV\_DPLL\_PER Register (offset = 78h) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+CM\_SSC\_MODFREQDIV\_DPLL\_PER is shown in [Figure](#page-151-1) 8-116 and described in Table [8-120.](#page-151-2)
+
+Control the Modulation Frequency (Fm) for Spread Spectrum Clocking technique by defining it as a ratio of DPLL\_REFCLK/4 Fm = [DPLL\_REFCLK/4]/MODFREQDIV MODFREQDIV = MODFREQDIV\_MANTISSA \* 2^MODFREQDIV\_EXPONENT [warm reset insensitive]
+
+
+#### **Table 8-120. CM\_SSC\_MODFREQDIV\_DPLL\_PER Register Field Descriptions**
+
+
+| Bit   | Field                   | Type       | Reset | Description                                     |
+|-------|-------------------------|------------|-------|-------------------------------------------------|
+| 31-11 | RESERVED                | Rreturns0s | 0h    |                                                 |
+| 10-8  | MODFREQDIV_EXPONE<br>NT | R/W        | 0h    | Set the Exponent component of MODFREQDIV factor |
+| 7     | RESERVED                | Rreturns0s | 0h    |                                                 |
+| 6-0   | MODFREQDIV_MANTISS<br>A | R/W        | 0h    | Set the Mantissa component of MODFREQDIV factor |
+
+
+### *8.1.12.2.32 CM\_CLKDCOLDO\_DPLL\_PER Register (offset = 7Ch) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+CM\_CLKDCOLDO\_DPLL\_PER is shown in [Figure](#page-152-1) 8-117 and described in Table [8-121](#page-152-2).
+
+This register provides controls over the digitally controlled oscillator output of the PER DPLL.
+
+**Table 8-121. CM\_CLKDCOLDO\_DPLL\_PER Register Field Descriptions**
+
+
+| Bit   | Field                        | Type       | Reset | Description                                                                                                                                                                                            |
+|-------|------------------------------|------------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-13 | RESERVED                     | Rreturns0s | 0h    |                                                                                                                                                                                                        |
+| 12    | DPLL_CLKDCOLDO_PW<br>DN      | R/W        | 0h    | Automatic power down for CLKDCOLDO o/p when it is gated<br>0h (R/W) = Keep CLKDCOLDO o/p powered on even when it is<br>gated<br>1h (R/W) = Automatically power down CLKDCOLDO o/p when it is<br>gated. |
+| 11-10 | RESERVED                     | Rreturns0s | 0h    |                                                                                                                                                                                                        |
+| 9     | ST_DPLL_CLKDCOLDO            | R          | 0h    | DPLL CLKDCOLDO status<br>0h (R) = The clock output is gated<br>1h (R) = The clock output is enabled                                                                                                    |
+| 8     | DPLL_CLKDCOLDO_GA<br>TE_CTRL | R/W        | 0h    | Control gating of DPLL CLKDCOLDO<br>0h (R/W) = Automatically gate this clock when there is no<br>dependency for it<br>1h (R/W) = Force this clock to stay enabled even if there is no<br>request       |
+| 7-0   | RESERVED                     | Rreturns0s | 0h    |                                                                                                                                                                                                        |
+
+
+### *8.1.12.2.33 CM\_DIV\_M4\_DPLL\_CORE Register (offset = 80h) [reset = 4h]*
+
+Register mask: FFFFFFFFh
+
+CM\_DIV\_M4\_DPLL\_CORE is shown in [Figure](#page-153-1) 8-118 and described in Table [8-122](#page-153-2).
+
+This register provides controls over the CLKOUT1 o/p of the HSDIVIDER.
+
+#### **Table 8-122. CM\_DIV\_M4\_DPLL\_CORE Register Field Descriptions**
+
+
+| Bit   | Field                           | Type       | Reset | Description                                                                                                                                                                                                                                                |
+|-------|---------------------------------|------------|-------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-13 | RESERVED                        | Rreturns0s | 0h    |                                                                                                                                                                                                                                                            |
+| 12    | HSDIVIDER_CLKOUT1_P<br>WDN      | R/W        | 0h    | Automatic power down for HSDIVIDER M4 divider and hence<br>CLKOUT1 output when the o/p clock is gated.<br>0h (R/W) = Keep M4 divider powered on even when CLKOUT1 is<br>gated.<br>1h (R/W) = Automatically power down M4 divider when CLKOUT1 is<br>gated. |
+| 11-10 | RESERVED                        | Rreturns0s | 0h    |                                                                                                                                                                                                                                                            |
+| 9     | ST_HSDIVIDER_CLKOU<br>T1        | R          | 0h    | HSDIVIDER CLKOUT1 status<br>0h (R) = The clock output is gated<br>1h (R) = The clock output is enabled                                                                                                                                                     |
+| 8     | HSDIVIDER_CLKOUT1_<br>GATE_CTRL | R/W        | 0h    | Control gating of HSDIVIDER CLKOUT1<br>0h (R/W) = Automatically gate this clock when there is no<br>dependency for it<br>1h (R/W) = Force this clock to stay enabled even if there is no<br>request                                                        |
+| 7-6   | RESERVED                        | Rreturns0s | 0h    |                                                                                                                                                                                                                                                            |
+| 5     | HSDIVIDER_CLKOUT1_<br>DIVCHACK  | R          | 0h    | Toggle on this status bit after changing HSDIVIDER_CLKOUT1_DIV<br>indicates that the change in divider value has taken effect                                                                                                                              |
+| 4-0   | HSDIVIDER_CLKOUT1_<br>DIV       | R/W        | 4h    | DPLL post-divider factor, M4, for internal clock generation.<br>Divide values from 1 to 31.<br>0h (R/W) = Reserved                                                                                                                                         |
+
+
+### *8.1.12.2.34 CM\_DIV\_M5\_DPLL\_CORE Register (offset = 84h) [reset = 4h]*
+
+Register mask: FFFFFFFFh
+
+CM\_DIV\_M5\_DPLL\_CORE is shown in [Figure](#page-154-1) 8-119 and described in Table [8-123](#page-154-2).
+
+This register provides controls over the CLKOUT2 o/p of the HSDIVIDER.
+
+
+#### **Table 8-123. CM\_DIV\_M5\_DPLL\_CORE Register Field Descriptions**
+
+
+| Bit   | Field                           | Type       | Reset | Description                                                                                                                                                                                                                                                |
+|-------|---------------------------------|------------|-------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-13 | RESERVED                        | Rreturns0s | 0h    |                                                                                                                                                                                                                                                            |
+| 12    | HSDIVIDER_CLKOUT2_P<br>WDN      | R/W        | 0h    | Automatic power down for HSDIVIDER M5 divider and hence<br>CLKOUT2 output when the o/p clock is gated.<br>0h (R/W) = Keep M5 divider powered on even when CLKOUT2 is<br>gated.<br>1h (R/W) = Automatically power down M5 divider when CLKOUT2 is<br>gated. |
+| 11-10 | RESERVED                        | Rreturns0s | 0h    |                                                                                                                                                                                                                                                            |
+| 9     | ST_HSDIVIDER_CLKOU<br>T2        | R          | 0h    | HSDIVIDER CLKOUT2 status<br>0h (R) = The clock output is gated<br>1h (R) = The clock output is enabled                                                                                                                                                     |
+| 8     | HSDIVIDER_CLKOUT2_<br>GATE_CTRL | R/W        | 0h    | Control gating of HSDIVIDER CLKOUT2<br>0h (R/W) = Automatically gate this clock when there is no<br>dependency for it<br>1h (R/W) = Force this clock to stay enabled even if there is no<br>request                                                        |
+| 7-6   | RESERVED                        | Rreturns0s | 0h    |                                                                                                                                                                                                                                                            |
+| 5     | HSDIVIDER_CLKOUT2_<br>DIVCHACK  | R          | 0h    | Toggle on this status bit after changing HSDIVIDER_CLKOUT2_DIV<br>indicates that the change in divider value has taken effect                                                                                                                              |
+| 4-0   | HSDIVIDER_CLKOUT2_<br>DIV       | R/W        | 4h    | DPLL post-divider factor, M5, for internal clock generation.<br>Divide values from 1 to 31.<br>0h (R/W) = Reserved                                                                                                                                         |
+
+
+# *8.1.12.2.35 CM\_CLKMODE\_DPLL\_MPU Register (offset = 88h) [reset = 4h]*
+
+Register mask: FFFFFFFFh
+
+CM\_CLKMODE\_DPLL\_MPU is shown in [Figure](#page-155-1) 8-120 and described in Table [8-124](#page-155-2).
+
+This register allows controlling the DPLL modes.
+
+#### **Table 8-124. CM\_CLKMODE\_DPLL\_MPU Register Field Descriptions**
+
+
+| Bit   | Field                   | Type       | Reset | Description                                                                                                                                                                                                                                                                   |
+|-------|-------------------------|------------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-16 | RESERVED                | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                               |
+| 15    | DPLL_SSC_TYPE           | R/W        | 0h    | Select Triangular Spread Spectrum clocking.<br>Always write 0.<br>0 = Triangular Spread Spectrum Clocking is selected.<br>1 = Reserved.                                                                                                                                       |
+| 14    | DPLL_SSC_DOWNSPRE<br>AD | R/W        | 0h    | Control if only low frequency spread is required<br>0h (R/W) = When SSC is enabled, clock frequency is spread on both<br>sides of the programmed frequency<br>1h (R/W) = When SSC is enabled, clock frequency is spread only on<br>the lower side of the programmed frequency |
+| 13    | DPLL_SSC_ACK            | R          | 0h    | Acknowledgement from the DPLL regarding start and stop of Spread<br>Spectrum Clocking feature<br>0h (R) = SSC has been turned off on PLL o/ps<br>1h (R) = SSC has been turned on on PLL o/ps                                                                                  |
+| 12    | DPLL_SSC_EN             | R/W        | 0h    | Enable or disable Spread Spectrum Clocking<br>0h (R/W) = SSC disabled<br>1h (R/W) = SSC enabled                                                                                                                                                                               |
+| 11    | DPLL_REGM4XEN           | Rreturns0s | 0h    | Enable the REGM4XEN mode of the DPLL.<br>Please check the DPLL documentation to check when this mode can<br>be enabled.<br>0h (R) = REGM4XEN mode of the DPLL is disabled                                                                                                     |
+| 10    | DPLL_LPMODE_EN          | R/W        | 0h    | Set the DPLL in Low Power mode.<br>Check the DPLL documentation to see when this can be enabled.<br>0h (R/W) = Low power mode of the DPLL is disabled<br>1h (R/W) = Low power mode of the DPLL is enabled                                                                     |
+| 9     | DPLL_RELOCK_RAMP_E<br>N | R/W        | 0h    | If enabled, the clock ramping feature is used applied during the lock<br>process, as well as the relock process.<br>If disabled, the clock ramping feature is used only during the first<br>lock.                                                                             |
+
+
+# **Table 8-124. CM\_CLKMODE\_DPLL\_MPU Register Field Descriptions (continued)**
+
+| Bit | Field              | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+|-----|--------------------|------|-------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 8   | DPLL_DRIFTGUARD_EN | R/W  | 0h    | This bit allows to enable or disable the automatic recalibration<br>feature of the DPLL.<br>The DPLL will automatically start a recalibration process upon<br>assertion of the DPLL's RECAL flag if this bit is set.<br>0h (R/W) = DRIFTGUARD feature is disabled<br>1h (R/W) = DRIFTGUARD feature is enabled                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 7-5 | DPLL_RAMP_RATE     | R/W  | 0h    | Selects the time in terms of DPLL REFCLKs spent at each stage of<br>the clock ramping process<br>0h (R/W) = 2 REFCLKs<br>1h (R/W) = 4 REFCLKs<br>2h (R/W) = 8 REFCLKs<br>3h (R/W) = 16 REFCLKs<br>4h (R/W) = 32 REFCLKs<br>5h (R/W) = 64 REFCLKs<br>6h (R/W) = 128 REFCLKs<br>7h (R/W) = 512 REFCLKs                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 4-3 | DPLL_RAMP_LEVEL    | R/W  | 0h    | The DPLL provides an output clock frequency ramping feature when<br>switching from bypass clock to normal clock during lock and re-lock.<br>The frequency ramping will happen in a maximum of 4 steps in<br>frequency before the DPLL's frequency lock indicator is asserted.<br>This register is used to enable/disable the DPLL ramping feature.<br>If enabled, it is also used to select the algorithm used for clock<br>ramping<br>0h (R/W) = CLKOUT => No ramping CLKOUTX2 => No ramping<br>1h (R/W) = CLKOUT => Bypass clk -> Fout/8 -> Fout/4 -> Fout/2 -><br>Fout CLKOUTX2 => Bypass clk -> Foutx2/8 -> Foutx2/4 -> Foutx2/2<br>-> Foutx2<br>2h (R/W) = CLKOUT => Bypass clk -> Fout/4 -> Fout/2 -> Fout/1.5 -<br>> Fout CLKOUTX2 => Bypass clk -> Foutx2/4 -> Foutx2/2 -><br>Foutx2/1.5 -> Foutx2<br>3h (R/W) = Reserved |
+| 2-0 | DPLL_EN            | R/W  | 4h    | DPLL control.<br>Upon Warm Reset, the PRCM DPLL control state machine updates<br>this register to reflect MN Bypass mode.<br>0h (R/W) = Reserved<br>1h (R/W) = Reserved<br>2h (R/W) = Reserved<br>3h (R/W) = Reserved<br>4h (R/W) = Put the DPLL in MN Bypass mode. The DPLL_MULT<br>register bits are reset to 0 automatically by putting the DPLL in this<br>mode.<br>5h (R/W) = Put the DPLL in Idle Bypass Low Power mode.<br>6h (R/W) = Put the DPLL in Idle Bypass Fast Relock mode.<br>7h (R/W) = Enables the DPLL in Lock mode                                                                                                                                                                                                                                                                                            |
+
+
+### *8.1.12.2.36 CM\_CLKMODE\_DPLL\_PER Register (offset = 8Ch) [reset = 4h]*
+
+Register mask: FFFFFFFFh
+
+CM\_CLKMODE\_DPLL\_PER is shown in [Figure](#page-157-1) 8-121 and described in Table [8-125](#page-157-2).
+
+This register allows controlling the DPLL modes.
+
+
+#### **Table 8-125. CM\_CLKMODE\_DPLL\_PER Register Field Descriptions**
+
+
+| Bit   | Field                   | Type       | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+|-------|-------------------------|------------|-------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-16 | RESERVED                | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| 15    | DPLL_SSC_TYPE           | R/W        | 0h    | Select Triangular Spread Spectrum clocking.<br>Always write 0.<br>0 = Triangular Spread Spectrum Clocking is selected.<br>1 = Reserved.                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 14    | DPLL_SSC_DOWNSPRE<br>AD | R/W        | 0h    | Control if only low frequency spread is required<br>0h (R/W) = When SSC is enabled, clock frequency is spread on both<br>sides of the programmed frequency<br>1h (R/W) = When SSC is enabled, clock frequency is spread only on<br>the lower side of the programmed frequency                                                                                                                                                                                                                                                           |
+| 13    | DPLL_SSC_ACK            | R          | 0h    | Acknowledgement from the DPLL regarding start and stop of Spread<br>Spectrum Clocking feature<br>0h (R) = SSC has been turned off on PLL o/ps<br>1h (R) = SSC has been turned on on PLL o/ps                                                                                                                                                                                                                                                                                                                                            |
+| 12    | DPLL_SSC_EN             | R/W        | 0h    | Enable or disable Spread Spectrum Clocking<br>0h (R/W) = SSC disabled<br>1h (R/W) = SSC enabled                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| 11-3  | RESERVED                | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| 2-0   | DPLL_EN                 | R/W        | 4h    | DPLL control.<br>Upon Warm Reset, the PRCM DPLL control state machine updates<br>this register to reflect DPLL Low Power Stop mode.<br>0h (R/W) = Reserved<br>1h (R/W) = Put the DPLL in Low Power Stop mode<br>2h (R/W) = Reserved2<br>3h (R/W) = Reserved<br>4h (R/W) = Put the DPLL in MN Bypass mode. The DPLL_MULT<br>register bits are reset to 0 automatically by putting the DPLL in this<br>mode.<br>5h (R/W) = Put the DPLL in Idle Bypass Low Power mode.<br>6h (R/W) = Reserved<br>7h (R/W) = Enables the DPLL in Lock mode |
+
+
+### *8.1.12.2.37 CM\_CLKMODE\_DPLL\_CORE Register (offset = 90h) [reset = 4h]*
+
+Register mask: FFFFFFFFh
+
+CM\_CLKMODE\_DPLL\_CORE is shown in [Figure](#page-158-1) 8-122 and described in Table [8-126.](#page-158-2)
+
+This register allows controlling the DPLL modes.
+
+
+# **Table 8-126. CM\_CLKMODE\_DPLL\_CORE Register Field Descriptions**
+
+
+| Bit   | Field                   | Type       | Reset | Description                                                                                                                                                                                                                                                                   |
+|-------|-------------------------|------------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-16 | RESERVED                | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                               |
+| 15    | DPLL_SSC_TYPE           | R/W        | 0h    | Select Triangular Spread Spectrum clocking.<br>Always write 0.<br>0 = Triangular Spread Spectrum Clocking is selected.<br>1 = Reserved.                                                                                                                                       |
+| 14    | DPLL_SSC_DOWNSPRE<br>AD | R/W        | 0h    | Control if only low frequency spread is required<br>0h (R/W) = When SSC is enabled, clock frequency is spread on both<br>sides of the programmed frequency<br>1h (R/W) = When SSC is enabled, clock frequency is spread only on<br>the lower side of the programmed frequency |
+| 13    | DPLL_SSC_ACK            | R          | 0h    | Acknowledgement from the DPLL regarding start and stop of Spread<br>Spectrum Clocking feature<br>0h (R) = SSC has been turned off on PLL o/ps<br>1h (R) = SSC has been turned on on PLL o/ps                                                                                  |
+| 12    | DPLL_SSC_EN             | R/W        | 0h    | Enable or disable Spread Spectrum Clocking<br>0h (R/W) = SSC disabled<br>1h (R/W) = SSC enabled                                                                                                                                                                               |
+| 11    | DPLL_REGM4XEN           | Rreturns0s | 0h    | Enable the REGM4XEN mode of the DPLL.<br>Please check the DPLL documentation to check when this mode can<br>be enabled.<br>0h (R) = REGM4XEN mode of the DPLL is disabled                                                                                                     |
+| 10    | DPLL_LPMODE_EN          | R/W        | 0h    | Set the DPLL in Low Power mode.<br>Check the DPLL documentation to see when this can be enabled.<br>0h (R/W) = Low power mode of the DPLL is disabled<br>1h (R/W) = Low power mode of the DPLL is enabled                                                                     |
+| 9     | DPLL_RELOCK_RAMP_E<br>N | R/W        | 0h    | If enabled, the clock ramping feature is used applied during the lock<br>process, as well as the relock process.<br>If disabled, the clock ramping feature is used only during the first<br>lock.                                                                             |
+
+
+# **Table 8-126. CM\_CLKMODE\_DPLL\_CORE Register Field Descriptions (continued)**
+
+| Bit | Field              | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+|-----|--------------------|------|-------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 8   | DPLL_DRIFTGUARD_EN | R/W  | 0h    | This bit allows to enable or disable the automatic recalibration<br>feature of the DPLL.<br>The DPLL will automatically start a recalibration process upon<br>assertion of the DPLL's RECAL flag if this bit is set.<br>0h (R/W) = DRIFTGUARD feature is disabled<br>1h (R/W) = DRIFTGUARD feature is enabled                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 7-5 | DPLL_RAMP_RATE     | R/W  | 0h    | Selects the time in terms of DPLL REFCLKs spent at each stage of<br>the clock ramping process<br>0h (R/W) = 2 REFCLKs<br>1h (R/W) = 4 REFCLKs<br>2h (R/W) = 8 REFCLKs<br>3h (R/W) = 16 REFCLKs<br>4h (R/W) = 32 REFCLKs<br>5h (R/W) = 64 REFCLKs<br>6h (R/W) = 128 REFCLKs<br>7h (R/W) = 512 REFCLKs                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 4-3 | DPLL_RAMP_LEVEL    | R/W  | 0h    | The DPLL provides an output clock frequency ramping feature when<br>switching from bypass clock to normal clock during lock and re-lock.<br>The frequency ramping will happen in a maximum of 4 steps in<br>frequency before the DPLL's frequency lock indicator is asserted.<br>This register is used to enable/disable the DPLL ramping feature.<br>If enabled, it is also used to select the algorithm used for clock<br>ramping<br>0h (R/W) = CLKOUT => No ramping CLKOUTX2 => No ramping<br>1h (R/W) = CLKOUT => Bypass clk -> Fout/8 -> Fout/4 -> Fout/2 -><br>Fout CLKOUTX2 => Bypass clk -> Foutx2/8 -> Foutx2/4 -> Foutx2/2<br>-> Foutx2<br>2h (R/W) = CLKOUT => Bypass clk -> Fout/4 -> Fout/2 -> Fout/1.5 -<br>> Fout CLKOUTX2 => Bypass clk -> Foutx2/4 -> Foutx2/2 -><br>Foutx2/1.5 -> Foutx2<br>3h (R/W) = Reserved |
+| 2-0 | DPLL_EN            | R/W  | 4h    | DPLL control.<br>Upon Warm Reset, the PRCM DPLL control state machine updates<br>this register to reflect MN Bypass mode.<br>0h (R/W) = Reserved<br>1h (R/W) = Reserved<br>2h (R/W) = Reserved<br>3h (R/W) = Reserved<br>4h (R/W) = Put the DPLL in MN Bypass mode. The DPLL_MULT<br>register bits are reset to 0 automatically by putting the DPLL in this<br>mode.<br>5h (R/W) = Put the DPLL in Idle Bypass Low Power mode.<br>6h (R/W) = Put the DPLL in Idle Bypass Fast Relock mode.<br>7h (R/W) = Enables the DPLL in Lock mode                                                                                                                                                                                                                                                                                            |
+
+
+### *8.1.12.2.38 CM\_CLKMODE\_DPLL\_DDR Register (offset = 94h) [reset = 4h]*
+
+Register mask: FFFFFFFFh
+
+CM\_CLKMODE\_DPLL\_DDR is shown in [Figure](#page-160-1) 8-123 and described in Table [8-127](#page-160-2).
+
+This register allows controlling the DPLL modes.
+
+
+# **Table 8-127. CM\_CLKMODE\_DPLL\_DDR Register Field Descriptions**
+
+
+| Bit   | Field                   | Type       | Reset | Description                                                                                                                                                                                                                                                                   |
+|-------|-------------------------|------------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-16 | RESERVED                | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                               |
+| 15    | DPLL_SSC_TYPE           | R/W        | 0h    | Select Triangular Spread Spectrum clocking.<br>Always write 0.<br>0 = Triangular Spread Spectrum Clocking is selected.<br>1 = Reserved.                                                                                                                                       |
+| 14    | DPLL_SSC_DOWNSPRE<br>AD | R/W        | 0h    | Control if only low frequency spread is required<br>0h (R/W) = When SSC is enabled, clock frequency is spread on both<br>sides of the programmed frequency<br>1h (R/W) = When SSC is enabled, clock frequency is spread only on<br>the lower side of the programmed frequency |
+| 13    | DPLL_SSC_ACK            | R          | 0h    | Acknowledgement from the DPLL regarding start and stop of Spread<br>Spectrum Clocking feature<br>0h (R) = SSC has been turned off on PLL o/ps<br>1h (R) = SSC has been turned on on PLL o/ps                                                                                  |
+| 12    | DPLL_SSC_EN             | R/W        | 0h    | Enable or disable Spread Spectrum Clocking<br>0h (R/W) = SSC disabled<br>1h (R/W) = SSC enabled                                                                                                                                                                               |
+| 11    | DPLL_REGM4XEN           | Rreturns0s | 0h    | Enable the REGM4XEN mode of the DPLL.<br>Please check the DPLL documentation to check when this mode can<br>be enabled.<br>0h (R) = REGM4XEN mode of the DPLL is disabled                                                                                                     |
+| 10    | DPLL_LPMODE_EN          | R/W        | 0h    | Set the DPLL in Low Power mode.<br>Check the DPLL documentation to see when this can be enabled.<br>0h (R/W) = Low power mode of the DPLL is disabled<br>1h (R/W) = Low power mode of the DPLL is enabled                                                                     |
+| 9     | DPLL_RELOCK_RAMP_E<br>N | R/W        | 0h    | If enabled, the clock ramping feature is used applied during the lock<br>process, as well as the relock process.<br>If disabled, the clock ramping feature is used only during the first<br>lock.                                                                             |
+
+
+# **Table 8-127. CM\_CLKMODE\_DPLL\_DDR Register Field Descriptions (continued)**
+
+| Bit | Field              | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+|-----|--------------------|------|-------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 8   | DPLL_DRIFTGUARD_EN | R/W  | 0h    | This bit allows to enable or disable the automatic recalibration<br>feature of the DPLL.<br>The DPLL will automatically start a recalibration process upon<br>assertion of the DPLL's RECAL flag if this bit is set.<br>0h (R/W) = DRIFTGUARD feature is disabled<br>1h (R/W) = DRIFTGUARD feature is enabled                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 7-5 | DPLL_RAMP_RATE     | R/W  | 0h    | Selects the time in terms of DPLL REFCLKs spent at each stage of<br>the clock ramping process<br>0h (R/W) = 2 REFCLKs<br>1h (R/W) = 4 REFCLKs<br>2h (R/W) = 8 REFCLKs<br>3h (R/W) = 16 REFCLKs<br>4h (R/W) = 32 REFCLKs<br>5h (R/W) = 64 REFCLKs<br>6h (R/W) = 128 REFCLKs<br>7h (R/W) = 512 REFCLKs                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 4-3 | DPLL_RAMP_LEVEL    | R/W  | 0h    | The DPLL provides an output clock frequency ramping feature when<br>switching from bypass clock to normal clock during lock and re-lock.<br>The frequency ramping will happen in a maximum of 4 steps in<br>frequency before the DPLL's frequency lock indicator is asserted.<br>This register is used to enable/disable the DPLL ramping feature.<br>If enabled, it is also used to select the algorithm used for clock<br>ramping<br>0h (R/W) = CLKOUT => No ramping CLKOUTX2 => No ramping<br>1h (R/W) = CLKOUT => Bypass clk -> Fout/8 -> Fout/4 -> Fout/2 -><br>Fout CLKOUTX2 => Bypass clk -> Foutx2/8 -> Foutx2/4 -> Foutx2/2<br>-> Foutx2<br>2h (R/W) = CLKOUT => Bypass clk -> Fout/4 -> Fout/2 -> Fout/1.5 -<br>> Fout CLKOUTX2 => Bypass clk -> Foutx2/4 -> Foutx2/2 -><br>Foutx2/1.5 -> Foutx2<br>3h (R/W) = Reserved |
+| 2-0 | DPLL_EN            | R/W  | 4h    | DPLL control.<br>Upon Warm Reset, the PRCM DPLL control state machine updates<br>this register to reflect MN Bypass mode.<br>0h (R/W) = Reserved<br>1h (R/W) = Reserved<br>2h (R/W) = Reserved<br>3h (R/W) = Reserved<br>4h (R/W) = Put the DPLL in MN Bypass mode. The DPLL_MULT<br>register bits are reset to 0 automatically by putting the DPLL in this<br>mode.<br>5h (R/W) = Put the DPLL in Idle Bypass Low Power mode.<br>6h (R/W) = Put the DPLL in Idle Bypass Fast Relock mode.<br>7h (R/W) = Enables the DPLL in Lock mode                                                                                                                                                                                                                                                                                            |
+
+
+### *8.1.12.2.39 CM\_CLKMODE\_DPLL\_DISP Register (offset = 98h) [reset = 4h]*
+
+Register mask: FFFFFFFFh
+
+CM\_CLKMODE\_DPLL\_DISP is shown in [Figure](#page-162-1) 8-124 and described in Table [8-128](#page-162-2).
+
+This register allows controlling the DPLL modes.
+
+### **Table 8-128. CM\_CLKMODE\_DPLL\_DISP Register Field Descriptions**
+
+
+| Bit   | Field                   | Type       | Reset | Description                                                                                                                                                                                                                                                                   |
+|-------|-------------------------|------------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-16 | RESERVED                | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                               |
+| 15    | DPLL_SSC_TYPE           | R/W        | 0h    | Select Triangular Spread Spectrum clocking.<br>Always write 0.<br>0 = Triangular Spread Spectrum Clocking is selected.<br>1 = Reserved.                                                                                                                                       |
+| 14    | DPLL_SSC_DOWNSPRE<br>AD | R/W        | 0h    | Control if only low frequency spread is required<br>0h (R/W) = When SSC is enabled, clock frequency is spread on both<br>sides of the programmed frequency<br>1h (R/W) = When SSC is enabled, clock frequency is spread only on<br>the lower side of the programmed frequency |
+| 13    | DPLL_SSC_ACK            | R          | 0h    | Acknowledgement from the DPLL regarding start and stop of Spread<br>Spectrum Clocking feature<br>0h (R) = SSC has been turned off on PLL o/ps<br>1h (R) = SSC has been turned on on PLL o/ps                                                                                  |
+| 12    | DPLL_SSC_EN             | R/W        | 0h    | Enable or disable Spread Spectrum Clocking<br>0h (R/W) = SSC disabled<br>1h (R/W) = SSC enabled                                                                                                                                                                               |
+| 11    | DPLL_REGM4XEN           | Rreturns0s | 0h    | Enable the REGM4XEN mode of the DPLL.<br>Please check the DPLL documentation to check when this mode can<br>be enabled.<br>0h (R) = REGM4XEN mode of the DPLL is disabled                                                                                                     |
+| 10    | DPLL_LPMODE_EN          | R/W        | 0h    | Set the DPLL in Low Power mode.<br>Check the DPLL documentation to see when this can be enabled.<br>0h (R/W) = Low power mode of the DPLL is disabled<br>1h (R/W) = Low power mode of the DPLL is enabled                                                                     |
+| 9     | DPLL_RELOCK_RAMP_E<br>N | R/W        | 0h    | If enabled, the clock ramping feature is used applied during the lock<br>process, as well as the relock process.<br>If disabled, the clock ramping feature is used only during the first<br>lock.                                                                             |
+
+
+# **Table 8-128. CM\_CLKMODE\_DPLL\_DISP Register Field Descriptions (continued)**
+
+| Bit | Field              | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+|-----|--------------------|------|-------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 8   | DPLL_DRIFTGUARD_EN | R/W  | 0h    | This bit allows to enable or disable the automatic recalibration<br>feature of the DPLL.<br>The DPLL will automatically start a recalibration process upon<br>assertion of the DPLL's RECAL flag if this bit is set.<br>0h (R/W) = DRIFTGUARD feature is disabled<br>1h (R/W) = DRIFTGUARD feature is enabled                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 7-5 | DPLL_RAMP_RATE     | R/W  | 0h    | Selects the time in terms of DPLL REFCLKs spent at each stage of<br>the clock ramping process<br>0h (R/W) = 2 REFCLKs<br>1h (R/W) = 4 REFCLKs<br>2h (R/W) = 8 REFCLKs<br>3h (R/W) = 16 REFCLKs<br>4h (R/W) = 32 REFCLKs<br>5h (R/W) = 64 REFCLKs<br>6h (R/W) = 128 REFCLKs<br>7h (R/W) = 512 REFCLKs                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| 4-3 | DPLL_RAMP_LEVEL    | R/W  | 0h    | The DPLL provides an output clock frequency ramping feature when<br>switching from bypass clock to normal clock during lock and re-lock.<br>The frequency ramping will happen in a maximum of 4 steps in<br>frequency before the DPLL's frequency lock indicator is asserted.<br>This register is used to enable/disable the DPLL ramping feature.<br>If enabled, it is also used to select the algorithm used for clock<br>ramping<br>0h (R/W) = CLKOUT => No ramping CLKOUTX2 => No ramping<br>1h (R/W) = CLKOUT => Bypass clk -> Fout/8 -> Fout/4 -> Fout/2 -><br>Fout CLKOUTX2 => Bypass clk -> Foutx2/8 -> Foutx2/4 -> Foutx2/2<br>-> Foutx2<br>2h (R/W) = CLKOUT => Bypass clk -> Fout/4 -> Fout/2 -> Fout/1.5 -<br>> Fout CLKOUTX2 => Bypass clk -> Foutx2/4 -> Foutx2/2 -><br>Foutx2/1.5 -> Foutx2<br>3h (R/W) = Reserved |
+| 2-0 | DPLL_EN            | R/W  | 4h    | DPLL control.<br>Upon Warm Reset, the PRCM DPLL control state machine updates<br>this register to reflect MN Bypass mode.<br>0h (R/W) = Reserved<br>1h (R/W) = Reserved<br>2h (R/W) = Reserved<br>3h (R/W) = Reserved<br>4h (R/W) = Put the DPLL in MN Bypass mode. The DPLL_MULT<br>register bits are reset to 0 automatically by putting the DPLL in this<br>mode.<br>5h (R/W) = Put the DPLL in Idle Bypass Low Power mode.<br>6h (R/W) = Put the DPLL in Idle Bypass Fast Relock mode.<br>7h (R/W) = Enables the DPLL in Lock mode                                                                                                                                                                                                                                                                                            |
+
+
+### *8.1.12.2.40 CM\_CLKSEL\_DPLL\_PERIPH Register (offset = 9Ch) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+CM\_CLKSEL\_DPLL\_PERIPH is shown in [Figure](#page-164-1) 8-125 and described in Table [8-129.](#page-164-2)
+
+This register provides controls over the DPLL.
+
+
+# **Table 8-129. CM\_CLKSEL\_DPLL\_PERIPH Register Field Descriptions**
+
+
+| Bit   | Field       | Type       | Reset | Description                                                                                                                                                                                                                                                                                                                                             |
+|-------|-------------|------------|-------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-24 | DPLL_SD_DIV | R/W        | 0h    | Sigma-Delta divider select (<br>2-255).<br>This factor must be set by s/w to ensure optimum jitter performance.<br>DPLL_SD_DIV = CEILING ([DPLL_MULT/(DPLL_DIV+1)] * CLKINP<br>/ 250), where CLKINP is the input clock of the DPLL in MHz).<br>Must be set with M and N factors, and must not be changed once<br>DPLL is locked.<br>0h (R/W) = Reserved |
+|       |             |            |       | 1h (R/W) = Reserved                                                                                                                                                                                                                                                                                                                                     |
+| 23    | RESERVED    | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                                                                         |
+| 22-20 | RESERVED    | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                                                                         |
+| 19-8  | DPLL_MULT   | R/W        | 0h    | DPLL multiplier factor (2 to 4095).<br>This register is automatically cleared to 0 when the DPLL_EN field in<br>the *CLKMODE_DPLL* register is set to select MN Bypass mode.<br>(equal to input M of DPLL<br>M=2 to<br>4095 => DPLL multiplies by M).<br>0h (R/W) = 0 : Reserved<br>1h (R/W) = 1 : Reserved                                             |
+| 7-0   | DPLL_DIV    | R/W        | 0h    | DPLL divider factor (0 to 255) (equal to input N of DPLL<br>actual division factor is N+1).                                                                                                                                                                                                                                                             |
+
+
+# *8.1.12.2.41 CM\_DIV\_M2\_DPLL\_DDR Register (offset = A0h) [reset = 1h]*
+
+Register mask: FFFFFFFFh
+
+CM\_DIV\_M2\_DPLL\_DDR is shown in [Figure](#page-165-1) 8-126 and described in Table [8-130](#page-165-2).
+
+This register provides controls over the M2 divider of the DPLL.
+
+
+# **Table 8-130. CM\_DIV\_M2\_DPLL\_DDR Register Field Descriptions**
+
+
+| Bit   | Field                     | Type       | Reset | Description                                                                                                                                                                                   |
+|-------|---------------------------|------------|-------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-10 | RESERVED                  | Rreturns0s | 0h    |                                                                                                                                                                                               |
+| 9     | ST_DPLL_CLKOUT            | R          | 0h    | DPLL CLKOUT status<br>0h (R) = The clock output is gated<br>1h (R) = The clock output is enabled                                                                                              |
+| 8     | DPLL_CLKOUT_GATE_C<br>TRL | R/W        | 0h    | Control gating of DPLL CLKOUT<br>0h (R/W) = Automatically gate this clock when there is no<br>dependency for it<br>1h (R/W) = Force this clock to stay enabled even if there is no<br>request |
+| 7-6   | RESERVED                  | Rreturns0s | 0h    |                                                                                                                                                                                               |
+| 5     | DPLL_CLKOUT_DIVCHA<br>CK  | R          | 0h    | Toggle on this status bit after changing DPLL_CLKOUT_DIV<br>indicates that the change in divider value has taken effect                                                                       |
+| 4-0   | DPLL_CLKOUT_DIV           | R/W        | 1h    | DPLL M2 post-divider factor (1 to 31).<br>0h (R/W) = Reserved                                                                                                                                 |
+
+
+### *8.1.12.2.42 CM\_DIV\_M2\_DPLL\_DISP Register (offset = A4h) [reset = 1h]*
+
+Register mask: FFFFFFFFh
+
+CM\_DIV\_M2\_DPLL\_DISP is shown in [Figure](#page-166-1) 8-127 and described in Table [8-131.](#page-166-2)
+
+This register provides controls over the M2 divider of the DPLL.
+
+
+### **Table 8-131. CM\_DIV\_M2\_DPLL\_DISP Register Field Descriptions**
+
+
+| Bit   | Field                     | Type       | Reset | Description                                                                                                                                                                                   |
+|-------|---------------------------|------------|-------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-10 | RESERVED                  | Rreturns0s | 0h    |                                                                                                                                                                                               |
+| 9     | ST_DPLL_CLKOUT            | R          | 0h    | DPLL CLKOUT status<br>0h (R) = The clock output is gated<br>1h (R) = The clock output is enabled                                                                                              |
+| 8     | DPLL_CLKOUT_GATE_C<br>TRL | R/W        | 0h    | Control gating of DPLL CLKOUT<br>0h (R/W) = Automatically gate this clock when there is no<br>dependency for it<br>1h (R/W) = Force this clock to stay enabled even if there is no<br>request |
+| 7-6   | RESERVED                  | Rreturns0s | 0h    |                                                                                                                                                                                               |
+| 5     | DPLL_CLKOUT_DIVCHA<br>CK  | R          | 0h    | Toggle on this status bit after changing DPLL_CLKOUT_DIV<br>indicates that the change in divider value has taken effect                                                                       |
+| 4-0   | DPLL_CLKOUT_DIV           | R/W        | 1h    | DPLL M2 post-divider factor (1 to 31).<br>0h (R/W) = Reserved                                                                                                                                 |
+
+
+# *8.1.12.2.43 CM\_DIV\_M2\_DPLL\_MPU Register (offset = A8h) [reset = 1h]*
+
+Register mask: FFFFFFFFh
+
+CM\_DIV\_M2\_DPLL\_MPU is shown in [Figure](#page-167-1) 8-128 and described in Table [8-132.](#page-167-2)
+
+This register provides controls over the M2 divider of the DPLL.
+
+# **Table 8-132. CM\_DIV\_M2\_DPLL\_MPU Register Field Descriptions**
+
+
+| Bit   | Field                     | Type       | Reset | Description                                                                                                                                                                                   |
+|-------|---------------------------|------------|-------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-10 | RESERVED                  | Rreturns0s | 0h    |                                                                                                                                                                                               |
+| 9     | ST_DPLL_CLKOUT            | R          | 0h    | DPLL CLKOUT status<br>0h (R) = The clock output is gated<br>1h (R) = The clock output is enabled                                                                                              |
+| 8     | DPLL_CLKOUT_GATE_C<br>TRL | R/W        | 0h    | Control gating of DPLL CLKOUT<br>0h (R/W) = Automatically gate this clock when there is no<br>dependency for it<br>1h (R/W) = Force this clock to stay enabled even if there is no<br>request |
+| 7-6   | RESERVED                  | Rreturns0s | 0h    |                                                                                                                                                                                               |
+| 5     | DPLL_CLKOUT_DIVCHA<br>CK  | R          | 0h    | Toggle on this status bit after changing DPLL_CLKOUT_DIV<br>indicates that the change in divider value has taken effect                                                                       |
+| 4-0   | DPLL_CLKOUT_DIV           | R/W        | 1h    | DPLL M2 post-divider factor (1 to 31).<br>0h (R/W) = Reserved                                                                                                                                 |
+
+
+# *8.1.12.2.44 CM\_DIV\_M2\_DPLL\_PER Register (offset = ACh) [reset = 1h]*
+
+Register mask: FFFFFFFFh
+
+CM\_DIV\_M2\_DPLL\_PER is shown in [Figure](#page-168-1) 8-129 and described in Table [8-133.](#page-168-2)
+
+This register provides controls over the M2 divider of the DPLL.
+
+
+### **Table 8-133. CM\_DIV\_M2\_DPLL\_PER Register Field Descriptions**
+
+
+| Bit   | Field                     | Type       | Reset | Description                                                                                                                                                                                   |
+|-------|---------------------------|------------|-------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-10 | RESERVED                  | Rreturns0s | 0h    |                                                                                                                                                                                               |
+| 9     | ST_DPLL_CLKOUT            | R          | 0h    | DPLL CLKOUT status<br>0h (R) = The clock output is gated<br>1h (R) = The clock output is enabled                                                                                              |
+| 8     | DPLL_CLKOUT_GATE_C<br>TRL | R/W        | 0h    | Control gating of DPLL CLKOUT<br>0h (R/W) = Automatically gate this clock when there is no<br>dependency for it<br>1h (R/W) = Force this clock to stay enabled even if there is no<br>request |
+| 7     | DPLL_CLKOUT_DIVCHA<br>CK  | R          | 0h    | Toggle on this status bit after changing DPLL_CLKOUT_DIV<br>indicates that the change in divider value has taken effect                                                                       |
+| 6-0   | DPLL_CLKOUT_DIV           | R/W        | 1h    | DPLL M2 post-divider factor (1 to 31).<br>0h (R/W) = Reserved                                                                                                                                 |
+
+
+# *8.1.12.2.45 CM\_WKUP\_WKUP\_M3\_CLKCTRL Register (offset = B0h) [reset = 2h]*
+
+Register mask: FFFFFFFFh
+
+CM\_WKUP\_WKUP\_M3\_CLKCTRL is shown in [Figure](#page-169-1) 8-130 and described in Table [8-134](#page-169-2).
+
+This register manages the WKUP M3 clocks.
+
+
+
+#### **Table 8-134. CM\_WKUP\_WKUP\_M3\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type       | Reset | Description                                                                                               |
+|-------|------------|------------|-------|-----------------------------------------------------------------------------------------------------------|
+| 31-19 | RESERVED   | Rreturns0s | 0h    |                                                                                                           |
+| 18    | STBYST     | R          | 0h    | Module standby status.<br>0h (R) = Module is functional (not in standby)<br>1h (R) = Module is in standby |
+| 17-2  | RESERVED   | Rreturns0s | 0h    |                                                                                                           |
+| 1-0   | MODULEMODE | R          | 2h    | Control the way mandatory clocks are managed.                                                             |
+
+
+### *8.1.12.2.46 CM\_WKUP\_UART0\_CLKCTRL Register (offset = B4h) [reset = 30000h]*
+
+Register mask: FFFFFFFFh
+
+CM\_WKUP\_UART0\_CLKCTRL is shown in [Figure](#page-170-1) 8-131 and described in Table [8-135.](#page-170-2)
+
+This register manages the UART0 clocks.
+
+# **Table 8-135. CM\_WKUP\_UART0\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type       | Reset | Description                                                                                                                                                                                                                                                                                           |
+|-------|------------|------------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | RESERVED   | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                       |
+| 17-16 | IDLEST     | R          | 3h    | Module idle status.                                                                                                                                                                                                                                                                                   |
+|       |            |            |       | 0h (R) = Module is fully functional, including OCP                                                                                                                                                                                                                                                    |
+|       |            |            |       | 1h (R) = Module is performing transition: wakeup, or sleep, or sleep<br>abortion                                                                                                                                                                                                                      |
+|       |            |            |       | 2h (R) = Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                               |
+|       |            |            |       | 3h (R) = Module is disabled and cannot be accessed                                                                                                                                                                                                                                                    |
+| 15-2  | RESERVED   | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                       |
+| 1-0   | MODULEMODE | R/W        | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                         |
+|       |            |            |       | 0h (R/W) = Module is disable by SW. Any OCP access to module<br>results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                                               |
+|       |            |            |       | 1h (R/W) = Reserved                                                                                                                                                                                                                                                                                   |
+|       |            |            |       | 2h (R/W) = Module is explicitly enabled. Interface clock (if not used<br>for functions) may be gated according to the clock domain state.<br>Functional clocks are guarantied to stay present. As long as in this<br>configuration, power domain sleep transition cannot happen.<br>3h (R) = Reserved |
+
+
+### *8.1.12.2.47 CM\_WKUP\_I2C0\_CLKCTRL Register (offset = B8h) [reset = 30000h]*
+
+Register mask: FFFFFFFFh
+
+CM\_WKUP\_I2C0\_CLKCTRL is shown in [Figure](#page-171-1) 8-132 and described in Table [8-136.](#page-171-2)
+
+This register manages the I2C0 clocks.
+
+
+# **Table 8-136. CM\_WKUP\_I2C0\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type       | Reset | Description                                                                                                                                                                                                                                                                      |
+|-------|------------|------------|-------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | RESERVED   | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                  |
+| 17-16 | IDLEST     | R          | 3h    | Module idle status.                                                                                                                                                                                                                                                              |
+|       |            |            |       | 0h (R) = Module is fully functional, including OCP                                                                                                                                                                                                                               |
+|       |            |            |       | 1h (R) = Module is performing transition: wakeup, or sleep, or sleep<br>abortion                                                                                                                                                                                                 |
+|       |            |            |       | 2h (R) = Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                          |
+|       |            |            |       | 3h (R) = Module is disabled and cannot be accessed                                                                                                                                                                                                                               |
+| 15-2  | RESERVED   | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                  |
+| 1-0   | MODULEMODE | R/W        | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                    |
+|       |            |            |       | 0h (R/W) = Module is disable by SW. Any OCP access to module<br>results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                          |
+|       |            |            |       | 1h (R/W) = Reserved                                                                                                                                                                                                                                                              |
+|       |            |            |       | 2h (R/W) = Module is explicitly enabled. Interface clock (if not used<br>for functions) may be gated according to the clock domain state.<br>Functional clocks are guarantied to stay present. As long as in this<br>configuration, power domain sleep transition cannot happen. |
+|       |            |            |       | 3h (R) = Reserved                                                                                                                                                                                                                                                                |
+
+
+### *8.1.12.2.48 CM\_WKUP\_ADC\_TSC\_CLKCTRL Register (offset = BCh) [reset = 30000h]*
+
+Register mask: FFFFFFFFh
+
+CM\_WKUP\_ADC\_TSC\_CLKCTRL is shown in [Figure](#page-172-1) 8-133 and described in Table [8-137.](#page-172-2)
+
+This register manages the ADC clocks.
+
+
+# **Table 8-137. CM\_WKUP\_ADC\_TSC\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type       | Reset | Description                                                                                                                                                                                                                                                                                           |
+|-------|------------|------------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | RESERVED   | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                       |
+| 17-16 | IDLEST     | R          | 3h    | Module idle status.                                                                                                                                                                                                                                                                                   |
+|       |            |            |       | 0h (R) = Module is fully functional, including OCP                                                                                                                                                                                                                                                    |
+|       |            |            |       | 1h (R) = Module is performing transition: wakeup, or sleep, or sleep<br>abortion                                                                                                                                                                                                                      |
+|       |            |            |       | 2h (R) = Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                               |
+|       |            |            |       | 3h (R) = Module is disabled and cannot be accessed                                                                                                                                                                                                                                                    |
+| 15-2  | RESERVED   | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                       |
+| 1-0   | MODULEMODE | R/W        | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                         |
+|       |            |            |       | 0h (R/W) = Module is disable by SW. Any OCP access to module<br>results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                                               |
+|       |            |            |       | 1h (R/W) = Reserved                                                                                                                                                                                                                                                                                   |
+|       |            |            |       | 2h (R/W) = Module is explicitly enabled. Interface clock (if not used<br>for functions) may be gated according to the clock domain state.<br>Functional clocks are guarantied to stay present. As long as in this<br>configuration, power domain sleep transition cannot happen.<br>3h (R) = Reserved |
+
+
+# *8.1.12.2.49 CM\_WKUP\_SMARTREFLEX0\_CLKCTRL Register (offset = C0h) [reset = 30000h]*
+
+Register mask: FFFFFFFFh
+
+CM\_WKUP\_SMARTREFLEX0\_CLKCTRL is shown in [Figure](#page-173-1) 8-134 and described in Table [8-138](#page-173-2).
+
+This register manages the SmartReflex0 clocks.
+
+
+#### **Table 8-138. CM\_WKUP\_SMARTREFLEX0\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type       | Reset | Description                                                                                                                                                                                                                                                                      |
+|-------|------------|------------|-------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | RESERVED   | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                  |
+| 17-16 | IDLEST     | R          | 3h    | Module idle status.                                                                                                                                                                                                                                                              |
+|       |            |            |       | 0h (R) = Module is fully functional, including OCP                                                                                                                                                                                                                               |
+|       |            |            |       | 1h (R) = Module is performing transition: wakeup, or sleep, or sleep<br>abortion                                                                                                                                                                                                 |
+|       |            |            |       | 2h (R) = Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                          |
+|       |            |            |       | 3h (R) = Module is disabled and cannot be accessed                                                                                                                                                                                                                               |
+| 15-2  | RESERVED   | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                  |
+| 1-0   | MODULEMODE | R/W        | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                    |
+|       |            |            |       | 0h (R/W) = Module is disable by SW. Any OCP access to module<br>results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                          |
+|       |            |            |       | 1h (R/W) = Reserved                                                                                                                                                                                                                                                              |
+|       |            |            |       | 2h (R/W) = Module is explicitly enabled. Interface clock (if not used<br>for functions) may be gated according to the clock domain state.<br>Functional clocks are guarantied to stay present. As long as in this<br>configuration, power domain sleep transition cannot happen. |
+|       |            |            |       | 3h (R) = Reserved                                                                                                                                                                                                                                                                |
+
+
+# *8.1.12.2.50 CM\_WKUP\_TIMER1\_CLKCTRL Register (offset = C4h) [reset = 30000h]*
+
+Register mask: FFFFFFFFh
+
+CM\_WKUP\_TIMER1\_CLKCTRL is shown in [Figure](#page-174-1) 8-135 and described in Table [8-139.](#page-174-2)
+
+This register manages the TIMER1 clocks.
+
+
+# **Table 8-139. CM\_WKUP\_TIMER1\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type       | Reset | Description                                                                                                                                                                                                                                                                                           |
+|-------|------------|------------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-19 | RESERVED   | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                       |
+| 18    | RESERVED   | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                       |
+| 17-16 | IDLEST     | R          | 3h    | Module idle status.                                                                                                                                                                                                                                                                                   |
+|       |            |            |       | 0h (R) = Module is fully functional, including OCP                                                                                                                                                                                                                                                    |
+|       |            |            |       | 1h (R) = Module is performing transition: wakeup, or sleep, or sleep<br>abortion                                                                                                                                                                                                                      |
+|       |            |            |       | 2h (R) = Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                               |
+|       |            |            |       | 3h (R) = Module is disabled and cannot be accessed                                                                                                                                                                                                                                                    |
+| 15-2  | RESERVED   | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                       |
+| 1-0   | MODULEMODE | R/W        | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                         |
+|       |            |            |       | 0h (R/W) = Module is disable by SW. Any OCP access to module<br>results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                                               |
+|       |            |            |       | 1h (R/W) = Reserved                                                                                                                                                                                                                                                                                   |
+|       |            |            |       | 2h (R/W) = Module is explicitly enabled. Interface clock (if not used<br>for functions) may be gated according to the clock domain state.<br>Functional clocks are guarantied to stay present. As long as in this<br>configuration, power domain sleep transition cannot happen.<br>3h (R) = Reserved |
+|       |            |            |       |                                                                                                                                                                                                                                                                                                       |
+
+
+# *8.1.12.2.51 CM\_WKUP\_SMARTREFLEX1\_CLKCTRL Register (offset = C8h) [reset = 30000h]*
+
+Register mask: FFFFFFFFh
+
+CM\_WKUP\_SMARTREFLEX1\_CLKCTRL is shown in [Figure](#page-175-1) 8-136 and described in Table [8-140](#page-175-2).
+
+This register manages the SmartReflex1 clocks.
+
+
+#### **Table 8-140. CM\_WKUP\_SMARTREFLEX1\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type       | Reset | Description                                                                                                                                                                                                                                                                      |
+|-------|------------|------------|-------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | RESERVED   | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                  |
+| 17-16 | IDLEST     | R          | 3h    | Module idle status.                                                                                                                                                                                                                                                              |
+|       |            |            |       | 0h (R) = Module is fully functional, including OCP                                                                                                                                                                                                                               |
+|       |            |            |       | 1h (R) = Module is performing transition: wakeup, or sleep, or sleep<br>abortion                                                                                                                                                                                                 |
+|       |            |            |       | 2h (R) = Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                          |
+|       |            |            |       | 3h (R) = Module is disabled and cannot be accessed                                                                                                                                                                                                                               |
+| 15-2  | RESERVED   | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                  |
+| 1-0   | MODULEMODE | R/W        | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                    |
+|       |            |            |       | 0h (R/W) = Module is disable by SW. Any OCP access to module<br>results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                          |
+|       |            |            |       | 1h (R/W) = Reserved                                                                                                                                                                                                                                                              |
+|       |            |            |       | 2h (R/W) = Module is explicitly enabled. Interface clock (if not used<br>for functions) may be gated according to the clock domain state.<br>Functional clocks are guarantied to stay present. As long as in this<br>configuration, power domain sleep transition cannot happen. |
+|       |            |            |       | 3h (R) = Reserved                                                                                                                                                                                                                                                                |
+
+
+### *8.1.12.2.52 CM\_L4\_WKUP\_AON\_CLKSTCTRL Register (offset = CCh) [reset = 6h]*
+
+Register mask: FFFFFFFFh
+
+CM\_L4\_WKUP\_AON\_CLKSTCTRL is shown in [Figure](#page-176-1) 8-137 and described in Table [8-141.](#page-176-2)
+
+This register enables the domain power state transition. It controls the SW supervised clock domain state transition between ON-ACTIVE and ON-INACTIVE states. It also hold one status bit per clock input of the domain.
+
+**Table 8-141. CM\_L4\_WKUP\_AON\_CLKSTCTRL Register Field Descriptions**
+
+
+| Bit   | Field                            | Type       | Reset | Description                                                                                                                                                                                                                                                                                                                             |
+|-------|----------------------------------|------------|-------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-26 | RESERVED                         | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                                                         |
+| 25-14 | RESERVED                         | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                                                         |
+| 13-8  | RESERVED                         | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                                                         |
+| 7-4   | RESERVED                         | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                                                         |
+| 3     | RESERVED                         | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                                                         |
+| 2     | CLKACTIVITY_L4_WKUP<br>_AON_GCLK | R          | 1h    | This field indicates the state of the L4_WKUP clock in the domain.<br>0h (R) = Corresponding clock is gated<br>1h (R) = Corresponding clock is active                                                                                                                                                                                   |
+| 1-0   | CLKTRCTRL                        | R          | 2h    | Controls the clock state transition of the always on L4 clock domain.<br>0h (R/W) = Sleep transition cannot be initiated. Wakeup transition<br>may however occur.<br>1h (R/W) = Start a software forced sleep transition on the domain.<br>2h (R/W) = Start a software forced wake-up transition on the domain.<br>3h (R/W) = Reserved. |
+
+
+### *8.1.12.2.53 CM\_WKUP\_WDT1\_CLKCTRL Register (offset = D4h) [reset = 30002h]*
+
+Register mask: FFFFFFFFh
+
+CM\_WKUP\_WDT1\_CLKCTRL is shown in [Figure](#page-177-1) 8-138 and described in Table [8-142](#page-177-2).
+
+This register manages the WDT1 clocks.
+
+
+# **Table 8-142. CM\_WKUP\_WDT1\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type       | Reset | Description                                                                                                                                                                                                                                                                                           |
+|-------|------------|------------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-19 | RESERVED   | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                       |
+| 18    | RESERVED   | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                       |
+| 17-16 | IDLEST     | R          | 3h    | Module idle status.                                                                                                                                                                                                                                                                                   |
+|       |            |            |       | 0h (R) = Module is fully functional, including OCP                                                                                                                                                                                                                                                    |
+|       |            |            |       | 1h (R) = Module is performing transition: wakeup, or sleep, or sleep<br>abortion                                                                                                                                                                                                                      |
+|       |            |            |       | 2h (R) = Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                               |
+|       |            |            |       | 3h (R) = Module is disabled and cannot be accessed                                                                                                                                                                                                                                                    |
+| 15-2  | RESERVED   | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                       |
+| 1-0   | MODULEMODE | R/W        | 2h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                         |
+|       |            |            |       | 0h (R/W) = Module is disable by SW. Any OCP access to module<br>results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                                               |
+|       |            |            |       | 1h (R/W) = Reserved                                                                                                                                                                                                                                                                                   |
+|       |            |            |       | 2h (R/W) = Module is explicitly enabled. Interface clock (if not used<br>for functions) may be gated according to the clock domain state.<br>Functional clocks are guarantied to stay present. As long as in this<br>configuration, power domain sleep transition cannot happen.<br>3h (R) = Reserved |
+
+
+### *8.1.12.2.54 CM\_DIV\_M6\_DPLL\_CORE Register (offset = D8h) [reset = 4h]*
+
+Register mask: FFFFFFFFh
+
+CM\_DIV\_M6\_DPLL\_CORE is shown in [Figure](#page-178-1) 8-139 and described in Table [8-143](#page-178-2).
+
+This register provides controls over the CLKOUT3 o/p of the HSDIVIDER. [warm reset insensitive]
+
+
+#### **Table 8-143. CM\_DIV\_M6\_DPLL\_CORE Register Field Descriptions**
+
+
+| Bit   | Field                           | Type       | Reset | Description                                                                                                                                                                                                                                                |
+|-------|---------------------------------|------------|-------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-13 | RESERVED                        | Rreturns0s | 0h    |                                                                                                                                                                                                                                                            |
+| 12    | HSDIVIDER_CLKOUT3_P<br>WDN      | R/W        | 0h    | Automatic power down for HSDIVIDER M6 divider and hence<br>CLKOUT3 output when the o/p clock is gated.<br>0h (R/W) = Keep M6 divider powered on even when CLKOUT3 is<br>gated.<br>1h (R/W) = Automatically power down M6 divider when CLKOUT3 is<br>gated. |
+| 11-10 | RESERVED                        | Rreturns0s | 0h    |                                                                                                                                                                                                                                                            |
+| 9     | ST_HSDIVIDER_CLKOU<br>T3        | R          | 0h    | HSDIVIDER CLKOUT3 status<br>0h (R) = The clock output is gated<br>1h (R) = The clock output is enabled                                                                                                                                                     |
+| 8     | HSDIVIDER_CLKOUT3_<br>GATE_CTRL | R/W        | 0h    | Control gating of HSDIVIDER CLKOUT3<br>0h (R/W) = Automatically gate this clock when there is no<br>dependency for it<br>1h (R/W) = Force this clock to stay enabled even if there is no<br>request                                                        |
+| 7-6   | RESERVED                        | Rreturns0s | 0h    |                                                                                                                                                                                                                                                            |
+| 5     | HSDIVIDER_CLKOUT3_<br>DIVCHACK  | R          | 0h    | Toggle on this status bit after changing HSDIVIDER_CLKOUT3_DIV<br>indicates that the change in divider value has taken effect                                                                                                                              |
+| 4-0   | HSDIVIDER_CLKOUT3_<br>DIV       | R/W        | 4h    | DPLL post-divider factor, M6, for internal clock generation.<br>Divide values from 1 to 31.<br>0h (R/W) = Reserved                                                                                                                                         |
+
+#### **8.1.12.3 CM\_DPLL Registers**
+
+Table [8-144](#page-179-0) lists the memory-mapped registers for the CM\_DPLL. All register offset addresses not listed in Table [8-144](#page-179-0) should be considered as reserved locations and the register contents should not be modified.
+
+
+### **Table 8-144. CM\_DPLL REGISTERS**
+
+
+| Offset | Acronym                 | Register Name                                                                    | Section             |
+|--------|-------------------------|----------------------------------------------------------------------------------|---------------------|
+| 4h     | CLKSEL_TIMER7_CLK       | Selects the Mux select line for TIMER7 clock [warm<br>reset insensitive]         | Section 8.1.12.3.1  |
+| 8h     | CLKSEL_TIMER2_CLK       | Selects the Mux select line for TIMER2 clock [warm<br>reset insensitive]         | Section 8.1.12.3.2  |
+| Ch     | CLKSEL_TIMER3_CLK       | Selects the Mux select line for TIMER3 clock [warm<br>reset insensitive]         | Section 8.1.12.3.3  |
+| 10h    | CLKSEL_TIMER4_CLK       | Selects the Mux select line for TIMER4 clock [warm<br>reset insensitive]         | Section 8.1.12.3.4  |
+| 14h    | CM_MAC_CLKSEL           | Selects the clock divide ration for MII clock [warm reset<br>insensitive]        | Section 8.1.12.3.5  |
+| 18h    | CLKSEL_TIMER5_CLK       | Selects the Mux select line for TIMER5 clock [warm<br>reset insensitive]         | Section 8.1.12.3.6  |
+| 1Ch    | CLKSEL_TIMER6_CLK       | Selects the Mux select line for TIMER6 clock [warm<br>reset insensitive]         | Section 8.1.12.3.7  |
+| 20h    | CM_CPTS_RFT_CLKSEL      | Selects the Mux select line for CPTS RFT clock [warm<br>reset insensitive]       | Section 8.1.12.3.8  |
+| 28h    | CLKSEL_TIMER1MS_CLK     | Selects the Mux select line for TIMER1 clock [warm<br>reset insensitive]         | Section 8.1.12.3.9  |
+| 2Ch    | CLKSEL_GFX_FCLK         | Selects the divider value for GFX clock [warm reset<br>insensitive]              | Section 8.1.12.3.10 |
+| 30h    | CLKSEL_PRU_ICSS_OCP_CLK | Controls the Mux select line for PRU-ICSS OCP clock<br>[warm reset insensitive]  | Section 8.1.12.3.11 |
+| 34h    | CLKSEL_LCDC_PIXEL_CLK   | Controls the Mux select line for LCDC PIXEL clock<br>[warm reset insensitive]    | Section 8.1.12.3.12 |
+| 38h    | CLKSEL_WDT1_CLK         | Selects the Mux select line for Watchdog1 clock [warm<br>reset insensitive]      | Section 8.1.12.3.13 |
+| 3Ch    | CLKSEL_GPIO0_DBCLK      | Selects the Mux select line for GPIO0 debounce clock<br>[warm reset insensitive] | Section 8.1.12.3.14 |
+|        |                         |                                                                                  |                     |
+
+
+### *8.1.12.3.1 CLKSEL\_TIMER7\_CLK Register (offset = 4h) [reset = 1h]*
+
+CLKSEL\_TIMER7\_CLK is shown in [Figure](#page-180-1) 8-140 and described in Table [8-145.](#page-180-2)
+
+Selects the Mux select line for TIMER7 clock [warm reset insensitive]
+
+#### **Figure 8-140. CLKSEL\_TIMER7\_CLK Register**
+
+
+LEGEND: R/W = Read/Write; R = Read only; W1toCl = Write 1 to clear bit; *-n* = value after reset
+
+#### **Table 8-145. CLKSEL\_TIMER7\_CLK Register Field Descriptions**
+
+
+| Bit  | Field    | Type | Reset | Description                                                                                                                                                                                                      |
+|------|----------|------|-------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-2 | Reserved | R    | 0h    |                                                                                                                                                                                                                  |
+| 1-0  | CLKSEL   | R/W  | 1h    | Selects the Mux select line for TIMER7 clock [warm reset insensitive]<br>0x0 = SEL1 : Select TCLKIN clock<br>0x1 = SEL2 : Select CLK_M_OSC clock<br>0x2 = SEL3 : Select CLK_32KHZ clock<br>0x3 = SEL4 : Reserved |
+
+
+### *8.1.12.3.2 CLKSEL\_TIMER2\_CLK Register (offset = 8h) [reset = 1h]*
+
+CLKSEL\_TIMER2\_CLK is shown in [Figure](#page-181-1) 8-141 and described in Table [8-146.](#page-181-2)
+
+Selects the Mux select line for TIMER2 clock [warm reset insensitive]
+
+
+#### **Table 8-146. CLKSEL\_TIMER2\_CLK Register Field Descriptions**
+
+
+| Bit  | Field    | Type | Reset | Description                                                                                                                                                                                                      |
+|------|----------|------|-------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-2 | Reserved | R    | 0h    |                                                                                                                                                                                                                  |
+| 1-0  | CLKSEL   | R/W  | 1h    | Selects the Mux select line for TIMER2 clock [warm reset insensitive]<br>0x0 = SEL1 : Select TCLKIN clock<br>0x1 = SEL2 : Select CLK_M_OSC clock<br>0x2 = SEL3 : Select CLK_32KHZ clock<br>0x3 = SEL4 : Reserved |
+
+
+### *8.1.12.3.3 CLKSEL\_TIMER3\_CLK Register (offset = Ch) [reset = 1h]*
+
+CLKSEL\_TIMER3\_CLK is shown in [Figure](#page-182-1) 8-142 and described in Table [8-147.](#page-182-2)
+
+Selects the Mux select line for TIMER3 clock [warm reset insensitive]
+
+#### **Table 8-147. CLKSEL\_TIMER3\_CLK Register Field Descriptions**
+
+
+| Bit  | Field    | Type | Reset | Description                                                                                                                                                                                                      |
+|------|----------|------|-------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-2 | Reserved | R    | 0h    |                                                                                                                                                                                                                  |
+| 1-0  | CLKSEL   | R/W  | 1h    | Selects the Mux select line for TIMER3 clock [warm reset insensitive]<br>0x0 = SEL1 : Select TCLKIN clock<br>0x1 = SEL2 : Select CLK_M_OSC clock<br>0x2 = SEL3 : Select CLK_32KHZ clock<br>0x3 = SEL4 : Reserved |
+
+
+# *8.1.12.3.4 CLKSEL\_TIMER4\_CLK Register (offset = 10h) [reset = 1h]*
+
+CLKSEL\_TIMER4\_CLK is shown in [Figure](#page-183-1) 8-143 and described in Table [8-148.](#page-183-2)
+
+Selects the Mux select line for TIMER4 clock [warm reset insensitive]
+
+
+#### **Table 8-148. CLKSEL\_TIMER4\_CLK Register Field Descriptions**
+
+
+| Bit  | Field    | Type | Reset | Description                                                                                                                                                                                                      |
+|------|----------|------|-------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-2 | Reserved | R    | 0h    |                                                                                                                                                                                                                  |
+| 1-0  | CLKSEL   | R/W  | 1h    | Selects the Mux select line for TIMER4 clock [warm reset insensitive]<br>0x0 = SEL1 : Select TCLKIN clock<br>0x1 = SEL2 : Select CLK_M_OSC clock<br>0x2 = SEL3 : Select CLK_32KHZ clock<br>0x3 = SEL4 : Reserved |
+
+
+# *8.1.12.3.5 CM\_MAC\_CLKSEL Register (offset = 14h) [reset = 4h]*
+
+CM\_MAC\_CLKSEL is shown in [Figure](#page-184-1) 8-144 and described in Table [8-149](#page-184-2).
+
+Selects the clock divide ration for MII clock [warm reset insensitive]
+
+
+#### **Table 8-149. CM\_MAC\_CLKSEL Register Field Descriptions**
+
+
+| Bit  | Field       | Type | Reset | Description                                                                                                                                                                                             |
+|------|-------------|------|-------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-3 | Reserved    | R    | 0h    |                                                                                                                                                                                                         |
+| 2    | MII_CLK_SEL | R/W  | 1h    | MII Clock Divider Selection.<br>This bit is warm reset insensitive when CPSW RESET_ISO is<br>enabled<br>0x0 = SEL0 : Selects 1/2 divider of SYSCLK2<br>0x1 = SEL1 : Selects 1/5 divide ratio of SYSCLK2 |
+| 1-0  | Reserved    | R    | 0h    |                                                                                                                                                                                                         |
+
+
+# *8.1.12.3.6 CLKSEL\_TIMER5\_CLK Register (offset = 18h) [reset = 1h]*
+
+CLKSEL\_TIMER5\_CLK is shown in [Figure](#page-185-1) 8-145 and described in Table [8-150.](#page-185-2)
+
+Selects the Mux select line for TIMER5 clock [warm reset insensitive]
+
+#### **Table 8-150. CLKSEL\_TIMER5\_CLK Register Field Descriptions**
+
+
+| Bit  | Field    | Type | Reset | Description                                                                                                                                                                                                      |
+|------|----------|------|-------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-2 | Reserved | R    | 0h    |                                                                                                                                                                                                                  |
+| 1-0  | CLKSEL   | R/W  | 1h    | Selects the Mux select line for TIMER5 clock [warm reset insensitive]<br>0x0 = SEL1 : Select TCLKIN clock<br>0x1 = SEL2 : Select CLK_M_OSC clock<br>0x2 = SEL3 : Select CLK_32KHZ clock<br>0x3 = SEL4 : Reserved |
+
+
+### *8.1.12.3.7 CLKSEL\_TIMER6\_CLK Register (offset = 1Ch) [reset = 1h]*
+
+CLKSEL\_TIMER6\_CLK is shown in [Figure](#page-186-1) 8-146 and described in Table [8-151.](#page-186-2)
+
+Selects the Mux select line for TIMER6 clock [warm reset insensitive]
+
+
+#### **Table 8-151. CLKSEL\_TIMER6\_CLK Register Field Descriptions**
+
+
+| Bit  | Field    | Type | Reset | Description                                                                                                                                                                                                      |
+|------|----------|------|-------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-2 | Reserved | R    | 0h    |                                                                                                                                                                                                                  |
+| 1-0  | CLKSEL   | R/W  | 1h    | Selects the Mux select line for TIMER6 clock [warm reset insensitive]<br>0x0 = SEL1 : Select TCLKIN clock<br>0x1 = SEL2 : Select CLK_M_OSC clock<br>0x2 = SEL3 : Select CLK_32KHZ clock<br>0x3 = SEL4 : Reserved |
+
+
+# *8.1.12.3.8 CM\_CPTS\_RFT\_CLKSEL Register (offset = 20h) [reset = 0h]*
+
+CM\_CPTS\_RFT\_CLKSEL is shown in [Figure](#page-187-1) 8-147 and described in Table [8-152.](#page-187-2)
+
+Selects the Mux select line for CPTS RFT clock [warm reset insensitive]
+
+#### **Table 8-152. CM\_CPTS\_RFT\_CLKSEL Register Field Descriptions**
+
+
+| Bit  | Field    | Type | Reset | Description                                                                                                                                              |
+|------|----------|------|-------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-3 | Reserved | R    | 0h    |                                                                                                                                                          |
+| 2    | Reserved | R    | 0h    |                                                                                                                                                          |
+| 1    | Reserved | R    | 0h    |                                                                                                                                                          |
+| 0    | CLKSEL   | R/W  | 0h    | Selects the Mux select line for cpgmac rft clock [warm reset<br>insensitive]<br>0x0 = SEL1 : Selects CORE_CLKOUTM5<br>0x1 = SEL2 : Selects CORE_CLKOUTM4 |
+
+
+### *8.1.12.3.9 CLKSEL\_TIMER1MS\_CLK Register (offset = 28h) [reset = 0h]*
+
+CLKSEL\_TIMER1MS\_CLK is shown in [Figure](#page-188-1) 8-148 and described in Table [8-153.](#page-188-2)
+
+Selects the Mux select line for TIMER1 clock [warm reset insensitive]
+
+#### **Table 8-153. CLKSEL\_TIMER1MS\_CLK Register Field Descriptions**
+
+
+| Bit  | Field    | Type | Reset | Description                                                                   |
+|------|----------|------|-------|-------------------------------------------------------------------------------|
+| 31-3 | Reserved | R    | 0h    |                                                                               |
+| 2-0  | CLKSEL   | R/W  | 0h    | Selects the Mux select line for DMTIMER_1MS clock [warm reset<br>insensitive] |
+|      |          |      |       | 0x0 = SEL1 : Select CLK_M_OSC clock                                           |
+|      |          |      |       | 0x1 = SEL2 : Select CLK_32KHZ clock                                           |
+|      |          |      |       | 0x2 = SEL3 : Select TCLKIN clock                                              |
+|      |          |      |       | 0x3 = SEL4 : Select CLK_RC32K clock                                           |
+|      |          |      |       | 0x4 = SEL5 : Selects the CLK_32768 from 32KHz Crystal Osc                     |
+
+
+# *8.1.12.3.10 CLKSEL\_GFX\_FCLK Register (offset = 2Ch) [reset = 0h]*
+
+CLKSEL\_GFX\_FCLK is shown in [Figure](#page-189-1) 8-149 and described in Table [8-154.](#page-189-2)
+
+Selects the divider value for GFX clock [warm reset insensitive]
+
+
+#### **Table 8-154. CLKSEL\_GFX\_FCLK Register Field Descriptions**
+
+
+| Bit  | Field               | Type | Reset | Description                                                                                                                                                                    |
+|------|---------------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-2 | Reserved            | R    | 0h    |                                                                                                                                                                                |
+| 1    | CLKSEL_GFX_FCLK     | R/W  | 0h    | Selects the clock on gfx fclk [warm reset insensitive]<br>0x0 = SEL0 : SGX FCLK is from CORE PLL (same as L3 clock)<br>0x1 = SEL1 : SGX FCLK is from PER PLL (192 MHz clock)   |
+| 0    | CLKDIV_SEL_GFX_FCLK | R/W  | 0h    | Selects the divider value on gfx fclk [warm reset insensitive]<br>0x0 = DIV1 : SGX FCLK is same as L3 Clock or 192MHz Clock<br>0x1 = DIV2 : SGX FCLK is L3 clock/2 or 192Mhz/2 |
+
+
+# *8.1.12.3.11 CLKSEL\_PRU\_ICSS\_OCP\_CLK Register (offset = 30h) [reset = 0h]*
+
+CLKSEL\_PRU\_ICSS\_OCP\_CLK is shown in [Figure](#page-190-1) 8-150 and described in Table [8-155](#page-190-2).
+
+Controls the Mux select line for PRU-ICSS OCP clock [warm reset insensitive]
+
+#### **Table 8-155. CLKSEL\_PRU\_ICSS\_OCP\_CLK Register Field Descriptions**
+
+
+| Bit  | Field    | Type | Reset | Description                                                                                                                                                             |
+|------|----------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-1 | Reserved | R    | 0h    |                                                                                                                                                                         |
+| 0    | CLKSEL   | R/W  | 0h    | Controls Mux Select of PRU-ICSS OCP clock mux<br>0x0 = SEL1 : Select L3F clock as OCP Clock of PRU-ICSS<br>0x1 = SEL2 : Select DISP DPLL clock as OCP clock of PRU-ICSS |
+
+
+### *8.1.12.3.12 CLKSEL\_LCDC\_PIXEL\_CLK Register (offset = 34h) [reset = 0h]*
+
+CLKSEL\_LCDC\_PIXEL\_CLK is shown in [Figure](#page-191-1) 8-151 and described in Table [8-156](#page-191-2).
+
+Controls the Mux select line for LCDC PIXEL clock [warm reset insensitive]
+
+
+
+#### **Table 8-156. CLKSEL\_LCDC\_PIXEL\_CLK Register Field Descriptions**
+
+
+| Bit  | Field    | Type | Reset | Description                                                                                                                                                                                    |
+|------|----------|------|-------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-2 | Reserved | R    | 0h    |                                                                                                                                                                                                |
+| 1-0  | CLKSEL   | R/W  | 0h    | Controls the Mux Select of LCDC PIXEL clock<br>0x0 = SEL1 : Select DISP PLL CLKOUTM2<br>0x1 = SEL2 : Select CORE PLL CLKOUTM5<br>0x2 = SEL3 : Select PER PLL CLKOUTM2<br>0x3 = SEL4 : Reserved |
+
+
+### *8.1.12.3.13 CLKSEL\_WDT1\_CLK Register (offset = 38h) [reset = 1h]*
+
+CLKSEL\_WDT1\_CLK is shown in [Figure](#page-192-1) 8-152 and described in Table [8-157](#page-192-2).
+
+Selects the Mux select line for Watchdog1 clock [warm reset insensitive]
+
+#### **Table 8-157. CLKSEL\_WDT1\_CLK Register Field Descriptions**
+
+
+| Bit  | Field    | Type | Reset | Description                                                                                                                                                                   |
+|------|----------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-1 | Reserved | R    | 0h    |                                                                                                                                                                               |
+| 0    | CLKSEL   | R/W  | 1h    | Selects the Mux select line for WDT1 clock [warm reset insensitive]<br>0x0 = SEL1 : Select 32KHZ clock from RC Oscillator<br>0x1 = SEL2 : Select 32KHZ from 32K Clock divider |
+
+
+### *8.1.12.3.14 CLKSEL\_GPIO0\_DBCLK Register (offset = 3Ch) [reset = 0h]*
+
+CLKSEL\_GPIO0\_DBCLK is shown in [Figure](#page-193-1) 8-153 and described in Table [8-158](#page-193-2).
+
+Selects the Mux select line for GPIO0 debounce clock [warm reset insensitive]
+
+
+#### **Table 8-158. CLKSEL\_GPIO0\_DBCLK Register Field Descriptions**
+
+
+| Bit  | Field    | Type | Reset | Description                                                                                                                                                                                                                                     |
+|------|----------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-2 | Reserved | R    | 0h    |                                                                                                                                                                                                                                                 |
+| 1-0  | CLKSEL   | R/W  | 0h    | Selects the Mux select line for GPIO0 debounce clock [warm reset<br>insensitive]<br>0x0 = SEL1 : Select 32KHZ clock from RC Oscillator<br>0x1 = SEL2 : Select 32KHZ from 32K Crystal Oscillator<br>0x2 = SEL3 : Select 32KHz from Clock Divider |
+
+### **8.1.12.4 CM\_MPU Registers**
+
+Table [8-159](#page-193-3) lists the memory-mapped registers for the CM\_MPU. All register offset addresses not listed in Table [8-159](#page-193-3) should be considered as reserved locations and the register contents should not be modified.
+
+#### **Table 8-159. CM\_MPU REGISTERS**
+
+
+| Offset | Acronym            | Register Name                                                                                                                                                                                                                         | Section            |
+|--------|--------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------|
+| 0h     | CM_MPU_CLKSTCTRL   | This register enables the domain power state transition.<br>It controls the SW supervised clock domain state<br>transition between ON-ACTIVE and ON-INACTIVE<br>states.<br>It also hold one status bit per clock input of the domain. | Section 8.1.12.4.1 |
+| 4h     | CM_MPU_MPU_CLKCTRL | This register manages the MPU clocks.                                                                                                                                                                                                 | Section 8.1.12.4.2 |
+
+
+### *8.1.12.4.1 CM\_MPU\_CLKSTCTRL Register (offset = 0h) [reset = 6h]*
+
+CM\_MPU\_CLKSTCTRL is shown in [Figure](#page-194-1) 8-154 and described in Table [8-160](#page-194-2).
+
+This register enables the domain power state transition. It controls the SW supervised clock domain state transition between ON-ACTIVE and ON-INACTIVE states. It also hold one status bit per clock input of the domain.
+
+
+### **Table 8-160. CM\_MPU\_CLKSTCTRL Register Field Descriptions**
+
+
+| Bit  | Field               | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                               |
+|------|---------------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-3 | Reserved            | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                           |
+| 2    | CLKACTIVITY_MPU_CLK | R    | 1h    | This field indicates the state of the MPU Clock<br>0x0 = Inact : Corresponding clock is gated<br>0x1 = Act : Corresponding clock is active                                                                                                                                                                                                                                                |
+| 1-0  | CLKTRCTRL           | R/W  | 2h    | Controls the clock state transition of the MPU clock domains.<br>0x0 = NO_SLEEP : NO_SLEEP: Sleep transition cannot be initiated.<br>Wakeup transition may however occur.<br>0x1 = SW_SLEEP : SW_SLEEP: Start a software forced sleep<br>transition on the domain.<br>0x2 = SW_WKUP : SW_WKUP: Start a software forced wake-up<br>transition on the domain.<br>0x3 = Reserved : Reserved. |
+
+
+### *8.1.12.4.2 CM\_MPU\_MPU\_CLKCTRL Register (offset = 4h) [reset = 2h]*
+
+CM\_MPU\_MPU\_CLKCTRL is shown in [Figure](#page-195-1) 8-155 and described in Table [8-161](#page-195-2).
+
+This register manages the MPU clocks.
+
+
+
+#### **Table 8-161. CM\_MPU\_MPU\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |  |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--|
+| 31-19 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |  |
+| 18    | STBYST     | R    | 0h    | Module standby status.<br>0x0 = Func : Module is functional (not in standby)<br>0x1 = Standby : Module is in standby                                                                                                                                                                                                                                                                                                                                                                                                                                               |  |
+| 17-16 | IDLEST     | R    | 0h    | Module idle status.<br>0x0 = Func : Module is fully functional, including OCP<br>0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion<br>0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock<br>0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                 |  |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |  |
+| 1-0   | MODULEMODE | R/W  | 2h    | Control the way mandatory clocks are managed.<br>0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).<br>0x1 = RESERVED_1 : Reserved<br>0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |  |
+
+#### **8.1.12.5 CM\_DEVICE Registers**
+
+Table [8-162](#page-195-3) lists the memory-mapped registers for the CM\_DEVICE. All register offset addresses not listed in Table [8-162](#page-195-3) should be considered as reserved locations and the register contents should not be modified.
+
+**Table 8-162. CM\_DEVICE REGISTERS**
+
+
+| Offset | Acronym        | Register Name                                          | Section            |
+|--------|----------------|--------------------------------------------------------|--------------------|
+| 0h     | CM_CLKOUT_CTRL | This register provides the control over CLKOUT2 output | Section 8.1.12.5.1 |
+
+
+### *8.1.12.5.1 CM\_CLKOUT\_CTRL Register (offset = 0h) [reset = 0h]*
+
+CM\_CLKOUT\_CTRL is shown in [Figure](#page-197-1) 8-156 and described in Table [8-163](#page-197-2).
+
+This register provides the control over CLKOUT2 output
+
+
+#### **Table 8-163. CM\_CLKOUT\_CTRL Register Field Descriptions**
+
+
+| Bit  | Field         | Type | Reset | Description                                                                                                                                                                                                                                                                               |
+|------|---------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-8 | Reserved      | R    | 0h    |                                                                                                                                                                                                                                                                                           |
+| 7    | CLKOUT2EN     | R/W  | 0h    | This bit controls the external clock activity<br>0x0 = DIS : SYS_CLKOUT2 is disabled<br>0x1 = EN : SYS_CLKOUT2 is enabled                                                                                                                                                                 |
+| 6    | Reserved      | R    | 0h    |                                                                                                                                                                                                                                                                                           |
+| 5-3  | CLKOUT2DIV    | R/W  | 0h    | THis field controls the external clock divison factor<br>0x0 = DIV1 : SYS_CLKOUT2/1<br>0x1 = DIV2 : SYS_CLKOUT2/2<br>0x2 = DIV3 : SYS_CLKOUT2/3<br>0x3 = DIV4 : SYS_CLKOUT2/4<br>0x4 = DIV5 : SYS_CLKOUT2/5<br>0x5 = DIV6 : SYS_CLKOUT2/6<br>0x6 = DIV7 : SYS_CLKOUT2/7<br>0x7 = Reserved |
+| 2-0  | CLKOUT2SOURCE | R/W  | 0h    | This field selects the external output clock source<br>0x0 = SEL0 : Select 32KHz Oscillator O/P<br>0x1 = SEL1 : Select L3 Clock<br>0x2 = SEL2 : Select DDR PHY Clock<br>0x3 = SEL4 : Select 192Mhz clock from PER PLL<br>0x4 = SEL5 : Select LCD Pixel Clock                              |
+
+#### **8.1.12.6 CM\_RTC Registers**
+
+Table [8-164](#page-198-0) lists the memory-mapped registers for the CM\_RTC. All register offset addresses not listed in Table [8-164](#page-198-0) should be considered as reserved locations and the register contents should not be modified.
+
+
+#### **Table 8-164. CM\_RTC REGISTERS**
+
+| Offset | Acronym            | Register Name                                                                                                                                                                                                                         | Section            |
+|--------|--------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------|
+| 0h     | CM_RTC_RTC_CLKCTRL | This register manages the RTC clocks.                                                                                                                                                                                                 | Section 8.1.12.6.1 |
+| 4h     | CM_RTC_CLKSTCTRL   | This register enables the domain power state transition.<br>It controls the SW supervised clock domain state<br>transition between ON-ACTIVE and ON-INACTIVE<br>states.<br>It also hold one status bit per clock input of the domain. | Section 8.1.12.6.2 |
+
+
+### *8.1.12.6.1 CM\_RTC\_RTC\_CLKCTRL Register (offset = 0h) [reset = 30002h]*
+
+CM\_RTC\_RTC\_CLKCTRL is shown in [Figure](#page-199-1) 8-157 and described in Table [8-165.](#page-199-2)
+
+This register manages the RTC clocks.
+
+
+#### **Table 8-165. CM\_RTC\_RTC\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                       |
+|-------|------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-19 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 18    | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                                               |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                                                            |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                                             |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                                       |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                                                         |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 1-0   | MODULEMODE | R/W  | 2h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                                     |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                                                     |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                                                       |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+### *8.1.12.6.2 CM\_RTC\_CLKSTCTRL Register (offset = 4h) [reset = 102h]*
+
+CM\_RTC\_CLKSTCTRL is shown in [Figure](#page-200-1) 8-158 and described in Table [8-166.](#page-200-2)
+
+This register enables the domain power state transition. It controls the SW supervised clock domain state transition between ON-ACTIVE and ON-INACTIVE states. It also hold one status bit per clock input of the domain.
+
+### **Table 8-166. CM\_RTC\_CLKSTCTRL Register Field Descriptions**
+
+R-0h R/W-2h
+
+
+| Bit   | Field                       | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                               |
+|-------|-----------------------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-26 | Reserved                    | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                           |
+| 25-11 | Reserved                    | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                           |
+| 10    | Reserved                    | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                           |
+| 9     | CLKACTIVITY_RTC_32K<br>CLK  | R    | 0h    | This field indicates the state of the 32K RTC clock in the domain.<br>0x0 = Inact<br>0x1 = Act                                                                                                                                                                                                                                                                                            |
+| 8     | CLKACTIVITY_L4_RTC_<br>GCLK | R    | 1h    | This field indicates the state of the L4 RTC clock in the domain.<br>0x0 = Inact : Corresponding clock is gated<br>0x1 = Act : Corresponding clock is active                                                                                                                                                                                                                              |
+| 7-2   | Reserved                    | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                           |
+| 1-0   | CLKTRCTRL                   | R/W  | 2h    | Controls the clock state transition of the RTC clock domains.<br>0x0 = NO_SLEEP : NO_SLEEP: Sleep transition cannot be initiated.<br>Wakeup transition may however occur.<br>0x1 = SW_SLEEP : SW_SLEEP: Start a software forced sleep<br>transition on the domain.<br>0x2 = SW_WKUP : SW_WKUP: Start a software forced wake-up<br>transition on the domain.<br>0x3 = Reserved : Reserved. |
+
+#### **8.1.12.7 CM\_GFX Registers**
+
+Table [8-167](#page-201-0) lists the memory-mapped registers for the CM\_GFX. All register offset addresses not listed in Table [8-167](#page-201-0) should be considered as reserved locations and the register contents should not be modified.
+
+
+#### **Table 8-167. CM\_GFX REGISTERS**
+
+
+| Offset | Acronym                       | Register Name                                                                                                                                                                                                                         | Section            |
+|--------|-------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------|
+| 0h     | CM_GFX_L3_CLKSTCTRL           | This register enables the domain power state transition.<br>It controls the SW supervised clock domain state<br>transition between ON-ACTIVE and ON-INACTIVE<br>states.<br>It also hold one status bit per clock input of the domain. | Section 8.1.12.7.1 |
+| 4h     | CM_GFX_GFX_CLKCTRL            | This register manages the GFX clocks.                                                                                                                                                                                                 | Section 8.1.12.7.2 |
+| Ch     | CM_GFX_L4LS_GFX_CLKSTCTR<br>L | This register enables the domain power state transition.<br>It controls the SW supervised clock domain state<br>transition between ON-ACTIVE and ON-INACTIVE<br>states.<br>It also hold one status bit per clock input of the domain. | Section 8.1.12.7.3 |
+| 10h    | CM_GFX_MMUCFG_CLKCTRL         | This register manages the MMU CFG clocks.                                                                                                                                                                                             | Section 8.1.12.7.4 |
+| 14h    | CM_GFX_MMUDATA_CLKCTRL        | This register manages the MMU clocks.                                                                                                                                                                                                 | Section 8.1.12.7.5 |
+
+
+### *8.1.12.7.1 CM\_GFX\_L3\_CLKSTCTRL Register (offset = 0h) [reset = 2h]*
+
+CM\_GFX\_L3\_CLKSTCTRL is shown in [Figure](#page-202-1) 8-159 and described in Table [8-168](#page-202-2).
+
+This register enables the domain power state transition. It controls the SW supervised clock domain state transition between ON-ACTIVE and ON-INACTIVE states. It also hold one status bit per clock input of the domain.
+
+
+| 31 | 30 | 29       | 28        | 27       | 26 | 25                       | 24                          |
+|----|----|----------|-----------|----------|----|--------------------------|-----------------------------|
+|    |    | Reserved |           |          |    |                          | Reserved                    |
+|    |    | R-0h     |           |          |    |                          | R-0h                        |
+| 23 | 22 | 21       | 20        | 19       | 18 | 17                       | 16                          |
+|    |    |          |           | Reserved |    |                          |                             |
+|    |    |          |           | R-0h     |    |                          |                             |
+| 15 | 14 | 13       | 12        | 11       | 10 | 9                        | 8                           |
+|    |    | Reserved |           |          |    | CLKACTIVITY_<br>GFX_FCLK | CLKACTIVITY_<br>GFX_L3_GCLK |
+|    |    | R-0h     |           |          |    | R-0h                     | R-0h                        |
+| 7  | 6  | 5        | 4         | 3        | 2  | 1                        | 0                           |
+|    |    |          | CLKTRCTRL |          |    |                          |                             |
+|    |    | R-0h     |           |          |    |                          | R/W-2h                      |
+
+LEGEND: R/W = Read/Write; R = Read only; W1toCl = Write 1 to clear bit; *-n* = value after reset
+
+### **Table 8-168. CM\_GFX\_L3\_CLKSTCTRL Register Field Descriptions**
+
+
+| Bit   | Field                       | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                                     |
+|-------|-----------------------------|------|-------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-26 | Reserved                    | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 25-10 | Reserved                    | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 9     | CLKACTIVITY_GFX_FCL<br>K    | R    | 0h    | This field indicates the state of the GFX_GCLK clock in the domain.<br>0x0 = Inact : Corresponding clock is gated<br>0x1 = Act : Corresponding clock is active                                                                                                                                                                                                                                                  |
+| 8     | CLKACTIVITY_GFX_L3_<br>GCLK | R    | 0h    | This field indicates the state of the GFX_L3_GCLK clock in the<br>domain.<br>0x0 = Inact : Corresponding clock is gated<br>0x1 = Act : Corresponding clock is active                                                                                                                                                                                                                                            |
+| 7-2   | Reserved                    | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| 1-0   | CLKTRCTRL                   | R/W  | 2h    | Controls the clock state transition of the GFX clock domain in GFX<br>power domain.<br>0x0 = NO_SLEEP : NO_SLEEP: Sleep transition cannot be initiated.<br>Wakeup transition may however occur.<br>0x1 = SW_SLEEP : SW_SLEEP: Start a software forced sleep<br>transition on the domain.<br>0x2 = SW_WKUP : SW_WKUP: Start a software forced wake-up<br>transition on the domain.<br>0x3 = Reserved : Reserved. |
+
+
+### *8.1.12.7.2 CM\_GFX\_GFX\_CLKCTRL Register (offset = 4h) [reset = 70000h]*
+
+CM\_GFX\_GFX\_CLKCTRL is shown in [Figure](#page-203-1) 8-160 and described in Table [8-169](#page-203-2).
+
+This register manages the GFX clocks.
+
+#### **Table 8-169. CM\_GFX\_GFX\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-19 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 18    | STBYST     | R    | 1h    | Module standby status.<br>0x0 = Func : Module is functional (not in standby)<br>0x1 = Standby : Module is in standby                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.<br>0x0 = Func : Module is fully functional, including OCP<br>0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion<br>0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock<br>0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                 |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.<br>0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).<br>0x1 = RESERVED_1 : Reserved<br>0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+### *8.1.12.7.3 CM\_GFX\_L4LS\_GFX\_CLKSTCTRL Register (offset = Ch) [reset = 102h]*
+
+CM\_GFX\_L4LS\_GFX\_CLKSTCTRL is shown in [Figure](#page-204-1) 8-161 and described in Table [8-170.](#page-204-2)
+
+This register enables the domain power state transition. It controls the SW supervised clock domain state transition between ON-ACTIVE and ON-INACTIVE states. It also hold one status bit per clock input of the domain.
+
+
+LEGEND: R/W = Read/Write; R = Read only; W1toCl = Write 1 to clear bit; *-n* = value after reset
+
+# **Table 8-170. CM\_GFX\_L4LS\_GFX\_CLKSTCTRL Register Field Descriptions**
+
+
+| Bit  | Field                         | Type | Reset | Description                                                                                              |
+|------|-------------------------------|------|-------|----------------------------------------------------------------------------------------------------------|
+| 31-9 | Reserved                      | R    | 0h    |                                                                                                          |
+| 8    | CLKACTIVITY_L4LS_GF<br>X_GCLK | R    | 1h    | This field indicates the state of the L4_LS clock in the domain.<br>0x0 = Inact<br>0x1 = Act             |
+| 7-2  | Reserved                      | R    | 0h    |                                                                                                          |
+| 1-0  | CLKTRCTRL                     | R/W  | 2h    | Controls the clock state transition of the L4LS clock domain in GFX<br>power domain.                     |
+|      |                               |      |       | 0x0 = NO_SLEEP : NO_SLEEP: Sleep transition cannot be initiated.<br>Wakeup transition may however occur. |
+|      |                               |      |       | 0x1 = SW_SLEEP : SW_SLEEP: Start a software forced sleep<br>transition on the domain.                    |
+|      |                               |      |       | 0x2 = SW_WKUP : SW_WKUP: Start a software forced wake-up<br>transition on the domain.                    |
+|      |                               |      |       | 0x3 = Reserved : Reserved.                                                                               |
+
+
+### *8.1.12.7.4 CM\_GFX\_MMUCFG\_CLKCTRL Register (offset = 10h) [reset = 30000h]*
+
+CM\_GFX\_MMUCFG\_CLKCTRL is shown in [Figure](#page-205-1) 8-162 and described in Table [8-171](#page-205-2).
+
+This register manages the MMU CFG clocks.
+
+#### **Table 8-171. CM\_GFX\_MMUCFG\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                          |
+|-------|------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                  |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                               |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                          |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                            |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                      |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                        |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                        |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                          |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen. |
+|       |            |      |       | 0x3 = RESERVED : Reserved                                                                                                                                                                                                                                                            |
+
+
+### *8.1.12.7.5 CM\_GFX\_MMUDATA\_CLKCTRL Register (offset = 14h) [reset = 30000h]*
+
+CM\_GFX\_MMUDATA\_CLKCTRL is shown in [Figure](#page-206-1) 8-163 and described in Table [8-172.](#page-206-2)
+
+This register manages the MMU clocks.
+
+
+#### **Table 8-172. CM\_GFX\_MMUDATA\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field      | Type | Reset | Description                                                                                                                                                                                                                                                                                                       |
+|-------|------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 17-16 | IDLEST     | R    | 3h    | Module idle status.                                                                                                                                                                                                                                                                                               |
+|       |            |      |       | 0x0 = Func : Module is fully functional, including OCP                                                                                                                                                                                                                                                            |
+|       |            |      |       | 0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                                                                                                                             |
+|       |            |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                                       |
+|       |            |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                                                         |
+| 15-2  | Reserved   | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 1-0   | MODULEMODE | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                                     |
+|       |            |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                                                     |
+|       |            |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                                                       |
+|       |            |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+#### **8.1.12.8 CM\_CEFUSE Registers**
+
+Table [8-173](#page-206-3) lists the memory-mapped registers for the CM\_CEFUSE. All register offset addresses not listed in Table [8-173](#page-206-3) should be considered as reserved locations and the register contents should not be modified.
+
+**Table 8-173. CM\_CEFUSE REGISTERS**
+
+
+| Offset | Acronym             | Register Name                                                                                                                                                                                                                         | Section            |
+|--------|---------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------|
+| 0h     | CM_CEFUSE_CLKSTCTRL | This register enables the domain power state transition.<br>It controls the HW supervised domain power state<br>transition between ON-ACTIVE and ON-INACTIVE<br>states.<br>It also hold one status bit per clock input of the domain. | Section 8.1.12.8.1 |
+
+
+# **Table 8-173. CM\_CEFUSE REGISTERS (continued)**
+
+| Offset | Acronym                      | Register Name                            | Section            |
+|--------|------------------------------|------------------------------------------|--------------------|
+| 20h    | CM_CEFUSE_CEFUSE_CLKCTR<br>L | This register manages the CEFUSE clocks. | Section 8.1.12.8.2 |
+
+
+### *8.1.12.8.1 CM\_CEFUSE\_CLKSTCTRL Register (offset = 0h) [reset = 2h]*
+
+CM\_CEFUSE\_CLKSTCTRL is shown in [Figure](#page-208-1) 8-164 and described in Table [8-174.](#page-208-2)
+
+This register enables the domain power state transition. It controls the HW supervised domain power state transition between ON-ACTIVE and ON-INACTIVE states. It also hold one status bit per clock input of the domain.
+
+
+
+#### **Table 8-174. CM\_CEFUSE\_CLKSTCTRL Register Field Descriptions**
+
+R-0h R/W-2h
+
+
+| Bit   | Field                              | Type | Reset | Description                                                                                                       |
+|-------|------------------------------------|------|-------|-------------------------------------------------------------------------------------------------------------------|
+| 31-10 | Reserved                           | R    | 0h    |                                                                                                                   |
+| 9     | CLKACTIVITY_CUST_EF<br>USE_SYS_CLK | R    | 0h    | This field indicates the state of the Cust_Efuse_SYSCLK clock input<br>of the domain.<br>[warm reset insensitive] |
+|       |                                    |      |       | 0x0 = Inact : Corresponding clock is definitely gated                                                             |
+|       |                                    |      |       | 0x1 = Act : Corresponding clock is running or gating/ungating<br>transition is on-going                           |
+| 8     | CLKACTIVITY_L4_CEFU<br>SE_GICLK    | R    | 0h    | This field indicates the state of the L4_CEFUSE_GCLK clock input of<br>the domain.<br>[warm reset insensitive]    |
+|       |                                    |      |       | 0x0 = Inact : Corresponding clock is definitely gated                                                             |
+|       |                                    |      |       | 0x1 = Act : Corresponding clock is running or gating/ungating<br>transition is on-going                           |
+| 7-2   | Reserved                           | R    | 0h    |                                                                                                                   |
+| 1-0   | CLKTRCTRL                          | R/W  | 2h    | Controls the clock state transition of the clock domain in customer<br>efuse power domain.                        |
+|       |                                    |      |       | 0x0 = NO_SLEEP : NO_SLEEP: Sleep transition cannot be initiated.<br>Wakeup transition may however occur.          |
+|       |                                    |      |       | 0x1 = SW_SLEEP : SW_SLEEP: Start a software forced sleep<br>transition on the domain.                             |
+|       |                                    |      |       | 0x2 = SW_WKUP : SW_WKUP: Start a software forced wake-up<br>transition on the domain.                             |
+|       |                                    |      |       | 0x3 = Reserved : Reserved.                                                                                        |
+
+
+### *8.1.12.8.2 CM\_CEFUSE\_CEFUSE\_CLKCTRL Register (offset = 20h) [reset = 30000h]*
+
+CM\_CEFUSE\_CEFUSE\_CLKCTRL is shown in [Figure](#page-209-1) 8-165 and described in Table [8-175.](#page-209-2) This register manages the CEFUSE clocks.
+
+
+
+**Table 8-175. CM\_CEFUSE\_CEFUSE\_CLKCTRL Register Field Descriptions**
+
+
+| Bit   | Field             | Type | Reset | Description                                                                                                                                                                                                                                                                                                       |
+|-------|-------------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-18 | Reserved          | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 17-16 | IDLEST<br>R<br>3h |      |       | Module idle status.<br>[warm reset insensitive]<br>0x0 = Func : Module is fully functional, including OCP<br>0x1 = Trans : Module is performing transition: wakeup, or sleep, or<br>sleep abortion                                                                                                                |
+|       |                   |      |       | 0x2 = Idle : Module is in Idle mode (only OCP part). It is functional if<br>using separate functional clock                                                                                                                                                                                                       |
+|       |                   |      |       | 0x3 = Disable : Module is disabled and cannot be accessed                                                                                                                                                                                                                                                         |
+| 15-2  | Reserved          | R    | 0h    |                                                                                                                                                                                                                                                                                                                   |
+| 1-0   | MODULEMODE        | R/W  | 0h    | Control the way mandatory clocks are managed.                                                                                                                                                                                                                                                                     |
+|       |                   |      |       | 0x0 = DISABLED : Module is disable by SW. Any OCP access to<br>module results in an error, except if resulting from a module wakeup<br>(asynchronous wakeup).                                                                                                                                                     |
+|       |                   |      |       | 0x1 = RESERVED_1 : Reserved                                                                                                                                                                                                                                                                                       |
+|       |                   |      |       | 0x2 = ENABLE : Module is explicitly enabled. Interface clock (if not<br>used for functions) may be gated according to the clock domain<br>state. Functional clocks are guarantied to stay present. As long as in<br>this configuration, power domain sleep transition cannot happen.<br>0x3 = RESERVED : Reserved |
+
+
+# *8.1.13 Power Management Registers*
+
+# **8.1.13.1 PRM\_IRQ Registers**
+
+Table [8-176](#page-210-0) lists the memory-mapped registers for the PRM\_IRQ. All register offset addresses not listed in Table [8-176](#page-210-0) should be considered as reserved locations and the register contents should not be modified.
+
+### **Table 8-176. PRM\_IRQ REGISTERS**
+
+
+| Offset | Acronym           | Register Name                                                                                                                                                                                                                               | Section            |
+|--------|-------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------|
+| 0h     | REVISION_PRM      | This register contains the IP revision code for the PRCM                                                                                                                                                                                    | Section 8.1.13.1.1 |
+| 4h     | PRM_IRQSTATUS_MPU | This register provides status on MPU interrupt events.<br>An event is logged whether interrupt generation for the<br>event is enabled or not.<br>SW is required to clear a set bit by writing a '1' into the<br>bit-position to be cleared. | Section 8.1.13.1.2 |
+| 8h     | PRM_IRQENABLE_MPU | This register is used to enable and disable events used<br>to trigger MPU interrupt activation.                                                                                                                                             | Section 8.1.13.1.3 |
+| Ch     | PRM_IRQSTATUS_M3  | This register provides status on MPU interrupt events.<br>An event is logged whether interrupt generation for the<br>event is enabled or not.<br>SW is required to clear a set bit by writing a '1' into the<br>bit-position to be cleared. | Section 8.1.13.1.4 |
+| 10h    | PRM_IRQENABLE_M3  | This register is used to enable and disable events used<br>to trigger MPU interrupt activation.                                                                                                                                             | Section 8.1.13.1.5 |
+
+
+### *8.1.13.1.1 REVISION\_PRM Register (offset = 0h) [reset = 0h]*
+
+REVISION\_PRM is shown in [Figure](#page-211-1) 8-166 and described in Table [8-177.](#page-211-2)
+
+This register contains the IP revision code for the PRCM
+
+#### **Table 8-177. REVISION\_PRM Register Field Descriptions**
+
+
+| Bit  | Field    | Type | Reset | Description                                                                                        |
+|------|----------|------|-------|----------------------------------------------------------------------------------------------------|
+| 31-8 | Reserved | R    | 0h    | Reads returns 0.                                                                                   |
+| 7-0  | Rev      | R    | 0h    | IP revision [<br>7:4] Major revision [<br>3:0] Minor revision Examples: 0x10 for 1.0, 0x21 for 2.1 |
+
+
+### *8.1.13.1.2 PRM\_IRQSTATUS\_MPU Register (offset = 4h) [reset = 0h]*
+
+PRM\_IRQSTATUS\_MPU is shown in [Figure](#page-212-1) 8-167 and described in Table [8-178.](#page-212-2)
+
+This register provides status on MPU interrupt events. An event is logged whether interrupt generation for the event is enabled or not. SW is required to clear a set bit by writing a '1' into the bit-position to be cleared.
+
+### **Table 8-178. PRM\_IRQSTATUS\_MPU Register Field Descriptions**
+
+
+| Bit   | Field              | Type | Reset | Description                                                                                                                                         |
+|-------|--------------------|------|-------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-16 | Reserved           | R    | 0h    |                                                                                                                                                     |
+| 15    | dpll_per_recal_st  | R/W  | 0h    | interrupt status for usb dpll recaliberation<br>0 = DIS : Disables dpll recaliberation<br>1 = EN : ENAbles dpll recaliberation                      |
+| 14    | dpll_ddr_recal_st  | R/W  | 0h    | interrupt status for ddr dpll recaliberation<br>0 = DIS : Disables dpll recaliberation<br>1 = EN : ENAbles dpll recaliberation                      |
+| 13    | dpll_disp_recal_st | R/W  | 0h    | interrupt status for disp dpll recaliberation<br>0 = DIS : Disables dpll recaliberation<br>1 = EN : ENAbles dpll recaliberation                     |
+| 12    | dpll_core_recal_st | R/W  | 0h    | interrupt status for core dpll recaliberation<br>0 = DIS : Disables dpll recaliberation<br>1 = EN : ENAbles dpll recaliberation                     |
+| 11    | dpll_mpu_recal_st  | R/W  | 0h    | interrupt status for mpu dpll recaliberation<br>0 = DIS : Disables dpll recaliberation<br>1 = EN : ENAbles dpll recaliberation                      |
+| 10    | ForceWkup_st       | R/W  | 0h    | Software supervised wakeup completed event interrupt status<br>0 = IRQ_fal : No interrupt<br>1 = IRQ_tru : Interrupt is pending                     |
+| 9     | Reserved           | R    | 0h    |                                                                                                                                                     |
+| 8     | Transition_st      | R/W  | 0h    | Software supervised transition completed event interrupt status (any<br>domain)<br>0 = IRQ_fal : No interrupt<br>1 = IRQ_tru : Interrupt is pending |
+| 7-0   | Reserved           | R    | 0h    |                                                                                                                                                     |
+
+
+### *8.1.13.1.3 PRM\_IRQENABLE\_MPU Register (offset = 8h) [reset = 0h]*
+
+PRM\_IRQENABLE\_MPU is shown in [Figure](#page-213-1) 8-168 and described in Table [8-179.](#page-213-2)
+
+This register is used to enable and disable events used to trigger MPU interrupt activation.
+
+
+#### **Table 8-179. PRM\_IRQENABLE\_MPU Register Field Descriptions**
+
+
+| Bit   | Field              | Type | Reset | Description                                                                                                                                               |
+|-------|--------------------|------|-------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-16 | Reserved           | R    | 0h    |                                                                                                                                                           |
+| 15    | dpll_disp_recal_en | R/W  | 0h    | Interrupt enable for disp dpll recaliberation<br>0 = DIS : Disables dpll recaliberation<br>1 = EN : ENAbles dpll recaliberation                           |
+| 14    | dpll_ddr_recal_en  | R/W  | 0h    | Interrupt enable for ddr dpll recaliberation<br>0 = DIS : Disables dpll recaliberation<br>1 = EN : ENAbles dpll recaliberation                            |
+| 13    | dpll_per_recal_en  | R/W  | 0h    | Interrupt enable for usb dpll recaliberation<br>0 = DIS : Disables dpll recaliberation<br>1 = EN : ENAbles dpll recaliberation                            |
+| 12    | dpll_core_recal_en | R/W  | 0h    | Interrupt enable for core dpll recaliberation<br>0 = DIS : Disables dpll recaliberation<br>1 = EN : ENAbles dpll recaliberation                           |
+| 11    | dpll_mpu_recal_en  | R/W  | 0h    | Interrupt enable for mpu dpll recaliberation<br>0 = DIS : Disables dpll recaliberation<br>1 = EN : ENAbles dpll recaliberation                            |
+| 10    | ForceWkup_en       | R/W  | 0h    | Software supervised Froce Wakeup completed event interrupt<br>enable<br>0 = irq_msk : Interrupt is masked<br>1 = irq_en : Interrupt is enabled            |
+| 9     | Reserved           | R    | 0h    |                                                                                                                                                           |
+| 8     | Transition_en      | R/W  | 0h    | Software supervised transition completed event interrupt enable (any<br>domain)<br>0 = irq_msk : Interrupt is masked<br>1 = irq_en : Interrupt is enabled |
+| 7-6   | Reserved           | R    | 0h    |                                                                                                                                                           |
+| 5-1   | Reserved           | R    | 0h    |                                                                                                                                                           |
+| 0     | Reserved           | R    | 0h    |                                                                                                                                                           |
+
+
+### *8.1.13.1.4 PRM\_IRQSTATUS\_M3 Register (offset = Ch) [reset = 0h]*
+
+PRM\_IRQSTATUS\_M3 is shown in [Figure](#page-214-1) 8-169 and described in Table [8-180.](#page-214-2)
+
+This register provides status on MPU interrupt events. An event is logged whether interrupt generation for the event is enabled or not. SW is required to clear a set bit by writing a '1' into the bit-position to be cleared.
+
+
+
+### **Table 8-180. PRM\_IRQSTATUS\_M3 Register Field Descriptions**
+
+
+| Bit   | Field              | Type | Reset | Description                                                                                                                                         |
+|-------|--------------------|------|-------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-16 | Reserved           | R    | 0h    |                                                                                                                                                     |
+| 15    | dpll_per_recal_st  | R/W  | 0h    | interrupt status for usb dpll recaliberation<br>0 = DIS : Disables dpll recaliberation<br>1 = EN : ENAbles dpll recaliberation                      |
+| 14    | dpll_ddr_recal_st  | R/W  | 0h    | interrupt status for ddr dpll recaliberation<br>0 = DIS : Disables dpll recaliberation<br>1 = EN : ENAbles dpll recaliberation                      |
+| 13    | dpll_disp_recal_st | R/W  | 0h    | interrupt status for disp dpll recaliberation<br>0 = DIS : Disables dpll recaliberation<br>1 = EN : ENAbles dpll recaliberation                     |
+| 12    | dpll_core_recal_st | R/W  | 0h    | interrupt status for core dpll recaliberation<br>0 = DIS : Disables dpll recaliberation<br>1 = EN : ENAbles dpll recaliberation                     |
+| 11    | dpll_mpu_recal_st  | R/W  | 0h    | interrupt status for mpu dpll recaliberation<br>0 = DIS : Disables dpll recaliberation<br>1 = EN : ENAbles dpll recaliberation                      |
+| 10    | ForceWkup_st       | R/W  | 0h    | Software supervised wakeup completed event interrupt status<br>0 = IRQ_fal : No interrupt<br>1 = IRQ_tru : Interrupt is pending                     |
+| 9     | Reserved           | R    | 0h    |                                                                                                                                                     |
+| 8     | Transition_st      | R/W  | 0h    | Software supervised transition completed event interrupt status (any<br>domain)<br>0 = IRQ_fal : No interrupt<br>1 = IRQ_tru : Interrupt is pending |
+| 7-0   | Reserved           | R    | 0h    |                                                                                                                                                     |
+
+
+### *8.1.13.1.5 PRM\_IRQENABLE\_M3 Register (offset = 10h) [reset = 0h]*
+
+PRM\_IRQENABLE\_M3 is shown in [Figure](#page-215-1) 8-170 and described in Table [8-181.](#page-215-2)
+
+This register is used to enable and disable events used to trigger MPU interrupt activation.
+
+
+#### **Table 8-181. PRM\_IRQENABLE\_M3 Register Field Descriptions**
+
+
+| Bit   | Field              | Type | Reset | Description                                                                                                                                               |
+|-------|--------------------|------|-------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-16 | Reserved           | R    | 0h    |                                                                                                                                                           |
+| 15    | dpll_disp_recal_en | R/W  | 0h    | Interrupt enable for disp dpll recaliberation<br>0 = DIS : Disables dpll recaliberation<br>1 = EN : ENAbles dpll recaliberation                           |
+| 14    | dpll_ddr_recal_en  | R/W  | 0h    | Interrupt enable for ddr dpll recaliberation<br>0 = DIS : Disables dpll recaliberation<br>1 = EN : ENAbles dpll recaliberation                            |
+| 13    | dpll_per_recal_en  | R/W  | 0h    | Interrupt enable for usb dpll recaliberation<br>0 = DIS : Disables dpll recaliberation<br>1 = EN : ENAbles dpll recaliberation                            |
+| 12    | dpll_core_recal_en | R/W  | 0h    | Interrupt enable for core dpll recaliberation<br>0 = DIS : Disables dpll recaliberation<br>1 = EN : ENAbles dpll recaliberation                           |
+| 11    | dpll_mpu_recal_en  | R/W  | 0h    | Interrupt enable for mpu dpll recaliberation<br>0 = DIS : Disables dpll recaliberation<br>1 = EN : ENAbles dpll recaliberation                            |
+| 10    | ForceWkup_en       | R/W  | 0h    | Software supervised Froce Wakeup completed event interrupt<br>enable<br>0 = irq_msk : Interrupt is masked<br>1 = irq_en : Interrupt is enabled            |
+| 9     | Reserved           | R    | 0h    |                                                                                                                                                           |
+| 8     | Transition_en      | R/W  | 0h    | Software supervised transition completed event interrupt enable (any<br>domain)<br>0 = irq_msk : Interrupt is masked<br>1 = irq_en : Interrupt is enabled |
+| 7-6   | Reserved           | R    | 0h    |                                                                                                                                                           |
+| 5-1   | Reserved           | R    | 0h    |                                                                                                                                                           |
+| 0     | Reserved           | R    | 0h    |                                                                                                                                                           |
+
+
+# **8.1.13.2 PRM\_PER Registers**
+
+Table [8-182](#page-216-0) lists the memory-mapped registers for the PRM\_PER. All register offset addresses not listed in Table [8-182](#page-216-0) should be considered as reserved locations and the register contents should not be modified.
+
+### **Table 8-182. PRM\_PER REGISTERS**
+
+
+| Offset | Acronym          | Register Name                                                                                         | Section            |
+|--------|------------------|-------------------------------------------------------------------------------------------------------|--------------------|
+| 0h     | RM_PER_RSTCTRL   | This register controls the release of the PER Domain<br>resets.                                       | Section 8.1.13.2.1 |
+| 8h     | PM_PER_PWRSTST   | This register provides a status on the current PER power<br>domain state.<br>[warm reset insensitive] | Section 8.1.13.2.2 |
+| Ch     | PM_PER_PWRSTCTRL | Controls the power state of PER power domain                                                          | Section 8.1.13.2.3 |
+
+
+### *8.1.13.2.1 RM\_PER\_RSTCTRL Register (offset = 0h) [reset = 2h]*
+
+RM\_PER\_RSTCTRL is shown in [Figure](#page-217-1) 8-171 and described in Table [8-183](#page-217-2).
+
+This register controls the release of the PER Domain resets.
+
+### **Figure 8-171. RM\_PER\_RSTCTRL Register**
+
+
+LEGEND: R/W = Read/Write; R = Read only; W1toCl = Write 1 to clear bit; *-n* = value after reset
+
+#### **Table 8-183. RM\_PER\_RSTCTRL Register Field Descriptions**
+
+
+| Bit  | Field         | Type | Reset | Description                                                                                                                                     |
+|------|---------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-6 | Reserved      | R    | 0h    |                                                                                                                                                 |
+| 5-3  | Reserved      | R    | 0h    |                                                                                                                                                 |
+| 2    | Reserved      | R    | 0h    |                                                                                                                                                 |
+| 1    | PRU_ICSS_LRST | R/W  | 1h    | PER domain PRU-ICSS local reset control<br>0x0 = CLEAR : Reset is cleared for the PRU-ICSS<br>0x1 = ASSERT : Reset is asserted for the PRU-ICSS |
+| 0    | Reserved      | R    | 0h    |                                                                                                                                                 |
+
+
+### *8.1.13.2.2 PM\_PER\_PWRSTST Register (offset = 8h) [reset = 1E60007h]*
+
+PM\_PER\_PWRSTST is shown in [Figure](#page-218-1) 8-172 and described in Table [8-184.](#page-218-2)
+
+This register provides a status on the current PER power domain state. [warm reset insensitive]
+
+
+### **Table 8-184. PM\_PER\_PWRSTST Register Field Descriptions**
+
+
+| Bit   | Field                | Type | Reset | Description                                                                                                                                                |
+|-------|----------------------|------|-------|------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-25 | Reserved             | R    | 0h    |                                                                                                                                                            |
+| 24-23 | pru_icss_mem_statest | R    | 3h    | PRU-ICSS memory state status<br>0x0 = Mem_off : Memory is OFF<br>0x1= Memory is in RETENTION<br>0x2 = Reserved : Reserved<br>0x3 = Mem_on : Memory is ON   |
+| 22-21 | ram_mem_statest      | R    | 3h    | OCMC RAM memory state status<br>0x0 = Mem_off : Memory is OFF<br>0x1= Memory is in RETENTION<br>0x2 = Reserved : Reserved<br>0x3 = Mem_on : Memory is ON   |
+| 20    | InTransition         | R    | 0h    | Domain transition status<br>0x0 = No : No on-going transition on power domain<br>0x1 = Ongoing : Power domain transition is in progress.                   |
+| 19    | Reserved             | R    | 0h    |                                                                                                                                                            |
+| 18-17 | PER_mem_statest      | R    | 3h    | PER domain memory state status<br>0x0 = Mem_off : Memory is OFF<br>0x1= Memory is in RETENTION<br>0x2 = Reserved : Reserved<br>0x3 = Mem_on : Memory is ON |
+| 16-3  | Reserved             | R    | 0h    |                                                                                                                                                            |
+| 2     | LogicStateSt         | R    | 1h    | Logic state status<br>0x0 = OFF : Logic in domain is OFF<br>0x1 = ON : Logic in domain is ON                                                               |
+
+
+# **Table 8-184. PM\_PER\_PWRSTST Register Field Descriptions (continued)**
+
+| Bit | Field        | Type | Reset | Description                |
+|-----|--------------|------|-------|----------------------------|
+| 1-0 | PowerStateSt | R    | 3h    | Current Power State Status |
+|     |              |      |       | 0x0 = OFF : OFF State      |
+|     |              |      |       | 0x1 = RET                  |
+|     |              |      |       | 0x2 = Reserved1            |
+|     |              |      |       | 0x3 = ON : ON State        |
+
+
+### *8.1.13.2.3 PM\_PER\_PWRSTCTRL Register (offset = Ch) [reset = EE0000EBh]*
+
+PM\_PER\_PWRSTCTRL is shown in [Figure](#page-220-1) 8-173 and described in Table [8-185.](#page-220-2)
+
+Controls the power state of PER power domain
+
+#### **Table 8-185. PM\_PER\_PWRSTCTRL Register Field Descriptions**
+
+
+| Bit   | Field                 | Type | Reset | Description                                                                                                                                    |
+|-------|-----------------------|------|-------|------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-30 | ram_mem_ONState       | R/W  | 3h    | OCMC RAM memory on state<br>0x0 = OFF : Memory is OFF<br>0x1 = RET : Memory is in retention state<br>0x2 = RESERVED<br>0x3 = ON : Memory is ON |
+| 29    | PER_mem_RETState      | R/W  | 1h    | Other memories in PER Domain RET state<br>0x0 = OFF<br>0x1 = RET                                                                               |
+| 28    | Reserved              | R    | 0h    |                                                                                                                                                |
+| 27    | ram_mem_RETState      | R/W  | 1h    | OCMC RAM memory RET state<br>0x0 = OFF : Memory is in off state<br>0x1 = RET : Memory is in retention state                                    |
+| 26-25 | PER_mem_ONState       | R/W  | 3h    | Other memories in PER Domain ON state<br>0x0 = Reserved2<br>0x1 = Reserved1<br>0x2 = Reserved : Reserved<br>0x3 = ON : Memory is ON            |
+| 24-8  | Reserved              | R    | 0h    |                                                                                                                                                |
+| 7     | pru_icss_mem_RETState | R/W  | 1h    | PRU-ICSS memory RET state<br>0x0 = OFF : Memory is in off state<br>0x1 = RET : Memory is in retention state                                    |
+| 6-5   | pru_icss_mem_ONState  | R/W  | 3h    | PRU-ICSS memory ON state<br>0x0 = Reserved2<br>0x1 = Reserved1<br>0x2 = Reserved : Reserved<br>0x3 = ON : Memory is ON                         |
+
+
+# **Table 8-185. PM\_PER\_PWRSTCTRL Register Field Descriptions (continued)**
+
+| Bit | Field               | Type | Reset | Description                                                                                                                                                            |
+|-----|---------------------|------|-------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 4   | LowPowerStateChange | R/W  | 0h    | Power state change request when domain has already performed a<br>sleep transition.<br>Allows going into deeper low power state without waking up the<br>power domain. |
+|     |                     |      |       | 0x0 = DIS : Do not request a low power state change.                                                                                                                   |
+|     |                     |      |       | 0x1 = EN : Request a low power state change. This bit is<br>automatically cleared when the power state is effectively changed or<br>when power state is ON.            |
+| 3   | LogicRETState       | R/W  | 1h    | Logic state when power domain is RETENTION                                                                                                                             |
+|     |                     |      |       | 0x0 = logic_off : Only retention registers are retained and remaing<br>logic is off when the domain is in RETENTION state.                                             |
+|     |                     |      |       | 0x1 = logic_ret : Whole logic is retained when domain is in<br>RETENTION state.                                                                                        |
+| 2   | Reserved            | R    | 0h    |                                                                                                                                                                        |
+| 1-0 | PowerState          | R/W  | 3h    | PER domain power state control                                                                                                                                         |
+|     |                     |      |       | 0x0 = OFF                                                                                                                                                              |
+|     |                     |      |       | 0x1 = RET                                                                                                                                                              |
+|     |                     |      |       | 0x2 = Reserved                                                                                                                                                         |
+|     |                     |      |       | 0x3 = ON                                                                                                                                                               |
+
+#### **8.1.13.3 PRM\_WKUP Registers**
+
+Table [8-186](#page-221-0) lists the memory-mapped registers for the PRM\_WKUP. All register offset addresses not listed in Table [8-186](#page-221-0) should be considered as reserved locations and the register contents should not be modified.
+
+#### **Table 8-186. PRM\_WKUP REGISTERS**
+
+
+| Offset | Acronym           | Register Name                                                                                                                                                                                  | Section            |
+|--------|-------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------|
+| 0h     | RM_WKUP_RSTCTRL   | This register controls the release of the ALWAYS ON<br>Domain resets.                                                                                                                          | Section 8.1.13.3.1 |
+| 4h     | PM_WKUP_PWRSTCTRL | Controls power state of WKUP power domain                                                                                                                                                      | Section 8.1.13.3.2 |
+| 8h     | PM_WKUP_PWRSTST   | This register provides a status on the current WKUP<br>power domain state.<br>[warm reset insensitive]                                                                                         | Section 8.1.13.3.3 |
+| Ch     | RM_WKUP_RSTST     | This register logs the different reset sources of the<br>ALWON domain.<br>Each bit is set upon release of the domain reset signal.<br>Must be cleared by software.<br>[warm reset insensitive] | Section 8.1.13.3.4 |
+
+
+### *8.1.13.3.1 RM\_WKUP\_RSTCTRL Register (offset = 0h) [reset = 8h]*
+
+RM\_WKUP\_RSTCTRL is shown in [Figure](#page-222-1) 8-174 and described in Table [8-187.](#page-222-2)
+
+This register controls the release of the ALWAYS ON Domain resets.
+
+
+#### **Table 8-187. RM\_WKUP\_RSTCTRL Register Field Descriptions**
+
+
+| Bit  | Field        | Type | Reset | Description                                                                                                               |
+|------|--------------|------|-------|---------------------------------------------------------------------------------------------------------------------------|
+| 31-6 | Reserved     | R    | 0h    |                                                                                                                           |
+| 5-4  | Reserved     | R    | 0h    |                                                                                                                           |
+| 3    | WKUP_M3_LRST | R/W  | 1h    | Assert Reset to WKUP_M3<br>0x0 = CLEAR : Reset is cleared for the M3<br>0x1 = ASSERT : Reset is asserted for the M3 by A8 |
+| 2-0  | Reserved     | R    | 0h    |                                                                                                                           |
+
+
+### *8.1.13.3.2 PM\_WKUP\_PWRSTCTRL Register (offset = 4h) [reset = 8h]*
+
+PM\_WKUP\_PWRSTCTRL is shown in [Figure](#page-223-1) 8-175 and described in Table [8-188](#page-223-2).
+
+Controls power state of WKUP power domain
+
+#### **Table 8-188. PM\_WKUP\_PWRSTCTRL Register Field Descriptions**
+
+
+| Bit   | Field               | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                   |
+|-------|---------------------|------|-------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-30 | Reserved            | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                               |
+| 29    | Reserved            | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                               |
+| 28    | Reserved            | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                               |
+| 27    | Reserved            | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                               |
+| 26-25 | Reserved            | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                               |
+| 24-5  | Reserved            | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                               |
+| 4     | LowPowerStateChange | R/W  | 0h    | Power state change request when domain has already performed a<br>sleep transition.<br>Allows going into deeper low power state without waking up the<br>power domain.<br>0x0 = DIS : Do not request a low power state change.<br>0x1 = EN : Request a low power state change. This bit is<br>automatically cleared when the power state is effectively changed or<br>when power state is ON. |
+| 3     | LogicRETState       | R/W  | 1h    | Logic state when power domain is RETENTION<br>0x0 = logic_off : Only retention registers are retained and remaing<br>logic is off when the domain is in RETENTION state.<br>0x1 = logic_ret : Whole logic is retained when domain is in<br>RETENTION state.                                                                                                                                   |
+| 2     | Reserved            | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                               |
+| 1-0   | Reserved            | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                               |
+
+
+### *8.1.13.3.3 PM\_WKUP\_PWRSTST Register (offset = 8h) [reset = 60004h]*
+
+PM\_WKUP\_PWRSTST is shown in [Figure](#page-224-1) 8-176 and described in Table [8-189](#page-224-2).
+
+This register provides a status on the current WKUP power domain state. [warm reset insensitive]
+
+
+#### **Table 8-189. PM\_WKUP\_PWRSTST Register Field Descriptions**
+
+
+| Bit   | Field               | Type | Reset | Description                                                                                                                              |
+|-------|---------------------|------|-------|------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-23 | Reserved            | R    | 0h    |                                                                                                                                          |
+| 22-21 | Reserved            | R    | 0h    |                                                                                                                                          |
+| 20    | InTransition        | R    | 0h    | Domain transition status<br>0x0 = No : No on-going transition on power domain<br>0x1 = Ongoing : Power domain transition is in progress. |
+| 19    | Reserved            | R    | 0h    |                                                                                                                                          |
+| 18-17 | Debugss_mem_statest | R    | 3h    | WKUP domain memory state status<br>0x0 = Mem_off : Memory is OFF<br>0x2 = Reserved : Reserved<br>0x3 = Mem_on : Memory is ON             |
+| 16-3  | Reserved            | R    | 0h    |                                                                                                                                          |
+| 2     | LogicStateSt        | R    | 1h    | Logic state status<br>0x0 = OFF : Logic in domain is OFF<br>0x1 = ON : Logic in domain is ON                                             |
+| 1-0   | Reserved            | R    | 0h    |                                                                                                                                          |
+
+
+### *8.1.13.3.4 RM\_WKUP\_RSTST Register (offset = Ch) [reset = 0h]*
+
+RM\_WKUP\_RSTST is shown in [Figure](#page-225-1) 8-177 and described in Table [8-190.](#page-225-2)
+
+This register logs the different reset sources of the ALWON domain. Each bit is set upon release of the domain reset signal. Must be cleared by software. [warm reset insensitive]
+
+
+#### **Table 8-190. RM\_WKUP\_RSTST Register Field Descriptions**
+
+
+| Bit  | Field             | Type | Reset | Description                                                                                                                                                                                          |
+|------|-------------------|------|-------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-8 | Reserved          | R    | 0h    |                                                                                                                                                                                                      |
+| 7    | ICECRUSHER_M3_RST | R/W  | 0h    | M3 Processor has been reset due to M3 ICECRUSHER1 reset event<br>0x0 = RESET_NO : No reset<br>0x1 = RESET_YES : M3 Processor has been reset                                                          |
+| 6    | EMULATION_M3_RST  | R/W  | 0h    | M3 Processor has been reset due to emulation reset source e.g.<br>assert reset command initiated by the icepick module<br>0x0 = RESET_NO : No reset<br>0x1 = RESET_YES : M3 Processor has been reset |
+| 5    | WKUP_M3_LRST      | R/W  | 0h    | M3 Processor has been reset<br>0x0 = RESET_NO : No reset<br>0x1 = RESET_YES : M3 Processor has been reset                                                                                            |
+| 4-0  | Reserved          | R    | 0h    |                                                                                                                                                                                                      |
+
+# **8.1.13.4 PRM\_MPU Registers**
+
+Table [8-191](#page-225-3) lists the memory-mapped registers for the PRM\_MPU. All register offset addresses not listed in Table [8-191](#page-225-3) should be considered as reserved locations and the register contents should not be modified.
+
+**Table 8-191. PRM\_MPU REGISTERS**
+
+
+| Offset | Acronym          | Register Name                                                                                          | Section            |
+|--------|------------------|--------------------------------------------------------------------------------------------------------|--------------------|
+| 0h     | PM_MPU_PWRSTCTRL | This register controls the MPU power state to reach<br>upon mpu domain sleep transition                | Section 8.1.13.4.1 |
+| 4h     | PM_MPU_PWRSTST   | This register provides a status on the current MPU<br>power domain state0.<br>[warm reset insensitive] | Section 8.1.13.4.2 |
+
+
+#### **Table 8-191. PRM\_MPU REGISTERS (continued)**
+
+| Offset | Acronym      | Register Name                                                                                                                                                                                  | Section            |
+|--------|--------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------|
+| 8h     | RM_MPU_RSTST | This register logs the different reset sources of the<br>ALWON domain.<br>Each bit is set upon release of the domain reset signal.<br>Must be cleared by software.<br>[warm reset insensitive] | Section 8.1.13.4.3 |
+
+
+### *8.1.13.4.1 PM\_MPU\_PWRSTCTRL Register (offset = 0h) [reset = 1FF0007h]*
+
+PM\_MPU\_PWRSTCTRL is shown in [Figure](#page-227-1) 8-178 and described in Table [8-192.](#page-227-2)
+
+This register controls the MPU power state to reach upon mpu domain sleep transition
+
+
+#### **Table 8-192. PM\_MPU\_PWRSTCTRL Register Field Descriptions**
+
+
+| Bit   | Field               | Type | Reset | Description                                                                                                                                                                                                                                                                                |
+|-------|---------------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-26 | Reserved            | R    | 0h    |                                                                                                                                                                                                                                                                                            |
+| 25    | Reserved            | R    | 0h    |                                                                                                                                                                                                                                                                                            |
+| 24    | mpu_ram_RETState    | R/W  | 1h    | Default power domain memory(ram) retention state when power<br>domain is in retention                                                                                                                                                                                                      |
+| 23    | mpu_l2_RETState     | R/W  | 1h    | Default power domain memory(L2) retention state when power<br>domain is in retention                                                                                                                                                                                                       |
+| 22    | mpu_l1_RETState     | R/W  | 1h    | Default power domain memory(L1) retention state when power<br>domain is in retention                                                                                                                                                                                                       |
+| 21-20 | MPU_L2_ONState      | R    | 3h    | Default power domain memory state when domain is ON.                                                                                                                                                                                                                                       |
+| 19-18 | MPU_L1_ONState      | R    | 3h    | Default power domain memory state when domain is ON.                                                                                                                                                                                                                                       |
+| 17-16 | MPU_RAM_ONState     | R/W  | 3h    | Default power domain memory state when domain is ON.<br>0x0 = Mem_off<br>0x2 = Reserved<br>0x3 = Mem_on : Memory bank is on when the domain is ON.                                                                                                                                         |
+| 15-5  | Reserved            | R    | 0h    |                                                                                                                                                                                                                                                                                            |
+| 4     | LowPowerStateChange | R/W  | 0h    | Power state change request when domain has already performed a<br>sleep transition.<br>Allows going into deeper low power state without waking up the<br>power domain.<br>0x0 = DIS : Do not request a low power state change.<br>0x1 = EN : Request a low power state change. This bit is |
+|       |                     |      |       | automatically cleared when the power state is effectively changed or<br>when power state is ON.                                                                                                                                                                                            |
+| 3     | Reserved            | R    | 0h    |                                                                                                                                                                                                                                                                                            |
+| 2     | LogicRETState       | R/W  | 1h    | Logic state when power domain is RETENTION<br>0x0 = logic_off : Only retention registers are retained and remaing<br>logic is off when the domain is in RETENTION state.<br>0x1 = logic_ret : Whole logic is retained when domain is in<br>RETENTION state.                                |
+
+
+# **Table 8-192. PM\_MPU\_PWRSTCTRL Register Field Descriptions (continued)**
+
+| Bit | Field      | Type | Reset | Description           |
+|-----|------------|------|-------|-----------------------|
+| 1-0 | PowerState | R/W  | 3h    | Power state control   |
+|     |            |      |       | 0x0 = OFF : OFF State |
+|     |            |      |       | 0x1 = RET             |
+|     |            |      |       | 0x2 = Reserved        |
+|     |            |      |       | 0x3 = ON : ON State   |
+
+
+### *8.1.13.4.2 PM\_MPU\_PWRSTST Register (offset = 4h) [reset = 157h]*
+
+PM\_MPU\_PWRSTST is shown in [Figure](#page-229-1) 8-179 and described in Table [8-193](#page-229-2).
+
+This register provides a status on the current MPU power domain state0. [warm reset insensitive]
+
+#### **Table 8-193. PM\_MPU\_PWRSTST Register Field Descriptions**
+
+
+| Bit   | Field           | Type | Reset | Description                                                                                                                                           |
+|-------|-----------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-21 | Reserved        | R    | 0h    |                                                                                                                                                       |
+| 20    | InTransition    | R    | 0h    | Domain transition status<br>0x0 = No : No on-going transition on power domain                                                                         |
+|       |                 |      |       | 0x1 = Ongoing : Power domain transition is in progress.                                                                                               |
+| 19-10 | Reserved        | R    | 0h    |                                                                                                                                                       |
+| 9-8   | MPU_L2_StateSt  | R    | 1h    | MPU L2 memory state status<br>0x0 = Mem_off : Memory is OFF<br>0x2 = Reserved : Reserved<br>0x3 = Mem_on : Memory is ON                               |
+| 7-6   | MPU_L1_StateSt  | R    | 1h    | MPU L1 memory state status<br>0x0 = Mem_off : Memory is OFF<br>0x2 = Reserved : Reserved<br>0x3 = Mem_on : Memory is ON                               |
+| 5-4   | MPU_RAM_StateSt | R    | 1h    | MPU_RAM memory state status<br>0x0 = Mem_off : Memory is OFF<br>0x2 = Reserved : Reserved<br>0x3 = Mem_on : Memory is ON                              |
+| 3     | Reserved        | R    | 0h    |                                                                                                                                                       |
+| 2     | LogicStateSt    | R    | 1h    | Logic state status<br>0x0 = OFF : Logic in domain is OFF<br>0x1 = ON : Logic in domain is ON                                                          |
+| 1-0   | PowerStateSt    | R    | 3h    | Current Power State Status<br>0x0 = OFF : OFF State [warm reset insensitive]<br>0x1 = RET : RET State<br>0x3 = ON : ON State [warm reset insensitive] |
+
+
+### *8.1.13.4.3 RM\_MPU\_RSTST Register (offset = 8h) [reset = 0h]*
+
+RM\_MPU\_RSTST is shown in [Figure](#page-230-1) 8-180 and described in Table [8-194.](#page-230-2)
+
+This register logs the different reset sources of the ALWON domain. Each bit is set upon release of the domain reset signal. Must be cleared by software. [warm reset insensitive]
+
+
+
+### **Table 8-194. RM\_MPU\_RSTST Register Field Descriptions**
+
+
+| Bit   | Field                  | Type | Reset | Description                                                                                                                                                                                                                              |
+|-------|------------------------|------|-------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-15 | Reserved               | R    | 0h    |                                                                                                                                                                                                                                          |
+| 14-8  | Reserved               | R    | 0h    |                                                                                                                                                                                                                                          |
+| 7     | Reserved               | R    | 0h    |                                                                                                                                                                                                                                          |
+| 6     | ICECRUSHER_MPU_RS<br>T | R/W  | 0h    | MPU Processor has been reset due to MPU ICECRUSHER1 reset<br>event<br>0x0 = RESET_NO : No icecrusher reset<br>0x1 = RESET_YES : MPU Processor has been reset upon<br>icecursher reset                                                    |
+| 5     | EMULATION_MPU_RST      | R/W  | 0h    | MPU Processor has been reset due to emulation reset source e.g.<br>assert reset command initiated by the icepick module<br>0x0 = RESET_NO : No emulation reset<br>0x1 = RESET_YES : MPU Processor has been reset upon emulation<br>reset |
+| 4     | Reserved               | R    | 0h    |                                                                                                                                                                                                                                          |
+| 3     | Reserved               | R    | 0h    |                                                                                                                                                                                                                                          |
+| 2     | Reserved               | R    | 0h    |                                                                                                                                                                                                                                          |
+| 1-0   | Reserved               | R    | 0h    |                                                                                                                                                                                                                                          |
+
+#### **8.1.13.5 PRM\_DEVICE Registers**
+
+Table [8-195](#page-230-3) lists the memory-mapped registers for the PRM\_DEVICE. All register offset addresses not listed in Table [8-195](#page-230-3) should be considered as reserved locations and the register contents should not be modified.
+
+**Table 8-195. PRM\_DEVICE Registers**
+
+
+| Offset | Acronym     | Register Name | Section            |
+|--------|-------------|---------------|--------------------|
+| 0h     | PRM_RSTCTRL |               | Section 8.1.13.5.1 |
+| 4h     | PRM_RSTTIME |               | Section 8.1.13.5.2 |
+| 8h     | PRM_RSTST   |               | Section 8.1.13.5.3 |
+
+
+# **Table 8-195. PRM\_DEVICE Registers (continued)**
+
+| Offset | Acronym                 | Register Name | Section            |
+|--------|-------------------------|---------------|--------------------|
+| Ch     | PRM_SRAM_COUNT          |               | Section 8.1.13.5.4 |
+| 10h    | PRM_LDO_SRAM_CORE_SETUP |               | Section 8.1.13.5.5 |
+| 14h    | PRM_LDO_SRAM_CORE_CTRL  |               | Section 8.1.13.5.6 |
+| 18h    | PRM_LDO_SRAM_MPU_SETUP  |               | Section 8.1.13.5.7 |
+| 1Ch    | PRM_LDO_SRAM_MPU_CTRL   |               | Section 8.1.13.5.8 |
+
+
+### *8.1.13.5.1 PRM\_RSTCTRL Register (offset = 0h) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+PRM\_RSTCTRL is shown in [Figure](#page-232-1) 8-181 and described in Table [8-196.](#page-232-2)
+
+Global software cold and warm reset control. This register is auto-cleared. Only write 1 is possible. A read returns 0 only.
+
+
+# **Table 8-196. PRM\_RSTCTRL Register Field Descriptions**
+
+
+| Bit  | Field                  | Type             | Reset | Description                                                                                                                                                                                                                                                                                                    |
+|------|------------------------|------------------|-------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-2 | RESERVED               | Rreturns0s       | 0h    |                                                                                                                                                                                                                                                                                                                |
+| 1    | RST_GLOBAL_COLD_S<br>W | Rreturns0s/<br>W | 0h    | Global COLD software reset control.<br>This bit is reset only upon a global cold source of reset.<br>Read returns 0.<br>0h = 0x0 : Global COLD software reset is cleared.<br>1h = 0x1 : Asserts a global COLD software reset. The software must<br>ensure the SDRAM is properly put in sef-refresh mode before |
+|      |                        |                  |       | applying this reset.                                                                                                                                                                                                                                                                                           |
+| 0    | RST_GLOBAL_WARM_S<br>W | Rreturns0s/<br>W | 0h    | Global WARM software reset control.<br>This bit is reset upon any global source of reset (warm and cold).<br>Read returns 0.                                                                                                                                                                                   |
+|      |                        |                  |       | 0h = 0x0 : Global warm software reset is cleared.                                                                                                                                                                                                                                                              |
+|      |                        |                  |       | 1h = 0x1 : Asserts a global warm software reset.                                                                                                                                                                                                                                                               |
+
+
+### *8.1.13.5.2 PRM\_RSTTIME Register (offset = 4h) [reset = 1006h]*
+
+Register mask: FFFFFFFFh
+
+PRM\_RSTTIME is shown in [Figure](#page-233-1) 8-182 and described in Table [8-197.](#page-233-2)
+
+Reset duration control. [warm reset insensitive]
+
+
+### **Table 8-197. PRM\_RSTTIME Register Field Descriptions**
+
+
+| Bit   | Field    | Type       | Reset | Description                                                           |
+|-------|----------|------------|-------|-----------------------------------------------------------------------|
+| 31-13 | RESERVED | Rreturns0s | 0h    |                                                                       |
+| 12-8  | RSTTIME2 | R/W        | 10h   | (Power domain) reset duration 2 (number of CLK_M_OSC clock<br>cycles) |
+| 7-0   | RSTTIME1 | R/W        | 6h    | (Global) reset duration 1 (number of CLK_M_OSC clock cycles)          |
+
+
+# *8.1.13.5.3 PRM\_RSTST Register (offset = 8h) [reset = 1h]*
+
+Register mask: FFFFFFFFh
+
+PRM\_RSTST is shown in [Figure](#page-234-1) 8-183 and described in Table [8-198.](#page-234-2)
+
+This register logs the global reset sources. Each bit is set upon release of the domain reset signal. Must be cleared by software. [warm reset insensitive]
+
+
+
+### **Table 8-198. PRM\_RSTST Register Field Descriptions**
+
+
+| Bit   | Field                  | Type       | Reset | Description                                                                                                                                                                                     |
+|-------|------------------------|------------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-10 | RESERVED               | Rreturns0s | 0h    |                                                                                                                                                                                                 |
+| 9     | ICEPICK_RST            | R/W1toClr  | 0h    | IcePick reset event.<br>This is a source of global warm reset initiated by the emulation.<br>[warm reset insensitive]<br>0h = 0x0 : No ICEPICK reset.<br>1h = 0x1 : IcePick reset has occurred. |
+| 8-6   | RESERVED               | Rreturns0s | 0h    |                                                                                                                                                                                                 |
+| 5     | EXTERNAL_WARM_RST      | R/W1toClr  | 0h    | External warm reset event [warm reset insensitive]<br>0h = 0x0 : No global warm reset.<br>1h = 0x1 : Global external warm reset has occurred.                                                   |
+| 4     | WDT1_RST               | R/W1toClr  | 0h    | Watchdog1 timer reset event.<br>This is a source of global WARM reset.<br>[warm reset insensitive]<br>0h = 0x0 : No watchdog reset.<br>1h = 0x1 : watchdog reset has occurred.                  |
+| 3     | RESERVED               | R/W1toClr  | 0h    | Reserved.                                                                                                                                                                                       |
+| 2     | RESERVED               | R/W1toClr  | 0h    | Reserved.                                                                                                                                                                                       |
+| 1     | GLOBAL_WARM_SW_RS<br>T | R/W1toClr  | 0h    | Global warm software reset event [warm reset insensitive]<br>0h = 0x0 : No global warm SW reset<br>1h = 0x1 : Global warm SW reset has occurred.                                                |
+| 0     | GLOBAL_COLD_RST        | R/W1toClr  | 1h    | Power-on (cold) reset event [warm reset insensitive]<br>0h = 0x0 : No power-on reset.<br>1h = 0x1 : Power-on reset has occurred.                                                                |
+
+
+# *8.1.13.5.4 PRM\_SRAM\_COUNT Register (offset = Ch) [reset = 78000017h]*
+
+Register mask: FFFFFFFFh
+
+PRM\_SRAM\_COUNT is shown in [Figure](#page-235-1) 8-184 and described in Table [8-199.](#page-235-2)
+
+Common setup for SRAM LDO transition counters. Applies to all voltage domains. [warm reset insensitive]
+
+
+#### **Table 8-199. PRM\_SRAM\_COUNT Register Field Descriptions**
+
+
+| Bit   | Field            | Type       | Reset | Description                                                                                                                                            |
+|-------|------------------|------------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-24 | StartUp_Count    | R/W        | 78h   | Determines the start-up duration of SRAM and ABB LDO.<br>The duration is computed as 16 x NbCycles of system clock cycles.<br>Target is 50us.          |
+| 23-16 | SLPCNT_VALUE     | R/W        | 0h    | Delay between retention/off assertion of last SRAM bank and<br>SRAMALLRET signal to LDO is driven high.<br>Counting on system clock.<br>Target is 2us. |
+| 15-8  | VSETUPCNT_VALUE  | R/W        | 0h    | SRAM LDO rampup time from retention to active mode.<br>The duration is computed as 8 x NbCycles of system clock cycles.<br>Target is 30us.             |
+| 7-6   | RESERVED         | Rreturns0s | 0h    |                                                                                                                                                        |
+| 5-0   | PCHARGECNT_VALUE | R/W        | 17h   | Delay between de-assertion of standby_rta_ret_on and<br>standby_rta_ret_good.<br>Counting on system clock.<br>Target is 600ns.                         |
+
+
+# *8.1.13.5.5 PRM\_LDO\_SRAM\_CORE\_SETUP Register (offset = 10h) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+PRM\_LDO\_SRAM\_CORE\_SETUP is shown in [Figure](#page-236-1) 8-185 and described in Table [8-200](#page-236-2).
+
+Setup of the SRAM LDO for CORE voltage domain. [warm reset insensitive]
+
+
+# **Table 8-200. PRM\_LDO\_SRAM\_CORE\_SETUP Register Field Descriptions**
+
+
+| Field          | Type       | Reset | Description                                                                                                                                                                                                                                                                                                                         |
+|----------------|------------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| RESERVED       | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                                                     |
+| AIPOFF         | R/W        | 0h    | Override on AIPOFF input of SRAM LDO.<br>0h = No_Override : AIPOFF signal is not overriden<br>1h = Override : AIPOFF signal is overriden to '1'. Corresponding<br>SRAM LDO is disabled and in HZ mode.                                                                                                                              |
+| ENFUNC5        | R/W        | 0h    | ENFUNC5 input of SRAM LDO.<br>0h = One_step : Active to retention is a one step transfer<br>1h = Two_step : Active to retention is a two steps transfer                                                                                                                                                                             |
+| ENFUNC4        | R/W        | 0h    | ENFUNC4 input of SRAM LDO.<br>0h = Ext_clock : One external clock is supplied<br>1h = No_ext_clock : No external clock is supplied                                                                                                                                                                                                  |
+| ENFUNC3_EXPORT | R/WSpecial | 0h    | ENFUNC3 input of SRAM LDO.<br>After PowerOn reset and Efuse sensing, this bitfield is automatically<br>loaded with an Efuse value from control module.<br>Bitfield remains writable after this.<br>0h = Sub_regul_disabled : Sub regulation is disabled                                                                             |
+|                |            |       | 1h = Sub_regul_enabled : Sub regulation is enabled                                                                                                                                                                                                                                                                                  |
+| ENFUNC2_EXPORT | R/WSpecial | 0h    | ENFUNC2 input of SRAM LDO.<br>After PowerOn reset and Efuse sensing, this bitfield is automatically<br>loaded with an Efuse value from control module.<br>Bitfield remains writable after this.                                                                                                                                     |
+|                |            |       | 0h = Ext_cap : External cap is used<br>1h = No_ext_cap : External cap is not used                                                                                                                                                                                                                                                   |
+| ENFUNC1_EXPORT | R/WSpecial | 0h    | ENFUNC1 input of SRAM LDO.<br>After PowerOn reset and Efuse sensing, this bitfield is automatically<br>loaded with an Efuse value from control module.<br>Bitfield remains writable after this.<br>0h = Short_prot_disabled : Short circuit protection is disabled<br>1h = Short_prot_enabled : Short circuit protection is enabled |
+|                |            |       |                                                                                                                                                                                                                                                                                                                                     |
+
+
+# **Table 8-200. PRM\_LDO\_SRAM\_CORE\_SETUP Register Field Descriptions (continued)**
+
+| Bit | Field                   | Type       | Reset | Description                                                                                                                                                                                                                                                                                                                                                          |
+|-----|-------------------------|------------|-------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 2   | ABBOFF_SLEEP_EXPOR<br>T | R/WSpecial | 0h    | Determines whether SRAMNWA is supplied by VDDS or VDDAR<br>during deep-sleep.<br>After PowerOn reset and Efuse sensing, this bitfield is automatically<br>loaded with an Efuse value from control module.<br>Bitfield remains writable after this.<br>0h = SRAMNW_SLP_VDDS : SRAMNWA supplied with VDDS<br>1h(Read) = SRAMNW_SLP_VDDASRAMNWA supplied with<br>VDDAR  |
+| 1   | ABBOFF_ACT_EXPORT       | R/WSpecial | 0h    | Determines whether SRAMNWA is supplied by VDDS or VDDAR<br>during active mode.<br>After PowerOn reset and Efuse sensing, this bitfield is automatically<br>loaded with an Efuse value from control module.<br>Bitfield remains writable after this.<br>0h = SRAMNW_ACT_VDDS : SRAMNWA supplied with VDDS<br>1h(Read) = SRAMNW_ACT_VDDASRAMNWA supplied with<br>VDDAR |
+| 0   | DISABLE_RTA_EXPORT      | R/WSpecial | 0h    | Control for HD memory RTA feature.<br>After PowerOn reset and Efuse sensing, this bitfield is automatically<br>loaded with an Efuse value from control module.<br>Bitfield remains writable after this.<br>0h = RTA_ENABLED : HD memory RTA feature is enabled<br>1h = RTA_DISABLED : HD memory RTA feature is disabled                                              |
+
+
+### *8.1.13.5.6 PRM\_LDO\_SRAM\_CORE\_CTRL Register (offset = 14h) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+PRM\_LDO\_SRAM\_CORE\_CTRL is shown in [Figure](#page-238-1) 8-186 and described in Table [8-201.](#page-238-2)
+
+Control and status of the SRAM LDO for CORE voltage domain. [warm reset insensitive]
+
+# **Table 8-201. PRM\_LDO\_SRAM\_CORE\_CTRL Register Field Descriptions**
+
+
+| Bit   | Field              | Type       | Reset | Description                                                                                                                                                                                                       |
+|-------|--------------------|------------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-10 | RESERVED           | Rreturns0s | 0h    |                                                                                                                                                                                                                   |
+| 9     | SRAM_IN_TRANSITION | R          | 0h    | Status indicating SRAM LDO state machine state.<br>0h = IDLE : SRAM LDO state machine is stable<br>1h = IN_TRANSITION : SRAM LDO state machine is in transition<br>state                                          |
+| 8     | SRAMLDO_STATUS     | R          | 0h    | SRAMLDO status<br>0h = ACTIVE : SRAMLDO is in ACTIVE mode.<br>1h = RETENTION : SRAMLDO is on RETENTION mode.                                                                                                      |
+| 7-1   | RESERVED           | Rreturns0s | 0h    |                                                                                                                                                                                                                   |
+| 0     | RETMODE_ENABLE     | R/W        | 0h    | Control if the SRAM LDO retention mode is used or not.<br>0h = Disabled : SRAM LDO is not allowed to go to RET mode<br>1h = Enabled : SRAM LDO go to RET mode when all memory of<br>voltage domain are OFF or RET |
+
+
+### *8.1.13.5.7 PRM\_LDO\_SRAM\_MPU\_SETUP Register (offset = 18h) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+PRM\_LDO\_SRAM\_MPU\_SETUP is shown in [Figure](#page-239-1) 8-187 and described in Table [8-202.](#page-239-2)
+
+Setup of the SRAM LDO for MPU voltage domain. [warm reset insensitive]
+
+
+#### **Table 8-202. PRM\_LDO\_SRAM\_MPU\_SETUP Register Field Descriptions**
+
+
+| Bit  | Field          | Type       | Reset | Description                                                                                                                                                                                                                                                                                                                         |
+|------|----------------|------------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-9 | RESERVED       | Rreturns0s | 0h    |                                                                                                                                                                                                                                                                                                                                     |
+| 8    | AIPOFF         | R/W        | 0h    | Override on AIPOFF input of SRAM LDO.<br>0h = No_Override : AIPOFF signal is not overriden<br>1h = Override : AIPOFF signal is overriden to '1'. Corresponding<br>SRAM LDO is disabled and in HZ mode.                                                                                                                              |
+| 7    | ENFUNC5        | R/W        | 0h    | ENFUNC5 input of SRAM LDO.<br>0h = One_step : Active to retention is a one step transfer<br>1h = Two_step : Active to retention is a two steps transfer                                                                                                                                                                             |
+| 6    | ENFUNC4        | R/W        | 0h    | ENFUNC4 input of SRAM LDO.<br>0h = Ext_clock : One external clock is supplied<br>1h = No_ext_clock : No external clock is supplied                                                                                                                                                                                                  |
+| 5    | ENFUNC3_EXPORT | R/WSpecial | 0h    | ENFUNC3 input of SRAM LDO.<br>After PowerOn reset and Efuse sensing, this bitfield is automatically<br>loaded with an Efuse value from control module.<br>Bitfield remains writable after this.<br>0h = Sub_regul_disabled : Sub regulation is disabled                                                                             |
+|      |                |            |       | 1h = Sub_regul_enabled : Sub regulation is enabled                                                                                                                                                                                                                                                                                  |
+| 4    | ENFUNC2_EXPORT | R/WSpecial | 0h    | ENFUNC2 input of SRAM LDO.<br>After PowerOn reset and Efuse sensing, this bitfield is automatically<br>loaded with an Efuse value from control module.<br>Bitfield remains writable after this.                                                                                                                                     |
+|      |                |            |       | 0h = Ext_cap : External cap is used<br>1h = No_ext_cap : External cap is not used                                                                                                                                                                                                                                                   |
+| 3    | ENFUNC1_EXPORT | R/WSpecial | 0h    | ENFUNC1 input of SRAM LDO.<br>After PowerOn reset and Efuse sensing, this bitfield is automatically<br>loaded with an Efuse value from control module.<br>Bitfield remains writable after this.<br>0h = Short_prot_disabled : Short circuit protection is disabled<br>1h = Short_prot_enabled : Short circuit protection is enabled |
+
+
+# **Table 8-202. PRM\_LDO\_SRAM\_MPU\_SETUP Register Field Descriptions (continued)**
+
+| Bit | Field                   | Type       | Reset | Description                                                                                                                                                                                                                                                                                                                                                          |
+|-----|-------------------------|------------|-------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 2   | ABBOFF_SLEEP_EXPOR<br>T | R/WSpecial | 0h    | Determines whether SRAMNWA is supplied by VDDS or VDDAR<br>during deep-sleep.<br>After PowerOn reset and Efuse sensing, this bitfield is automatically<br>loaded with an Efuse value from control module.<br>Bitfield remains writable after this.<br>0h = SRAMNW_SLP_VDDS : SRAMNWA supplied with VDDS<br>1h(Read) = SRAMNW_SLP_VDDASRAMNWA supplied with<br>VDDAR  |
+| 1   | ABBOFF_ACT_EXPORT       | R/WSpecial | 0h    | Determines whether SRAMNWA is supplied by VDDS or VDDAR<br>during active mode.<br>After PowerOn reset and Efuse sensing, this bitfield is automatically<br>loaded with an Efuse value from control module.<br>Bitfield remains writable after this.<br>0h = SRAMNW_ACT_VDDS : SRAMNWA supplied with VDDS<br>1h(Read) = SRAMNW_ACT_VDDASRAMNWA supplied with<br>VDDAR |
+| 0   | DISABLE_RTA_EXPORT      | R/WSpecial | 0h    | Control for HD memory RTA feature.<br>After PowerOn reset and Efuse sensing, this bitfield is automatically<br>loaded with an Efuse value from control module.<br>Bitfield remains writable after this.<br>0h = RTA_ENABLED : HD memory RTA feature is enabled<br>1h = RTA_DISABLED : HD memory RTA feature is disabled                                              |
+
+
+### *8.1.13.5.8 PRM\_LDO\_SRAM\_MPU\_CTRL Register (offset = 1Ch) [reset = 0h]*
+
+Register mask: FFFFFFFFh
+
+PRM\_LDO\_SRAM\_MPU\_CTRL is shown in [Figure](#page-241-1) 8-188 and described in Table [8-203](#page-241-2).
+
+Control and status of the SRAM LDO for MPU voltage domain. [warm reset insensitive]
+
+### **Table 8-203. PRM\_LDO\_SRAM\_MPU\_CTRL Register Field Descriptions**
+
+
+| Bit   | Field              | Type       | Reset | Description                                                                                                                                                                                                       |
+|-------|--------------------|------------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-10 | RESERVED           | Rreturns0s | 0h    |                                                                                                                                                                                                                   |
+| 9     | SRAM_IN_TRANSITION | R          | 0h    | Status indicating SRAM LDO state machine state.<br>0h = IDLE : SRAM LDO state machine is stable<br>1h = IN_TRANSITION : SRAM LDO state machine is in transition<br>state                                          |
+| 8     | SRAMLDO_STATUS     | R          | 0h    | SRAMLDO status<br>0h = ACTIVE : SRAMLDO is in ACTIVE mode.<br>1h = RETENTION : SRAMLDO is on RETENTION mode.                                                                                                      |
+| 7-1   | RESERVED           | Rreturns0s | 0h    |                                                                                                                                                                                                                   |
+| 0     | RETMODE_ENABLE     | R/W        | 0h    | Control if the SRAM LDO retention mode is used or not.<br>0h = Disabled : SRAM LDO is not allowed to go to RET mode<br>1h = Enabled : SRAM LDO go to RET mode when all memory of<br>voltage domain are OFF or RET |
+
+#### **8.1.13.6 PRM\_RTC Registers**
+
+Table [8-204](#page-241-3) lists the memory-mapped registers for the PRM\_RTC. All register offset addresses not listed in Table [8-204](#page-241-3) should be considered as reserved locations and the register contents should not be modified.
+
+**Table 8-204. PRM\_RTC REGISTERS**
+
+
+| Offset | Acronym          | Register Name                                                                                          | Section            |
+|--------|------------------|--------------------------------------------------------------------------------------------------------|--------------------|
+| 0h     | PM_RTC_PWRSTCTRL | This register controls the RTC power state to reach upon<br>mpu domain sleep transition                | Section 8.1.13.6.1 |
+| 4h     | PM_RTC_PWRSTST   | This register provides a status on the current RTC power<br>domain state0.<br>[warm reset insensitive] | Section 8.1.13.6.2 |
+
+
+### *8.1.13.6.1 PM\_RTC\_PWRSTCTRL Register (offset = 0h) [reset = 4h]*
+
+PM\_RTC\_PWRSTCTRL is shown in [Figure](#page-242-1) 8-189 and described in Table [8-205.](#page-242-2)
+
+This register controls the RTC power state to reach upon mpu domain sleep transition
+
+
+#### **Table 8-205. PM\_RTC\_PWRSTCTRL Register Field Descriptions**
+
+
+| Bit   | Field               | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                   |
+|-------|---------------------|------|-------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-26 | Reserved            | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                               |
+| 25-16 | Reserved            | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                               |
+| 15-5  | Reserved            | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                               |
+| 4     | LowPowerStateChange | R/W  | 0h    | Power state change request when domain has already performed a<br>sleep transition.<br>Allows going into deeper low power state without waking up the<br>power domain.<br>0x0 = DIS : Do not request a low power state change.<br>0x1 = EN : Request a low power state change. This bit is<br>automatically cleared when the power state is effectively changed or<br>when power state is ON. |
+| 3     | Reserved            | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                               |
+| 2     | LogicRETState       | R/W  | 1h    | Logic state when power domain is RETENTION<br>0x0 = logic_off : Only retention registers are retained and remaing<br>logic is off when the domain is in RETENTION state.<br>0x1 = logic_ret : Whole logic is retained when domain is in<br>RETENTION state.                                                                                                                                   |
+| 1-0   | Reserved            | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                               |
+
+
+### *8.1.13.6.2 PM\_RTC\_PWRSTST Register (offset = 4h) [reset = 4h]*
+
+PM\_RTC\_PWRSTST is shown in [Figure](#page-243-1) 8-190 and described in Table [8-206.](#page-243-2)
+
+This register provides a status on the current RTC power domain state0. [warm reset insensitive]
+
+
+#### **Table 8-206. PM\_RTC\_PWRSTST Register Field Descriptions**
+
+
+| Bit   | Field        | Type | Reset | Description                                                                                                                              |
+|-------|--------------|------|-------|------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-21 | Reserved     | R    | 0h    |                                                                                                                                          |
+| 20    | InTransition | R    | 0h    | Domain transition status<br>0x0 = No : No on-going transition on power domain<br>0x1 = Ongoing : Power domain transition is in progress. |
+| 19-10 | Reserved     | R    | 0h    |                                                                                                                                          |
+| 9-4   | Reserved     | R    | 0h    |                                                                                                                                          |
+| 3     | Reserved     | R    | 0h    |                                                                                                                                          |
+| 2     | LogicStateSt | R    | 1h    | Logic state status<br>0x0 = OFF : Logic in domain is OFF<br>0x1 = ON : Logic in domain is ON                                             |
+| 1-0   | Reserved     | R    | 0h    |                                                                                                                                          |
+
+#### **8.1.13.7 PRM\_GFX Registers**
+
+Table [8-207](#page-243-3) lists the memory-mapped registers for the PRM\_GFX. All register offset addresses not listed in Table [8-207](#page-243-3) should be considered as reserved locations and the register contents should not be modified.
+
+### **Table 8-207. PRM\_GFX REGISTERS**
+
+
+| Offset | Acronym          | Register Name                                                                                         | Section            |
+|--------|------------------|-------------------------------------------------------------------------------------------------------|--------------------|
+| 0h     | PM_GFX_PWRSTCTRL | This register controls the GFX power state to reach upon<br>a domain sleep transition.                | Section 8.1.13.7.1 |
+| 4h     | RM_GFX_RSTCTRL   | This register controls the release of the GFX Domain<br>resets.                                       | Section 8.1.13.7.2 |
+| 10h    | PM_GFX_PWRSTST   | This register provides a status on the current GFX power<br>domain state.<br>[warm reset insensitive] | Section 8.1.13.7.3 |
+
+
+#### **Table 8-207. PRM\_GFX REGISTERS (continued)**
+
+| Offset | Acronym      | Register Name                                                                                                                                                                                | Section            |
+|--------|--------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------|
+| 14h    | RM_GFX_RSTST | This register logs the different reset sources of the GFX<br>domain.<br>Each bit is set upon release of the domain reset signal.<br>Must be cleared by software.<br>[warm reset insensitive] | Section 8.1.13.7.4 |
+
+
+### *8.1.13.7.1 PM\_GFX\_PWRSTCTRL Register (offset = 0h) [reset = 60044h]*
+
+PM\_GFX\_PWRSTCTRL is shown in [Figure](#page-245-1) 8-191 and described in Table [8-208.](#page-245-2)
+
+This register controls the GFX power state to reach upon a domain sleep transition.
+
+
+#### **Table 8-208. PM\_GFX\_PWRSTCTRL Register Field Descriptions**
+
+
+| Bit   | Field               | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                                                   |
+|-------|---------------------|------|-------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-19 | Reserved            | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                               |
+| 18-17 | GFX_MEM_ONState     | R    | 3h    | GFX memory state when domain is ON.                                                                                                                                                                                                                                                                                                                                                           |
+| 16-7  | Reserved            | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                               |
+| 6     | GFX_MEM_RETState    | R/W  | 1h    |                                                                                                                                                                                                                                                                                                                                                                                               |
+| 5     | Reserved            | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                               |
+| 4     | LowPowerStateChange | R/W  | 0h    | Power state change request when domain has already performed a<br>sleep transition.<br>Allows going into deeper low power state without waking up the<br>power domain.<br>0x0 = DIS : Do not request a low power state change.<br>0x1 = EN : Request a low power state change. This bit is<br>automatically cleared when the power state is effectively changed or<br>when power state is ON. |
+| 3     | Reserved            | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                                               |
+| 2     | LogicRETState       | R/W  | 1h    | Logic state when power domain is RETENTION<br>0x0 = logic_off : Only retention registers are retained and remaing<br>logic is off when the domain is in RETENTION state.<br>0x1 = logic_ret : Whole logic is retained when domain is in<br>RETENTION state.                                                                                                                                   |
+| 1-0   | PowerState          | R/W  | 0h    | Power state control<br>0x0 = OFF : OFF State<br>0x1 = RET<br>0x2 = reserved_1<br>0x3 = ON : ON State                                                                                                                                                                                                                                                                                          |
+
+
+### *8.1.13.7.2 RM\_GFX\_RSTCTRL Register (offset = 4h) [reset = 1h]*
+
+RM\_GFX\_RSTCTRL is shown in [Figure](#page-246-1) 8-192 and described in Table [8-209](#page-246-2).
+
+This register controls the release of the GFX Domain resets.
+
+#### **Table 8-209. RM\_GFX\_RSTCTRL Register Field Descriptions**
+
+
+| Bit  | Field    | Type | Reset | Description                                                                                                                                                   |
+|------|----------|------|-------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-4 | Reserved | R    | 0h    |                                                                                                                                                               |
+| 3-2  | Reserved | R    | 0h    |                                                                                                                                                               |
+| 1    | Reserved | R    | 0h    |                                                                                                                                                               |
+| 0    | GFX_RST  | R/W  | 1h    | GFX domain local reset control<br>0x0 = CLEAR : Reset is cleared for the GFX Domain (SGX530)<br>0x1 = ASSERT : Reset is asserted for the GFX Domain (SGX 530) |
+
+
+### *8.1.13.7.3 PM\_GFX\_PWRSTST Register (offset = 10h) [reset = 17h]*
+
+PM\_GFX\_PWRSTST is shown in [Figure](#page-247-1) 8-193 and described in Table [8-210.](#page-247-2)
+
+This register provides a status on the current GFX power domain state. [warm reset insensitive]
+
+#### **Table 8-210. PM\_GFX\_PWRSTST Register Field Descriptions**
+
+
+| Bit   | Field           | Type | Reset | Description                                                                                                                               |
+|-------|-----------------|------|-------|-------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-21 | Reserved        | R    | 0h    |                                                                                                                                           |
+| 20    | InTransition    | R    | 0h    | Domain transition status<br>0x0 = No : No on-going transition on power domain<br>0x1 = Ongoing : Power domain transition is in progress.  |
+| 19-6  | Reserved        | R    | 0h    |                                                                                                                                           |
+| 5-4   | GFX_MEM_StateSt | R    | 1h    | GFX memory state status<br>0x0 = Mem_off : Memory is OFF<br>0x2 = Reserved : Reserved<br>0x3 = Mem_on : Memory is ON                      |
+| 3     | Reserved        | R    | 0h    |                                                                                                                                           |
+| 2     | LogicStateSt    | R    | 1h    | Logic state status<br>0x0 = OFF : Logic in domain is OFF<br>0x1 = ON : Logic in domain is ON                                              |
+| 1-0   | PowerStateSt    | R    | 3h    | Current Power State Status<br>0x0 = OFF : OFF State [warm reset insensitive]<br>0x1 = RET<br>0x3 = ON : ON State [warm reset insensitive] |
+
+
+### *8.1.13.7.4 RM\_GFX\_RSTST Register (offset = 14h) [reset = 0h]*
+
+RM\_GFX\_RSTST is shown in [Figure](#page-248-1) 8-194 and described in Table [8-211](#page-248-2).
+
+This register logs the different reset sources of the GFX domain. Each bit is set upon release of the domain reset signal. Must be cleared by software. [warm reset insensitive]
+
+
+
+#### **Table 8-211. RM\_GFX\_RSTST Register Field Descriptions**
+
+
+| Bit   | Field    | Type | Reset | Description                                                                                                                          |
+|-------|----------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------|
+| 31-12 | Reserved | R    | 0h    |                                                                                                                                      |
+| 11-2  | Reserved | R    | 0h    |                                                                                                                                      |
+| 1     | Reserved | R    | 0h    |                                                                                                                                      |
+| 0     | GFX_RST  | R/W  | 0h    | GFX Domain Logic Reset<br>0x0 = RESET_NO : No SW reset occured<br>0x1 = RESET_YES : GFX Domain Logic has been reset upon SW<br>reset |
+
+### **8.1.13.8 PRM\_CEFUSE Registers**
+
+Table [8-212](#page-248-3) lists the memory-mapped registers for the PRM\_CEFUSE. All register offset addresses not listed in Table [8-212](#page-248-3) should be considered as reserved locations and the register contents should not be modified.
+
+### **Table 8-212. PRM\_CEFUSE REGISTERS**
+
+
+| Offset | Acronym             | Register Name                                                                                            | Section            |
+|--------|---------------------|----------------------------------------------------------------------------------------------------------|--------------------|
+| 0h     | PM_CEFUSE_PWRSTCTRL | This register controls the CEFUSE power state to reach<br>upon a domain sleep transition                 | Section 8.1.13.8.1 |
+| 4h     | PM_CEFUSE_PWRSTST   | This register provides a status on the current CEFUSE<br>power domain state.<br>[warm reset insensitive] | Section 8.1.13.8.2 |
+
+
+# *8.1.13.8.1 PM\_CEFUSE\_PWRSTCTRL Register (offset = 0h) [reset = 0h]*
+
+PM\_CEFUSE\_PWRSTCTRL is shown in [Figure](#page-249-1) 8-195 and described in Table [8-213](#page-249-2).
+
+This register controls the CEFUSE power state to reach upon a domain sleep transition
+
+### **Figure 8-195. PM\_CEFUSE\_PWRSTCTRL Register**
+
+
+LEGEND: R/W = Read/Write; R = Read only; W1toCl = Write 1 to clear bit; *-n* = value after reset
+
+#### **Table 8-213. PM\_CEFUSE\_PWRSTCTRL Register Field Descriptions**
+
+
+| Bit  | Field               | Type | Reset | Description                                                                                                                                                                                                                                                                                                                                                        |
+|------|---------------------|------|-------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-5 | Reserved            | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                    |
+| 4    | LowPowerStateChange | R/W  | 0h    | Power state change request when domain has already performed a<br>sleep transition.<br>Allows going into deeper low power state without waking up the<br>power domain.<br>0x0 = DIS : Do not request a low power state change.<br>0x1 = EN : Request a low power state change. This bit is<br>automatically cleared when the power state is effectively changed or |
+|      |                     |      |       | when power state is ON.                                                                                                                                                                                                                                                                                                                                            |
+| 3-2  | Reserved            | R    | 0h    |                                                                                                                                                                                                                                                                                                                                                                    |
+| 1-0  | PowerState          | R/W  | 0h    | Power state control<br>0x0 = OFF : OFF state                                                                                                                                                                                                                                                                                                                       |
+|      |                     |      |       | 0x1 = Reserved : Reserved                                                                                                                                                                                                                                                                                                                                          |
+|      |                     |      |       | 0x2 = INACT : INACTIVE state                                                                                                                                                                                                                                                                                                                                       |
+|      |                     |      |       | 0x3 = ON : ON State                                                                                                                                                                                                                                                                                                                                                |
+
+
+### *8.1.13.8.2 PM\_CEFUSE\_PWRSTST Register (offset = 4h) [reset = 7h]*
+
+PM\_CEFUSE\_PWRSTST is shown in [Figure](#page-250-1) 8-196 and described in Table [8-214.](#page-250-2)
+
+This register provides a status on the current CEFUSE power domain state. [warm reset insensitive]
+
+
+#### **Table 8-214. PM\_CEFUSE\_PWRSTST Register Field Descriptions**
+
+
+| Bit   | Field                 | Type | Reset | Description                                                                                                                                                                                                                      |
+|-------|-----------------------|------|-------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 31-26 | Reserved              | R    | 0h    |                                                                                                                                                                                                                                  |
+| 25-24 | LastPowerStateEntered | R/W  | 0h    | Last low power state entered.<br>Set to 0x3 upon write of the same only.<br>This register is intended for debug purpose only.<br>0x0 = OFF : Power domain was previously OFF<br>0x1 = ON : Power domain was previously ON-ACTIVE |
+| 23-21 | Reserved              | R    | 0h    |                                                                                                                                                                                                                                  |
+| 20    | InTransition          | R    | 0h    | Domain transition status<br>0x0 = No : No on-going transition on power domain<br>0x1 = Ongoing : Power domain transition is in progress.                                                                                         |
+| 19-3  | Reserved              | R    | 0h    |                                                                                                                                                                                                                                  |
+| 2     | LogicStateSt          | R    | 1h    | Logic state status<br>0x0 = OFF : Logic in domain is OFF<br>0x1 = ON : Logic in domain is ON                                                                                                                                     |
+| 1-0   | PowerStateSt          | R    | 3h    | Current power state status<br>0x0 = OFF : Power domain is OFF<br>0x1 = RET : Power domain is in RETENTION<br>0x2 = INACTIVE : Power domain is ON-INACTIVE<br>0x3 = ON : Power domain is ON-ACTIVE                                |

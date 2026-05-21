@@ -61,6 +61,8 @@ compiler/           ← Phase 2: Python cross compiler → ARMv7-A (HOÀN THÀNH
 | CPU monitor     | Đo CPU% thực tế qua ARM cycle counter — bao gồm cả thời gian xử lý IRQ |
 | GPIO driver     | 4 GPIO banks (GPIO0-3), PRCM clock enable, output/input API |
 | LED control     | USR0-USR3 (GPIO1_21-24) điều khiển qua web dashboard |
+| USB keyboard demo | BBB Type-A host → AM335x USB1 → HID boot keyboard → shell input; hardware confirmed |
+| TTY input layer | UART RX và USB keyboard cùng đi qua TTY/console input queue |
 
 ---
 
