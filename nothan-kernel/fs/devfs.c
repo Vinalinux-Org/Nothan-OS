@@ -9,9 +9,9 @@
 #include "devfs.h"
 #include "nothan/cdev.h"
 #include "nothan/fs.h"
-#include "uart.h"
+#include "nothan/printk.h"
+#include "nothan/tty.h"
 #include "syscalls.h"
-#include "wait_queue.h"
 #include "string.h"
 
 /* /dev/null — silently discards writes, returns EOF on read. */
@@ -32,17 +32,17 @@ static const struct file_operations null_fops = {
     .write = null_write,
 };
 
-/* /dev/tty — wraps the UART RX/TX path.
- * Read blocks on uart_rx_wq; write expands \n to \r\n. */
+/* /dev/tty — wraps the shared console RX path and UART TX path. */
 static int tty_read(struct file *f, void *buf, uint32_t len)
 {
+    char *out;
+    int c;
+
     (void)f;
     if (len == 0) return 0;
 
-    char *out = buf;
-    wait_event(uart_rx_wq, uart_rx_available() > 0);
-
-    int c = uart_getc();
+    out = buf;
+    c = tty_read_char();
     if (c < 0) return 0;
     out[0] = (char)c;
     return 1;
@@ -51,12 +51,7 @@ static int tty_read(struct file *f, void *buf, uint32_t len)
 static int tty_write(struct file *f, const void *buf, uint32_t len)
 {
     (void)f;
-    const char *s = buf;
-    for (uint32_t i = 0; i < len; i++) {
-        if (s[i] == '\n') uart_putc('\r');
-        uart_putc(s[i]);
-    }
-    return (int)len;
+    return tty_write_buf(buf, len);
 }
 
 static const struct file_operations tty_fops = {

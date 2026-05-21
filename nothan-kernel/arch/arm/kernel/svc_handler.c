@@ -23,6 +23,7 @@
 #include "proc.h"
 #include "svc_context.h"
 #include "platform_device.h"
+#include "nothan/tty.h"
 
 extern uint8_t _shell_payload_start;
 extern uint8_t _shell_payload_end;
@@ -166,13 +167,10 @@ static int32_t sys_read(struct svc_context *ctx)
     if (len == 0)
         return 0;
 
-    /* Blocking read: wait_event() parks the task in uart_rx_wq until
-     * the RX IRQ handler calls wake_up(). Only len=1 is supported. */
+    /* Only len=1 is supported for the interactive shell path. */
     char *c_buf = (char *)buf;
 
-    wait_event(uart_rx_wq, uart_rx_available() > 0);
-
-    int c = uart_getc();
+    int c = tty_read_char();
     if (c == -1)
         return 0;
 
