@@ -208,6 +208,9 @@ SECTIONS
      * ======================================================== */
     _kernel_end = ADDR(.stack) + SIZEOF(.stack);
 
+    /* Discard ARM unwind tables — not needed in bare-metal kernel */
+    /DISCARD/ : { *(.ARM.exidx*) *(.ARM.attributes) *(.note*) }
+
     /* ========================================================
      * Helper symbols for PA/VA conversion
      * Used by boot code and MMU trampoline.

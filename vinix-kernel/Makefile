@@ -59,6 +59,15 @@ C_SRC = arch/arm/kernel/exception_handlers.c \
         drivers/base/platform.c \
         drivers/video/boot_screen.c \
         drivers/video/home_ui.c \
+        drivers/ui/ui_main.c \
+        drivers/ui/ui_lock.c \
+        drivers/ui/ui_login.c \
+        drivers/ui/ui_home.c \
+        drivers/ui/ui_auth.c \
+        drivers/ui/screen_transition.c \
+        drivers/ui/lv_port_disp.c \
+        drivers/ui/lv_port_indev.c \
+        drivers/ui/cursor_canvas.c \
         fs/char_dev.c \
         fs/vfs.c \
         fs/fat32.c \
@@ -84,7 +93,7 @@ PAYLOAD_OBJ = $(BUILD_DIR)/payload.o
 OBJS        = $(ASM_OBJ) $(C_OBJ) $(PAYLOAD_OBJ)
 
 # VPATH lets Make find sources by basename across directory tree
-VPATH = arch/arm/entry:arch/arm/exceptions:arch/arm/scheduler:arch/arm/mm:arch/arm/kernel:arch/arm/mach-omap2:init:kernel:kernel/irq:kernel/irqchip:kernel/printk:kernel/time:kernel/sched:kernel/locking:drivers/base:drivers/video:drivers/video/fbdev:drivers/tty:drivers/tty/serial:drivers/irqchip:drivers/clocksource:drivers/i2c:drivers/i2c/busses:drivers/mmc/core:drivers/mmc/host:drivers/watchdog:drivers/gpu/drm/tilcdc:drivers/gpu/drm/i2c:drivers/input:drivers/usb/host:drivers/usb/hid:fs:mm:block:block/partitions:lib:lib/fonts:lib/test
+VPATH = arch/arm/entry:arch/arm/exceptions:arch/arm/scheduler:arch/arm/mm:arch/arm/kernel:arch/arm/mach-omap2:init:kernel:kernel/irq:kernel/irqchip:kernel/printk:kernel/time:kernel/sched:kernel/locking:drivers/base:drivers/video:drivers/video/fbdev:drivers/tty:drivers/tty/serial:drivers/irqchip:drivers/clocksource:drivers/i2c:drivers/i2c/busses:drivers/mmc/core:drivers/mmc/host:drivers/watchdog:drivers/gpu/drm/tilcdc:drivers/gpu/drm/i2c:drivers/input:drivers/usb/host:drivers/usb/hid:drivers/ui:fs:mm:block:block/partitions:lib:lib/fonts:lib/test
 
 CFLAGS = -Wall -nostdlib -nostartfiles -ffreestanding \
          -march=armv7-a -mtune=cortex-a8 \
@@ -95,7 +104,28 @@ CFLAGS = -Wall -nostdlib -nostartfiles -ffreestanding \
          -Iarch/arm/include \
          -Iarch/arm/mach-omap2/include \
          -I$(USERSPACE_DIR)/include \
+         -Idrivers/ui \
          -O2 -g
+
+# ── LVGL (optional) — auto-detected from lib/lvgl symlink ───────────
+LVGL_DIR := lib/lvgl
+ifeq ($(wildcard $(LVGL_DIR)/lvgl.h),$(LVGL_DIR)/lvgl.h)
+  LVGL_SRCS := $(shell find $(LVGL_DIR)/src -name "*.c" \
+                 | grep -v "extra/libs/" \
+                 | grep -v "extra/themes/default" \
+                 | grep -v "extra/themes/basic" \
+                 | grep -v "extra/widgets/calendar")
+  C_SRC     += $(LVGL_SRCS)
+  ASM_OBJ   := $(addprefix $(BUILD_DIR)/, $(notdir $(ASM_SRC:.S=.o)))
+  C_OBJ     := $(addprefix $(BUILD_DIR)/, $(notdir $(C_SRC:.c=.o)))
+  OBJS      := $(ASM_OBJ) $(C_OBJ) $(PAYLOAD_OBJ)
+  CFLAGS    += -Ilib -DLV_CONF_INCLUDE_SIMPLE -DLVGL_PRESENT \
+               -Wno-unused-function
+  VPATH     += $(subst $(eval) ,:,$(sort $(dir $(LVGL_SRCS))))
+  $(info [LVGL] found — building with LVGL support)
+else
+  $(info [LVGL] not found at $(LVGL_DIR)/lvgl.h — UI disabled)
+endif
 ASFLAGS = -march=armv7-a -mfloat-abi=soft
 LDFLAGS = -T arch/arm/kernel.ld -nostdlib -Wl,-Map=$(BUILD_DIR)/kernel.map
 
