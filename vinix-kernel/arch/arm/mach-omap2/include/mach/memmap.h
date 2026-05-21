@@ -11,6 +11,9 @@
 #define PLATFORM_PERIPH_L4_PER_PA         0x48000000
 #define PLATFORM_PERIPH_L4_PER_SECTIONS   4
 
+#define PLATFORM_PERIPH_USB0_PA           0x47400000
+#define PLATFORM_PERIPH_USB0_SECTIONS     1
+
 /* Individual peripheral base addresses.
  * Drivers obtain their base from platform_get_resource() in probe().
  * These constants are used only in early boot paths where the platform
@@ -22,6 +25,13 @@
 #define OMAP_DMTIMER2_BASE  0x48040000
 #define OMAP_INTC_BASE      0x48200000
 #define OMAP_LCDC_BASE      0x4830E000
+#define OMAP_USBSS_BASE     0x47400000
+#define OMAP_USB0_CTRL_BASE 0x47401000
+#define OMAP_USB0_CORE_BASE 0x47401400
+#define OMAP_USB0_PHY_BASE  0x47401300
+#define OMAP_USB1_CTRL_BASE 0x47401800
+#define OMAP_USB1_CORE_BASE 0x47401C00
+#define OMAP_USB1_PHY_BASE  0x47401B00
 
 struct platform_peripheral_region {
     uint32_t pa;

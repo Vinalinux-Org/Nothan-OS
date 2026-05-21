@@ -15,4 +15,8 @@
  */
 void boot_screen_run(void);
 
+/* Redraw the home screen (icon grid + status bar).
+ * Called by home_ui when a panel is closed. */
+void show_home(void);
+
 #endif /* BOOT_SCREEN_H */

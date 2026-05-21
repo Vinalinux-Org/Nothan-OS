@@ -16,6 +16,7 @@
 #define CM_PER_MMC0_CLKCTRL         (CM_PER_BASE + 0x03C)
 #define CM_PER_UART0_CLKCTRL        (CM_PER_BASE + 0x06C)
 #define CM_PER_TIMER2_CLKCTRL       (CM_PER_BASE + 0x080)
+#define CM_PER_USB0_CLKCTRL         (CM_PER_BASE + 0x01C)
 #define CM_PER_LCDC_CLKSTCTRL       (CM_PER_BASE + 0x148)
 
 /* CM_DPLL — Clock Module DPLL (PLL clock selection) */

@@ -9,6 +9,7 @@
  *   omap-wdt     @ 0x44E35000  (WDT1)
  *   omap-i2c     @ 0x44E0B000  (I2C0 — TDA19988 HDMI, PMIC, EEPROM)
  *   tilcdc       @ 0x4830E000  (LCDC + TDA19988 HDMI bridge)
+ *   musb-host    @ 0x47401800  (USB1 MUSB host controller — Type A port)
  *
  * Each driver's probe() function is called by the platform bus when its
  * matching name is found in this table.
@@ -67,6 +68,13 @@ static struct platform_device omap_tilcdc = {
     .clk_id = "lcdc",
 };
 
+static struct platform_device usb1_host_dev = {
+    .name   = "musb-host",
+    .base   = 0x47401800,
+    .irq    = PLATFORM_IRQ_USB1,
+    .clk_id = "usb0",
+};
+
 static struct platform_device *bbb_devices[] = {
     &omap_intc,
     &omap_uart0,
@@ -75,6 +83,7 @@ static struct platform_device *bbb_devices[] = {
     &omap_hsmmc0,
     &omap_wdt,
     &omap_tilcdc,
+    &usb1_host_dev,
 };
 
 static int __init bbb_platform_init(void)

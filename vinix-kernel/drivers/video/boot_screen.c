@@ -230,7 +230,7 @@ static void draw_app_icon(uint32_t cx, uint32_t cy, uint32_t r,
 }
 
 
-static void show_home(void)
+void show_home(void)
 {
     uint32_t sw = lcdc_get_width();   /* 800 */
     uint32_t sh = lcdc_get_height();  /* 600 */

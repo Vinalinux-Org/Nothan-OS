@@ -66,6 +66,8 @@ void mmu_init(void)
                 PERIPH_L4_WKUP_PA, PERIPH_L4_WKUP_SECTIONS);
     pr_info("[MMU] Peripheral L4_PER:  PA 0x%x (%d MB) [Strongly Ordered, Identity]\n",
                 PERIPH_L4_PER_PA, PERIPH_L4_PER_SECTIONS);
+    pr_info("[MMU] Peripheral USB0:    PA 0x%x (%d MB) [Strongly Ordered, Identity]\n",
+                PERIPH_USB0_PA, PERIPH_USB0_SECTIONS);
     pr_info("[MMU] Framebuffer:        PA 0x%x – 0x%x (%d MB) [Non-Cacheable, Identity]\n",
                 FB_PA_BASE, FB_PA_BASE + (FB_SECTIONS * MMU_SECTION_SIZE) - 1, FB_SECTIONS);
     pr_info("[MMU] Identity mapping removed (VA 0x80000000 now unmapped)\n");
@@ -126,6 +128,12 @@ uint32_t mmu_new_pgd(void)
     for (uint32_t i = 0; i < PERIPH_L4_PER_SECTIONS; i++)
     {
         uint32_t idx = (PERIPH_L4_PER_PA >> MMU_SECTION_SHIFT) + i;
+        new_pgd[idx] = pgd[idx];
+    }
+
+    for (uint32_t i = 0; i < PERIPH_USB0_SECTIONS; i++)
+    {
+        uint32_t idx = (PERIPH_USB0_PA >> MMU_SECTION_SHIFT) + i;
         new_pgd[idx] = pgd[idx];
     }
 
@@ -205,10 +213,17 @@ mmu_build_page_table_boot(uint32_t *pgd_pa)
         pgd_pa[pa >> MMU_SECTION_SHIFT] = pa | MMU_SECT_PERIPHERAL;
     }
 
-    /* L4_PER: INTC, DMTimer, GPIO (3MB) */
+    /* L4_PER: INTC, DMTimer, GPIO (4MB) */
     for (i = 0; i < PERIPH_L4_PER_SECTIONS; i++)
     {
         pa = PERIPH_L4_PER_PA + (i * MMU_SECTION_SIZE);
+        pgd_pa[pa >> MMU_SECTION_SHIFT] = pa | MMU_SECT_PERIPHERAL;
+    }
+
+    /* USB0: MUSB host controller (1MB) */
+    for (i = 0; i < PERIPH_USB0_SECTIONS; i++)
+    {
+        pa = PERIPH_USB0_PA + (i * MMU_SECTION_SIZE);
         pgd_pa[pa >> MMU_SECTION_SHIFT] = pa | MMU_SECT_PERIPHERAL;
     }
 

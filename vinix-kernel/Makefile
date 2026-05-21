@@ -58,6 +58,7 @@ C_SRC = arch/arm/kernel/exception_handlers.c \
         drivers/base/device.c \
         drivers/base/platform.c \
         drivers/video/boot_screen.c \
+        drivers/video/home_ui.c \
         fs/char_dev.c \
         fs/vfs.c \
         fs/fat32.c \
@@ -68,6 +69,10 @@ C_SRC = arch/arm/kernel/exception_handlers.c \
         mm/vmm.c \
         block/block.c \
         block/buffer_cache.c \
+        drivers/input/input_core.c \
+        drivers/input/mouse_cursor.c \
+        drivers/usb/host/musb_host.c \
+        drivers/usb/hid/hid_mouse.c \
         lib/string.c \
         lib/format.c \
         lib/test/selftest.c
@@ -79,7 +84,7 @@ PAYLOAD_OBJ = $(BUILD_DIR)/payload.o
 OBJS        = $(ASM_OBJ) $(C_OBJ) $(PAYLOAD_OBJ)
 
 # VPATH lets Make find sources by basename across directory tree
-VPATH = arch/arm/entry:arch/arm/exceptions:arch/arm/scheduler:arch/arm/mm:arch/arm/kernel:arch/arm/mach-omap2:init:kernel:kernel/irq:kernel/irqchip:kernel/printk:kernel/time:kernel/sched:kernel/locking:drivers/base:drivers/video:drivers/video/fbdev:drivers/tty:drivers/tty/serial:drivers/irqchip:drivers/clocksource:drivers/i2c:drivers/i2c/busses:drivers/mmc/core:drivers/mmc/host:drivers/watchdog:drivers/gpu/drm/tilcdc:drivers/gpu/drm/i2c:fs:mm:block:block/partitions:lib:lib/fonts:lib/test
+VPATH = arch/arm/entry:arch/arm/exceptions:arch/arm/scheduler:arch/arm/mm:arch/arm/kernel:arch/arm/mach-omap2:init:kernel:kernel/irq:kernel/irqchip:kernel/printk:kernel/time:kernel/sched:kernel/locking:drivers/base:drivers/video:drivers/video/fbdev:drivers/tty:drivers/tty/serial:drivers/irqchip:drivers/clocksource:drivers/i2c:drivers/i2c/busses:drivers/mmc/core:drivers/mmc/host:drivers/watchdog:drivers/gpu/drm/tilcdc:drivers/gpu/drm/i2c:drivers/input:drivers/usb/host:drivers/usb/hid:fs:mm:block:block/partitions:lib:lib/fonts:lib/test
 
 CFLAGS = -Wall -nostdlib -nostartfiles -ffreestanding \
          -march=armv7-a -mtune=cortex-a8 \
