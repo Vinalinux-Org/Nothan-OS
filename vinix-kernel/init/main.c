@@ -32,8 +32,7 @@
 #include "selftest.h"
 #include "syscalls.h"
 #include "types.h"
-#include "boot_screen.h"
-#include "home_ui.h"
+struct task_struct *get_ui_task(void);
 
 extern void sync_selftest(void);
 
@@ -49,9 +48,6 @@ extern uint8_t _shell_payload_end;
 /* Initial User Process State */
 static struct task_struct shell_task;
 
-/* Home UI kernel task */
-static struct task_struct home_ui_task;
-static uint8_t home_ui_stack[4096];
 
 /*
  * We allocate the user stack at the top of the 1MB User Space memory
@@ -196,14 +192,9 @@ void kernel_main(void)
     if (scheduler_add_task(&shell_task) < 0)
         pr_info("[BOOT] Failed to add User App Task\n");
 
-    home_ui_task.name  = "home-ui";
-    home_ui_task.state = TASK_RUNNING;
-    home_ui_task.id    = 2;
-    task_stack_init(&home_ui_task, home_ui_run,
-                    home_ui_stack,
-                    sizeof(home_ui_stack));
-    if (scheduler_add_task(&home_ui_task) < 0)
-        pr_info("[BOOT] Failed to add home-ui task\n");
+    struct task_struct *ui_task = get_ui_task();
+    if (scheduler_add_task(ui_task) < 0)
+        pr_info("[BOOT] Failed to add LVGL ui task\n");
 
     /*
      * Device Init: bring up the scheduler timer and remaining drivers.
@@ -211,9 +202,6 @@ void kernel_main(void)
      * a periodic IRQ source plus free-running TCRR for delay_ms().
      */
     do_initcalls(6);
-
-    pr_info("[BOOT] UART init complete. Starting HDMI boot screen...\n");
-    boot_screen_run();
 
     /*
      * Run the final system self-tests to ensure critical structures
