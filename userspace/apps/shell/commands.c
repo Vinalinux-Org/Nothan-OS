@@ -305,8 +305,8 @@ static int cmd_kill(int argc, char **argv)
 static int cmd_devlist(int argc, char **argv)
 {
     (void)argc; (void)argv;
-    dev_info_t devs[8];
-    int n = sys_devlist(devs, 8);
+    dev_info_t devs[16];
+    int n = sys_devlist(devs, 16);
     if (n < 0) {
         printf("devlist failed: %d\n", n);
         return -1;
