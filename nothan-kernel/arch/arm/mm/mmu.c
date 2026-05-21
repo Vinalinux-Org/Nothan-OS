@@ -64,6 +64,8 @@ void mmu_init(void)
                 POOL_KERNEL_VA_BASE, POOL_KERNEL_PA_BASE, POOL_KERNEL_MB);
     pr_info("[MMU] Peripheral L4_WKUP: PA 0x%x (%d MB) [Strongly Ordered, Identity]\n",
                 PERIPH_L4_WKUP_PA, PERIPH_L4_WKUP_SECTIONS);
+    pr_info("[MMU] Peripheral USBSS:   PA 0x%x (%d MB) [Strongly Ordered, Identity]\n",
+                PERIPH_USBSS_PA, PERIPH_USBSS_SECTIONS);
     pr_info("[MMU] Peripheral L4_PER:  PA 0x%x (%d MB) [Strongly Ordered, Identity]\n",
                 PERIPH_L4_PER_PA, PERIPH_L4_PER_SECTIONS);
     pr_info("[MMU] Peripheral L4_FAST: PA 0x%x (%d MB) [Strongly Ordered, Identity]\n",
@@ -124,6 +126,12 @@ uint32_t mmu_new_pgd(void)
      * but must remain accessible from kernel mode after a TTBR switch. */
     uint32_t wkup_idx = PERIPH_L4_WKUP_PA >> MMU_SECTION_SHIFT;
     new_pgd[wkup_idx] = pgd[wkup_idx];
+
+    for (uint32_t i = 0; i < PERIPH_USBSS_SECTIONS; i++)
+    {
+        uint32_t idx = (PERIPH_USBSS_PA >> MMU_SECTION_SHIFT) + i;
+        new_pgd[idx] = pgd[idx];
+    }
 
     for (uint32_t i = 0; i < PERIPH_L4_PER_SECTIONS; i++)
     {
@@ -192,6 +200,7 @@ void mmu_install_user_section(uint32_t *pgd_va, uint32_t user_va,
  *   PA 0x80000000 → VA 0xC0000000  (kernel DDR, cached, kernel-only)
  *   PA 0x80000000 → VA 0x80000000  (identity map, temporary, removed by mmu_init)
  *   PA 0x44E00000 → VA 0x44E00000  (L4_WKUP peripherals, strongly ordered)
+ *   PA 0x47400000 → VA 0x47400000  (USBSS peripherals, strongly ordered)
  *   PA 0x48000000 → VA 0x48000000  (L4_PER peripherals, strongly ordered)
  *   framebuffer PA → same VA        (normal non-cacheable)
  */
@@ -213,7 +222,14 @@ mmu_build_page_table_boot(uint32_t *pgd_pa)
         pgd_pa[pa >> MMU_SECTION_SHIFT] = pa | MMU_SECT_PERIPHERAL;
     }
 
-    /* L4_PER: INTC, DMTimer, GPIO (3MB) */
+    /* USBSS: USB subsystem, USB1 controller, USB1 PHY, USB1 core (1MB) */
+    for (i = 0; i < PERIPH_USBSS_SECTIONS; i++)
+    {
+        pa = PERIPH_USBSS_PA + (i * MMU_SECTION_SIZE);
+        pgd_pa[pa >> MMU_SECTION_SHIFT] = pa | MMU_SECT_PERIPHERAL;
+    }
+
+    /* L4_PER: INTC, DMTimer, GPIO, LCDC (4MB) */
     for (i = 0; i < PERIPH_L4_PER_SECTIONS; i++)
     {
         pa = PERIPH_L4_PER_PA + (i * MMU_SECTION_SIZE);

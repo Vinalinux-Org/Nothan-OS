@@ -11,6 +11,7 @@
  *   tilcdc       @ 0x4830E000  (LCDC + TDA19988 HDMI bridge)
  *   omap-mdio    @ 0x4A101000  (MDIO bus controller)
  *   omap-cpsw    @ 0x4A100000  (Ethernet switch)
+ *   omap-usb1    @ 0x47401800  (USB1 host controller)
  *   omap-gpio    @ 0x44E07000/4804C000/481AC000/481AE000  (GPIO banks 0-3)
  *
  * Each driver's probe() function is called by the platform bus when its
@@ -84,6 +85,13 @@ static struct platform_device omap_cpsw0 = {
     .clk_id = "cpgmac0",
 };
 
+static struct platform_device omap_usb1 = {
+    .name   = "omap-usb1",
+    .base   = 0x47401800,
+    .irq    = PLATFORM_IRQ_USB1,
+    .clk_id = 0,
+};
+
 static struct platform_device omap_gpio0 = {
     .name   = "omap-gpio",
     .base   = 0x44E07000,
@@ -122,6 +130,7 @@ static struct platform_device *bbb_devices[] = {
     &omap_tilcdc,
     &omap_mdio0,
     &omap_cpsw0,
+    &omap_usb1,
     &omap_gpio0,
     &omap_gpio1,
     &omap_gpio2,

@@ -7,6 +7,7 @@
 #define PLATFORM_IRQ_CPSW_RX         41
 #define PLATFORM_IRQ_CPSW_TX         42
 #define PLATFORM_IRQ_CPSW_MISC       43
+#define PLATFORM_IRQ_USB1     19
 #define PLATFORM_IRQ_MMC0     64
 #define PLATFORM_IRQ_DMTIMER2 68
 #define PLATFORM_IRQ_UART0    72
