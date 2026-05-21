@@ -35,6 +35,7 @@ C_SRC = arch/arm/kernel/exception_handlers.c \
         drivers/i2c/i2c-core.c \
         drivers/mmc/core/core.c \
         drivers/mmc/core/mmc_block.c \
+        drivers/tty/console_input.c \
         drivers/tty/serial/serial_core.c \
         kernel/sched/scheduler.c \
         kernel/sched/task.c \
@@ -49,6 +50,7 @@ C_SRC = arch/arm/kernel/exception_handlers.c \
         drivers/irqchip/irq-omap-intc.c \
         drivers/clocksource/timer-omap-dm.c \
         drivers/i2c/busses/i2c-omap.c \
+        drivers/usb/musb/omap_usb1.c \
         drivers/gpu/drm/tilcdc/tilcdc_drv.c \
         drivers/gpu/drm/i2c/tda998x.c \
         drivers/mmc/host/omap_hsmmc.c \
@@ -91,7 +93,16 @@ PAYLOAD_OBJ = $(BUILD_DIR)/payload.o
 OBJS        = $(ASM_OBJ) $(C_OBJ) $(PAYLOAD_OBJ)
 
 # VPATH lets Make find sources by basename across directory tree
-VPATH = arch/arm/entry:arch/arm/exceptions:arch/arm/scheduler:arch/arm/mm:arch/arm/kernel:arch/arm/mach-omap2:init:kernel:kernel/irq:kernel/irqchip:kernel/printk:kernel/time:kernel/sched:kernel/locking:drivers/base:drivers/video:drivers/video/fbdev:drivers/tty:drivers/tty/serial:drivers/irqchip:drivers/clocksource:drivers/i2c:drivers/i2c/busses:drivers/mmc/core:drivers/mmc/host:drivers/watchdog:drivers/gpio:drivers/net:drivers/net/ipv4:drivers/net/app:drivers/net/ethernet/ti:drivers/gpu/drm/tilcdc:drivers/gpu/drm/i2c:fs:mm:block:block/partitions:lib:lib/fonts:lib/test
+VPATH = arch/arm/entry:arch/arm/exceptions:arch/arm/scheduler:arch/arm/mm \
+        arch/arm/kernel:arch/arm/mach-omap2:init:kernel:kernel/irq \
+        kernel/irqchip:kernel/printk:kernel/time:kernel/sched:kernel/locking \
+        drivers/base:drivers/video:drivers/video/fbdev:drivers/tty \
+        drivers/tty/serial:drivers/irqchip:drivers/clocksource:drivers/i2c \
+        drivers/i2c/busses:drivers/usb/musb:drivers/mmc/core \
+        drivers/mmc/host:drivers/watchdog:drivers/gpio:drivers/net \
+        drivers/net/ipv4:drivers/net/app:drivers/net/ethernet/ti \
+        drivers/gpu/drm/tilcdc:drivers/gpu/drm/i2c:fs:mm:block \
+        block/partitions:lib:lib/fonts:lib/test
 
 CFLAGS = -Wall -nostdlib -nostartfiles -ffreestanding \
          -march=armv7-a -mtune=cortex-a8 \

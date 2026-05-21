@@ -34,6 +34,7 @@
 #include "types.h"
 #include "boot_screen.h"
 #include "net_task.h"
+#include "usb_kbd_task.h"
 
 extern void sync_selftest(void);
 
@@ -65,6 +66,15 @@ static struct task_struct shell_task;
  */
 void kernel_main(void)
 {
+    struct task_struct *idle_ptr;
+    struct task_struct *net_ptr;
+    struct task_struct *usb_kbd_ptr;
+    uint32_t payload_size;
+    uint32_t part_lba;
+    uint8_t *src;
+    uint8_t *dst;
+    uint32_t i;
+
     /*
      * IRQ dispatch table must be zero-initialized before any driver
      * probe can call request_irq().
@@ -129,7 +139,6 @@ void kernel_main(void)
         while (1);
     }
 
-    uint32_t part_lba;
     if (mbr_find_fat32(&part_lba, NULL) != E_OK) {
         pr_err("[BOOT] ERROR: No FAT32 partition found on SD card\n");
         while (1);
@@ -161,12 +170,14 @@ void kernel_main(void)
      * Copies the embedded shell executable from kernel memory into
      * the designated 1MB user-space region.
      */
-    uint32_t payload_size = (uint32_t)&_shell_payload_end - (uint32_t)&_shell_payload_start;
-    pr_info("[BOOT] Loading User App Payload to 0x%x (Size: %d bytes)\n", USER_SPACE_VA, payload_size);
+    payload_size = (uint32_t)&_shell_payload_end -
+                   (uint32_t)&_shell_payload_start;
+    pr_info("[BOOT] Loading User App Payload to 0x%x (Size: %d bytes)\n",
+            USER_SPACE_VA, payload_size);
 
-    uint8_t *src = &_shell_payload_start;
-    uint8_t *dst = (uint8_t *)USER_SPACE_VA;
-    for (uint32_t i = 0; i < payload_size; i++)
+    src = &_shell_payload_start;
+    dst = (uint8_t *)USER_SPACE_VA;
+    for (i = 0; i < payload_size; i++)
         dst[i] = src[i];
     pr_info("[BOOT] Payload successfully copied to User Space.\n");
 
@@ -178,7 +189,7 @@ void kernel_main(void)
      */
     scheduler_init();
 
-    struct task_struct *idle_ptr = get_idle_task();
+    idle_ptr = get_idle_task();
     scheduler_add_task(idle_ptr);
 
     shell_task.name = "init";
@@ -192,9 +203,13 @@ void kernel_main(void)
     if (scheduler_add_task(&shell_task) < 0)
         pr_info("[BOOT] Failed to add User App Task\n");
 
-    struct task_struct *net_ptr = get_net_task();
+    net_ptr = get_net_task();
     if (scheduler_add_task(net_ptr) < 0)
         pr_info("[BOOT] Failed to add net task\n");
+
+    usb_kbd_ptr = usb_kbd_get_task();
+    if (scheduler_add_task(usb_kbd_ptr) < 0)
+        pr_info("[BOOT] Failed to add usbkbd task\n");
 
     /*
      * Device Init: bring up the scheduler timer and remaining drivers.
@@ -221,8 +236,7 @@ void kernel_main(void)
      * The kernel main thread now becomes the idle loop.
      * The scheduler will never return from this point.
      */
-    while (1)
-    {
+    while (1) {
         pr_emerg("PANIC: Scheduler returned!\n");
     }
 }
