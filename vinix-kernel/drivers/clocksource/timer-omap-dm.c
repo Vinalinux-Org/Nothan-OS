@@ -17,6 +17,9 @@
 #include "platform_device.h"
 #include "vinix/init.h"
 
+/* Weak stub — overridden by LVGL's lv_hal_tick.c when LVGL is linked */
+__attribute__((weak)) void lv_tick_inc(uint32_t period) { (void)period; }
+
 /* CM_PER_L4LS_CLKSTCTRL bits */
 #define CLKTRCTRL_MASK          0x3
 #define CLKTRCTRL_SW_WKUP       0x2
@@ -108,6 +111,7 @@ static void timer_irq_handler(void *data)
     mmio_write32(DMTIMER2_BASE + IRQSTATUS, IRQ_OVF_IT_FLAG);
 
     timer_ticks++;
+    lv_tick_inc(10);    /* advance LVGL timebase — 10 ms per tick */
 
     if (omap_dmtimer_clkevt.event_handler)
         omap_dmtimer_clkevt.event_handler(&omap_dmtimer_clkevt);
