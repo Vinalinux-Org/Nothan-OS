@@ -5,8 +5,8 @@
  */
 
 #include "cpu.h"
-#include "uart.h"
 #include "nothan/console_input.h"
+#include "nothan/common_subsystem.h"
 #include "nothan/tty.h"
 
 struct console_input_buffer {
@@ -114,14 +114,5 @@ void tty_input_clear(void)
 
 int tty_write_buf(const void *buf, uint32_t len)
 {
-    const char *s;
-    uint32_t i;
-
-    s = (const char *)buf;
-    for (i = 0; i < len; i++) {
-        if (s[i] == '\n')
-            uart_putc('\r');
-        uart_putc(s[i]);
-    }
-    return (int)len;
+    return common_subsystem_write(buf, len);
 }

@@ -36,6 +36,7 @@ C_SRC = arch/arm/kernel/exception_handlers.c \
         drivers/mmc/core/core.c \
         drivers/mmc/core/mmc_block.c \
         drivers/input/kbd_input.c \
+        drivers/tty/common_subsystem.c \
         drivers/tty/console_input.c \
         drivers/tty/serial/serial_core.c \
         kernel/sched/scheduler.c \

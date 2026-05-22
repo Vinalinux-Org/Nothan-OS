@@ -2,11 +2,11 @@
  * kernel/printk/printk.c — kernel log formatter
  *
  * Formats arguments through a minimal vsprintf-like parser
- * and emits each byte via uart_putc.  Supports %d %u %x %X
+ * and emits each byte through the common subsystem.  Supports %d %u %x %X
  * %s %c %% with optional %0NN width.
  */
 
-#include "uart.h"
+#include "nothan/common_subsystem.h"
 #include "nothan/printk.h"
 #include <stdarg.h>
 
@@ -34,7 +34,7 @@ static void emit_uint(uint32_t num, int base)
     int  i = 0;
     static const char digits[] = "0123456789abcdef";
 
-    if (num == 0) { uart_putc('0'); return; }
+    if (num == 0) { common_subsystem_putc('0'); return; }
 
     while (num > 0) {
         uint32_t q, r;
@@ -42,7 +42,7 @@ static void emit_uint(uint32_t num, int base)
         buf[i++] = digits[r];
         num = q;
     }
-    while (i > 0) uart_putc(buf[--i]);
+    while (i > 0) common_subsystem_putc(buf[--i]);
 }
 
 void printk(const char *fmt, ...)
@@ -54,8 +54,7 @@ void printk(const char *fmt, ...)
 
     for (p = fmt; *p; p++) {
         if (*p != '%') {
-            if (*p == '\n') uart_putc('\r');
-            uart_putc(*p);
+            common_subsystem_putc(*p);
             continue;
         }
 
@@ -79,18 +78,18 @@ void printk(const char *fmt, ...)
             break;
         case 's': {
             const char *s = va_arg(args, const char *);
-            uart_puts(s ? s : "(null)");
+            common_subsystem_write_string(s);
             break;
         }
         case 'c':
-            uart_putc((char)va_arg(args, int));
+            common_subsystem_putc((char)va_arg(args, int));
             break;
         case '%':
-            uart_putc('%');
+            common_subsystem_putc('%');
             break;
         default:
-            uart_putc('%');
-            uart_putc(*p);
+            common_subsystem_putc('%');
+            common_subsystem_putc(*p);
             break;
         }
     }

@@ -15,7 +15,7 @@
 #include "assert.h"
 #include "trace.h"
 #include "scheduler.h"
-#include "uart.h"
+#include "nothan/common_subsystem.h"
 #include "syscalls.h"
 #include "mmu.h"
 #include "vfs.h"
@@ -76,15 +76,7 @@ static int32_t sys_write(struct svc_context *ctx)
     if (len > 256)
         return E_ARG;
 
-    const char *str = (const char *)buf;
-    for (uint32_t i = 0; i < len; i++)
-    {
-        if (str[i] == '\n')
-            uart_putc('\r');
-        uart_putc(str[i]);
-    }
-
-    return (int32_t)len;
+    return common_subsystem_write(buf, len);
 }
 
 static int32_t sys_exit(struct svc_context *ctx)
