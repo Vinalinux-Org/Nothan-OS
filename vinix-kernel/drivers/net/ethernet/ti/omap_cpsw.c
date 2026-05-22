@@ -399,14 +399,15 @@ static void cpsw_rx_irq(void *data)
         }
     }
 
-    cpsw_bd_init(bd, 0, CPPI_RX_BUF(i), CPSW_BUF_SIZE, BD_OWNER);
+    uint32_t next = (i < CPSW_RX_COUNT - 1) ? CPPI_RX_BD(i + 1) : 0;
+    cpsw_bd_init(bd, next, CPPI_RX_BUF(i), CPSW_BUF_SIZE, BD_OWNER);
 
     mmio_write32(priv->cpdma_sr_base + SR_RX0_CP, bd);
 
+    priv->rx_idx = (i + 1) % CPSW_RX_COUNT;
+
     if (flags & BD_EOQ)
-        mmio_write32(priv->cpdma_sr_base + SR_RX0_HDP, bd);
-    else
-        priv->rx_idx = (i + 1) % CPSW_RX_COUNT;
+        mmio_write32(priv->cpdma_sr_base + SR_RX0_HDP, CPPI_RX_BD(priv->rx_idx));
 
     mmio_write32(priv->cpdma_base + CPDMA_EOI_VECTOR, CPDMA_EOI_RX);
 }
