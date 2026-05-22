@@ -22,6 +22,7 @@
 #include "mach/control.h"
 #include "mach/irqs.h"
 #include "string.h"
+#include "spinlock.h"
 
 /*
  * MII1 pad mux — TRM Ch.9 §9.3.1.50 + Table 9-10.
@@ -139,6 +140,7 @@ struct cpsw_priv {
     struct phy_device  *phy;
     struct net_device  *ndev;
     int         rx_idx;
+    spinlock_t  tx_lock;
 };
 
 static struct cpsw_priv  omap_cpsw_priv;
@@ -327,10 +329,14 @@ static int cpsw_ndo_start_xmit(struct sk_buff *skb, struct net_device *ndev)
 {
     struct cpsw_priv *priv = ndev->priv;
     int timeout = CPSW_TIMEOUT;
+    uint32_t flags;
+
+    flags = spin_lock_irqsave(&priv->tx_lock);
 
     while ((BD_FLAGS(CPPI_TX_BD) & BD_OWNER) && timeout--)
         ;
     if (BD_FLAGS(CPPI_TX_BD) & BD_OWNER) {
+        spin_unlock_irqrestore(&priv->tx_lock, flags);
         pr_err("[CPSW] TX timeout\n");
         kfree_skb(skb);
         return -EBUSY;
@@ -348,6 +354,8 @@ static int cpsw_ndo_start_xmit(struct sk_buff *skb, struct net_device *ndev)
                  | (tx_len & BD_PKT_LEN_MASK));
 
     mmio_write32(priv->cpdma_sr_base + SR_TX0_HDP, CPPI_TX_BD);
+
+    spin_unlock_irqrestore(&priv->tx_lock, flags);
 
     kfree_skb(skb);
     return 0;
@@ -454,6 +462,8 @@ static int omap_cpsw_probe(struct platform_device *pdev)
         pr_err("[CPSW] hw reset failed\n");
         return -EIO;
     }
+
+    spin_lock_init(&priv->tx_lock);
 
     cpsw_read_mac(ndev->dev_addr);
     pr_info("[CPSW] MAC %02x:%02x:%02x:%02x:%02x:%02x\n",
