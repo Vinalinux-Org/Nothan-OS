@@ -29,12 +29,13 @@
 
 #define HTTP_CHUNK      1400
 
-#define MAX_CONN        4
+#define MAX_CONN        32
 #define CONN_TYPE_HTTP  0
 #define CONN_TYPE_SSE   1
 
 /* keep-alive idle timeout: 5 seconds (500 ticks at 100 Hz) */
 #define KA_TIMEOUT_TICKS  500
+#define SYN_TIMEOUT_TICKS 300
 
 static const unsigned char bbb_ip[4] = {192, 168, 2, 100};
 
@@ -253,6 +254,15 @@ void tcp_poll(void)
     int i;
     for (i = 0; i < MAX_CONN; i++) {
         struct tcp_conn *conn = &conn_table[i];
+        
+        if (conn->state == TCP_SYN_RCVD) {
+            if (jiffies - conn->last_active > SYN_TIMEOUT_TICKS) {
+                pr_info("[TCP] SYN timeout, freeing slot\n");
+                conn->state = TCP_LISTEN;
+            }
+            continue;
+        }
+
         if (conn->state != TCP_ESTABLISHED) continue;
         if (conn->type  == CONN_TYPE_HTTP &&
             jiffies - conn->last_active > KA_TIMEOUT_TICKS) {
