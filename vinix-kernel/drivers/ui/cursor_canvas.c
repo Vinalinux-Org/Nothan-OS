@@ -130,14 +130,11 @@ static void apply_shape(cursor_shape_t shape)
 
 void cursor_canvas_init(lv_indev_t *mouse_indev)
 {
-    /* Create canvas on the system layer — above all other widgets */
     s_canvas = lv_canvas_create(lv_layer_sys());
-
-    /* Draw the default arrow shape */
     apply_shape(CURSOR_SHAPE_ARROW);
 
-    /* Bind the cursor image to the mouse input device */
-    lv_indev_set_cursor(mouse_indev, s_canvas);
+    if (mouse_indev)
+        lv_indev_set_cursor(mouse_indev, s_canvas);
 }
 
 void cursor_canvas_set(cursor_shape_t shape)
