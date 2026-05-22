@@ -163,9 +163,8 @@ static int cmd_ls(int argc, char **argv)
 static int cmd_cat(int argc, char **argv)
 {
     /* No arg: stream from shell_stdin_fd (set by `<` redirect).
-     * Without a redirect, shell_stdin_fd is 0 — the kernel stdin —
-     * which would block on UART, so require either an arg or a
-     * redirect. */
+     * If stdin is still the kernel default fd 0, require an explicit
+     * path or redirect so cat does not consume the interactive input. */
     int fd;
     bool opened_here = false;
 

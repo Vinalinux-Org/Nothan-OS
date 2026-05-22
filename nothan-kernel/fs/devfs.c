@@ -32,7 +32,7 @@ static const struct file_operations null_fops = {
     .write = null_write,
 };
 
-/* /dev/tty — wraps the shared console RX path and UART TX path. */
+/* /dev/tty — wraps the shared TTY input and output paths. */
 static int tty_read(struct file *f, void *buf, uint32_t len)
 {
     char *out;

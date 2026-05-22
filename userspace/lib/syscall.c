@@ -30,7 +30,7 @@ int sys_yield(void)
 }
 
 /* ============================================================
- * sys_write - Write data to UART
+ * sys_write - Write data to default stdout
  * ============================================================ */
 int sys_write(const void *buf, uint32_t len)
 {
@@ -73,7 +73,7 @@ void sys_exit(int status)
 }
 
 /* ============================================================
- * sys_read - Read data from UART
+ * sys_read - Read data from default stdin
  * ============================================================ */
 int sys_read(void *buf, uint32_t len)
 {

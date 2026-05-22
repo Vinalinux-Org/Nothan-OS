@@ -5,7 +5,6 @@
 #include "cpu.h"
 #include "nothan/errno.h"
 #include "nothan/kbd_input.h"
-#include "nothan/tty.h"
 #include "wait_queue.h"
 
 #define KBD_INPUT_QUEUE_SIZE 64
@@ -37,9 +36,6 @@ int kbd_input_publish_char(uint8_t ch)
 {
     uint32_t flags;
     uint32_t next_head;
-    int tty_ret;
-
-    tty_ret = tty_receive_char(ch);
 
     flags = irq_save();
     next_head = (kbd_queue.head + 1) % KBD_INPUT_QUEUE_SIZE;
@@ -54,7 +50,7 @@ int kbd_input_publish_char(uint8_t ch)
     irq_restore(flags);
 
     wake_up(&kbd_input_wq);
-    return tty_ret;
+    return 0;
 }
 
 int kbd_input_read_char(void)

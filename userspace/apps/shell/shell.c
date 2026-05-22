@@ -37,6 +37,13 @@ static void stdout_write(const void *buf, uint32_t len)
     }
 }
 
+static int stdin_read(void *buf, uint32_t len)
+{
+    if (shell_stdin_fd == 0)
+        return sys_read(buf, len);
+    return sys_read_file(shell_stdin_fd, buf, len);
+}
+
 void shell_putc(char c)
 {
     /* Ensure address is on stack */
@@ -56,8 +63,8 @@ void shell_puts(const char *s)
 
     while (*s)
     {
-        /* Newline expansion only applies when writing to the kernel
-         * stdout (UART). Redirected files shouldn't have \r injected. */
+        /* Newline expansion only applies when writing to default stdout.
+         * Redirected files shouldn't have \r injected. */
         if (*s == '\n' && shell_stdout_fd == 1)
         {
             if (i > 0) {
@@ -84,9 +91,8 @@ void shell_puts(const char *s)
 }
 
 /* Format via nothanlibc's vsnprintf, then fan out through shell_puts
- * so shell_stdout_fd (redirect target) and the UART \n→\r\n
- * expansion are still honoured. Keeps one implementation of %d/%s/…
- * for every userspace consumer. */
+ * so shell_stdout_fd and default-stdout newline handling are still honoured.
+ * Keeps one implementation of %d/%s/... for every userspace consumer. */
 extern int vsnprintf(char *buf, size_t size, const char *fmt, va_list ap);
 
 int printf(const char *fmt, ...)
@@ -331,13 +337,21 @@ int main(void)
     __asm__ __volatile__("mrs %0, cpsr" : "=r"(cpsr));
     printf("[SHELL] CPSR=0x%x, Mode=0x%x (USR=0x10, SVC=0x13)\n", cpsr, cpsr & 0x1F);
 
+    int usbkbd_fd = sys_open("/dev/usbkd0", O_RDONLY);
+    if (usbkbd_fd >= 0) {
+        shell_stdin_fd = usbkbd_fd;
+        printf("[SHELL] stdin=/dev/usbkd0\n");
+    } else {
+        printf("[SHELL] stdin=/dev/tty\n");
+    }
+
     printf("> ");
 
     /* 2. Main Loop */
     while (1)
     {
-        /* Non-Blocking Read */
-        int result = sys_read(&c, 1);
+        /* Read one byte from the userspace-selected input source. */
+        int result = stdin_read(&c, 1);
 
         if (result > 0)
         {

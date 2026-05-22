@@ -14,7 +14,7 @@
 int sys_yield(void);
 
 /*
- * Write data to standard output (UART)
+ * Write data to default standard output
  * buf: Pointer to data
  * len: Length in bytes
  * Returns: Number of bytes written or error code
@@ -29,7 +29,7 @@ int sys_write(const void *buf, uint32_t len);
 void sys_exit(int status);
 
 /*
- * Read data from standard input (UART)
+ * Read data from default standard input
  * buf: Pointer to buffer
  * len: Max length to read
  * Returns: Number of bytes read or error code

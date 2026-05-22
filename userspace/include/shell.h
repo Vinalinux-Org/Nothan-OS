@@ -43,7 +43,7 @@ void shell_puts(const char *s);
 
 /* Redirect state — commands that read without an explicit path fall
  * back to shell_stdin_fd; output goes to shell_stdout_fd. Default 0/1
- * means kernel stdin/stdout (UART). */
+ * means the kernel-provided default stdin/stdout. */
 extern int shell_stdin_fd;
 extern int shell_stdout_fd;
 
