@@ -10,7 +10,7 @@
 #include "nothan/init.h"
 #include "nothan/errno.h"
 #include "nothan/printk.h"
-#include "nothan/tty.h"
+#include "nothan/kbd_input.h"
 #include "timer.h"
 #include "sleep.h"
 #include "task.h"
@@ -887,16 +887,16 @@ static void omap_usb1_kbd_push_key(uint8_t code, uint8_t mod)
     ch = omap_usb1_kbd_ascii(code, shift);
 
     if (ch) {
-        (void)tty_receive_char((uint8_t)ch);
+        (void)kbd_input_publish_char((uint8_t)ch);
         return;
     }
 
     if (code == 0x28) {
-        (void)tty_receive_char('\n');
+        (void)kbd_input_publish_char('\n');
         return;
     }
     if (code == 0x2a) {
-        (void)tty_receive_char(0x08);
+        (void)kbd_input_publish_char(0x08);
         return;
     }
 }

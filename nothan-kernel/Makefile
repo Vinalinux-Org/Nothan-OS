@@ -35,6 +35,7 @@ C_SRC = arch/arm/kernel/exception_handlers.c \
         drivers/i2c/i2c-core.c \
         drivers/mmc/core/core.c \
         drivers/mmc/core/mmc_block.c \
+        drivers/input/kbd_input.c \
         drivers/tty/console_input.c \
         drivers/tty/serial/serial_core.c \
         kernel/sched/scheduler.c \
@@ -96,7 +97,7 @@ OBJS        = $(ASM_OBJ) $(C_OBJ) $(PAYLOAD_OBJ)
 VPATH = arch/arm/entry:arch/arm/exceptions:arch/arm/scheduler:arch/arm/mm \
         arch/arm/kernel:arch/arm/mach-omap2:init:kernel:kernel/irq \
         kernel/irqchip:kernel/printk:kernel/time:kernel/sched:kernel/locking \
-        drivers/base:drivers/video:drivers/video/fbdev:drivers/tty \
+        drivers/base:drivers/video:drivers/video/fbdev:drivers/input:drivers/tty \
         drivers/tty/serial:drivers/irqchip:drivers/clocksource:drivers/i2c \
         drivers/i2c/busses:drivers/usb/musb:drivers/mmc/core \
         drivers/mmc/host:drivers/watchdog:drivers/gpio:drivers/net \

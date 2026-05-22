@@ -3,16 +3,16 @@
  *
  * Exposes registered cdevs through the VFS interface.  Builds an
  * ephemeral struct file per call — no persistent inode model.
- * Registers /dev/tty (UART-backed) and /dev/null at init time.
+ * Registers built-in character devices at init time.
  */
 
 #include "devfs.h"
 #include "nothan/cdev.h"
 #include "nothan/fs.h"
+#include "nothan/kbd_input.h"
 #include "nothan/printk.h"
 #include "nothan/tty.h"
 #include "syscalls.h"
-#include "string.h"
 
 /* /dev/null — silently discards writes, returns EOF on read. */
 static int null_read(struct file *f, void *buf, uint32_t len)
@@ -57,6 +57,26 @@ static int tty_write(struct file *f, const void *buf, uint32_t len)
 static const struct file_operations tty_fops = {
     .read  = tty_read,
     .write = tty_write,
+};
+
+/* /dev/usbkd0 — processed USB keyboard characters for userspace readers. */
+static int usbkbd_read(struct file *f, void *buf, uint32_t len)
+{
+    char *out;
+    int c;
+
+    (void)f;
+    if (len == 0) return 0;
+
+    out = buf;
+    c = kbd_input_read_char();
+    if (c < 0) return c;
+    out[0] = (char)c;
+    return 1;
+}
+
+static const struct file_operations usbkbd_fops = {
+    .read = usbkbd_read,
 };
 
 /* VFS adapter — dispatches via fops with an ephemeral struct file.
@@ -156,10 +176,17 @@ static const struct cdev tty_cdev = {
     .priv = 0,
 };
 
+static const struct cdev usbkbd_cdev = {
+    .name = "usbkd0",
+    .fops = &usbkbd_fops,
+    .priv = 0,
+};
+
 struct vfs_operations *devfs_init(void)
 {
     cdev_register(&tty_cdev);
+    cdev_register(&usbkbd_cdev);
     cdev_register(&null_cdev);
-    pr_info("[DEVFS] registered /dev/tty, /dev/null\n");
+    pr_info("[DEVFS] registered /dev/tty, /dev/usbkd0, /dev/null\n");
     return &devfs_ops;
 }
