@@ -112,6 +112,13 @@ static struct platform_device omap_gpio3 = {
     .clk_id = "gpio3",
 };
 
+static struct platform_device omap_musb = {
+    .name   = "omap-musb",
+    .base   = 0x47400000,
+    .irq    = PLATFORM_IRQ_USB1,
+    .clk_id = "usb",
+};
+
 static struct platform_device *bbb_devices[] = {
     &omap_intc,
     &omap_uart0,
@@ -126,6 +133,7 @@ static struct platform_device *bbb_devices[] = {
     &omap_gpio1,
     &omap_gpio2,
     &omap_gpio3,
+    &omap_musb,
 };
 
 static int __init bbb_platform_init(void)

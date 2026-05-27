@@ -10,5 +10,7 @@
 #define PLATFORM_IRQ_MMC0     64
 #define PLATFORM_IRQ_DMTIMER2 68
 #define PLATFORM_IRQ_UART0    72
+#define PLATFORM_IRQ_USB0     18
+#define PLATFORM_IRQ_USB1     19
 
 #endif

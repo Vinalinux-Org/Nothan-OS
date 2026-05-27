@@ -12,8 +12,11 @@
 #define CM_PER_BASE                 0x44E00000UL
 
 #define CM_PER_L4LS_CLKSTCTRL       (CM_PER_BASE + 0x000)
+#define CM_PER_L3S_CLKSTCTRL        (CM_PER_BASE + 0x004)
+#define CM_PER_L3_CLKSTCTRL         (CM_PER_BASE + 0x00C)
 #define CM_PER_CPGMAC0_CLKCTRL      (CM_PER_BASE + 0x014)
 #define CM_PER_LCDC_CLKCTRL         (CM_PER_BASE + 0x018)
+#define CM_PER_USB0_CLKCTRL         (CM_PER_BASE + 0x01C)
 #define CM_PER_MMC0_CLKCTRL         (CM_PER_BASE + 0x03C)
 #define CM_PER_UART0_CLKCTRL        (CM_PER_BASE + 0x06C)
 #define CM_PER_TIMER2_CLKCTRL       (CM_PER_BASE + 0x080)
@@ -32,6 +35,7 @@
 #define CM_WKUP_BASE                0x44E00400UL
 
 #define CM_WKUP_GPIO0_CLKCTRL       (CM_WKUP_BASE + 0x008)
+#define CM_CLKDCOLDO_DPLL_PER       (CM_WKUP_BASE + 0x07C)
 #define CM_IDLEST_DPLL_DISP         (CM_WKUP_BASE + 0x048)
 #define CM_CLKSEL_DPLL_DISP         (CM_WKUP_BASE + 0x054)
 #define CM_CLKMODE_DPLL_DISP        (CM_WKUP_BASE + 0x098)
