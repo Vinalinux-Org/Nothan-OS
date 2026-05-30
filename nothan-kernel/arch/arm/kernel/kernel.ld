@@ -1,12 +1,22 @@
 OUTPUT_ARCH(arm)
 ENTRY(stext)
 
+PHYS_OFFSET = 0x80000000;
+PAGE_OFFSET = 0xC0000000;
+MMU_OFFSET  = PAGE_OFFSET - PHYS_OFFSET;
+
 SECTIONS
 {
-	. = 0x80000000;
+	. = PAGE_OFFSET;
 
 	.head.text : {
 		*(.head.text)
+	}
+
+	.idmap.text : {
+		__idmap_start = .;
+		*(.idmap.text)
+		__idmap_end = .;
 	}
 
 	.text : {
@@ -33,5 +43,10 @@ SECTIONS
 		__bss_stop = .;
 	}
 
+	. = ALIGN(16384);
+	__pgd_start = .;
+	.pgd : {
+		*(.pgd)
+	}
 	_end = .;
 }

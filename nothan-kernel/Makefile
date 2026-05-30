@@ -8,6 +8,7 @@ BUILD_DIR := build
 KBUILD_CFLAGS := -mcpu=cortex-a8 -marm -O2 -std=c11 -Wall -Wextra
 KBUILD_CFLAGS += -mno-unaligned-access -fno-common
 KBUILD_CFLAGS += -ffreestanding -nostdlib -fno-stack-protector
+KBUILD_CFLAGS += -Wno-array-bounds
 KBUILD_CFLAGS += -I include -I arch/arm/include
 
 KBUILD_AFLAGS := -mcpu=cortex-a8 -marm -D__ASSEMBLY__
@@ -18,6 +19,9 @@ LDFLAGS  := -nostdlib -T $(LDSCRIPT) -Map $(BUILD_DIR)/kernel.map
 
 OBJS := $(BUILD_DIR)/init/main.o
 OBJS += $(BUILD_DIR)/arch/arm/kernel/head.o
+OBJS += $(BUILD_DIR)/arch/arm/mm/mmu.o
+OBJS += $(BUILD_DIR)/arch/arm/mm/mmu_enable.o
+OBJS += $(BUILD_DIR)/arch/arm/mm/pgd.o
 
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 KERNEL_BIN := $(BUILD_DIR)/kernel.bin
