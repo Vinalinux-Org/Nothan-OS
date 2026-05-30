@@ -26,6 +26,7 @@ OBJS += $(BUILD_DIR)/arch/arm/mm/pgd.o
 OBJS += $(BUILD_DIR)/drivers/irqchip/irq-omap-intc.o
 OBJS += $(BUILD_DIR)/kernel/irq/irq_core.o
 OBJS += $(BUILD_DIR)/drivers/tty/serial/omap-serial.o
+OBJS += $(BUILD_DIR)/drivers/clocksource/timer-ti-dm.o
 OBJS += $(BUILD_DIR)/kernel/printk.o
 OBJS += $(BUILD_DIR)/init/main.o
 
