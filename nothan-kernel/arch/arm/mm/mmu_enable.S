@@ -36,7 +36,25 @@ __turn_mmu_on:
 	mcr	p15, 0, r1, c1, c0, 0		/* enable MMU */
 	isb
 
-	/* Identity map keeps us alive; jump to kernel_main at VA. */
+	/*
+	 * MMU is on through identity map.  Set VBAR and exception mode
+	 * stacks to their VAs before jumping to kernel_main.
+	 */
+	ldr	r0, =vectors
+	mcr	p15, 0, r0, c12, c0, 0
+	isb
+
+	cps	#0x11
+	ldr	sp, =fiq_stack_top
+	cps	#0x12
+	ldr	sp, =irq_stack_top
+	cps	#0x17
+	ldr	sp, =abt_stack_top
+	cps	#0x1B
+	ldr	sp, =und_stack_top
+	cps	#0x13
+	ldr	sp, =svc_stack_top
+
 	ldr	pc, =kernel_main
 	.size	__turn_mmu_on, . - __turn_mmu_on
 __turn_mmu_on_end:

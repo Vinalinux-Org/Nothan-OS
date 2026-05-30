@@ -29,6 +29,27 @@ stext:
 	ldr	sp, =init_stack
 	sub	sp, sp, r7
 
+	/* Set exception mode stacks at phys. */
+	cps	#0x11
+	ldr	sp, =fiq_stack_top
+	sub	sp, sp, r7
+
+	cps	#0x12
+	ldr	sp, =irq_stack_top
+	sub	sp, sp, r7
+
+	cps	#0x17
+	ldr	sp, =abt_stack_top
+	sub	sp, sp, r7
+
+	cps	#0x1B
+	ldr	sp, =und_stack_top
+	sub	sp, sp, r7
+
+	cps	#0x13
+	ldr	sp, =svc_stack_top
+	sub	sp, sp, r7
+
 	/* Clear BSS at phys. */
 	ldr	r4, =__bss_start
 	sub	r4, r4, r7
@@ -38,6 +59,12 @@ stext:
 1:	cmp	r4, r5
 	strlo	r6, [r4], #4
 	blo	1b
+
+	/* Set VBAR = phys address of vectors. */
+	ldr	r0, =vectors
+	sub	r0, r0, r7
+	mcr	p15, 0, r0, c12, c0, 0
+	isb
 
 	/* Save boot params (BSS is zero, now write). */
 	ldr	r8, =machine_type

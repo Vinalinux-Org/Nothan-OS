@@ -17,11 +17,13 @@ KBUILD_AFLAGS += -I include -I arch/arm/include
 LDSCRIPT := arch/arm/kernel/kernel.ld
 LDFLAGS  := -nostdlib -T $(LDSCRIPT) -Map $(BUILD_DIR)/kernel.map
 
-OBJS := $(BUILD_DIR)/init/main.o
+OBJS := $(BUILD_DIR)/arch/arm/kernel/vectors.o
+OBJS += $(BUILD_DIR)/arch/arm/kernel/traps.o
 OBJS += $(BUILD_DIR)/arch/arm/kernel/head.o
 OBJS += $(BUILD_DIR)/arch/arm/mm/mmu.o
 OBJS += $(BUILD_DIR)/arch/arm/mm/mmu_enable.o
 OBJS += $(BUILD_DIR)/arch/arm/mm/pgd.o
+OBJS += $(BUILD_DIR)/init/main.o
 
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 KERNEL_BIN := $(BUILD_DIR)/kernel.bin

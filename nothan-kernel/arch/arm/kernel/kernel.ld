@@ -13,6 +13,12 @@ SECTIONS
 		*(.head.text)
 	}
 
+	.vectors : ALIGN(32) {
+		vectors_start = .;
+		*(.vectors)
+		vectors_end = .;
+	}
+
 	.idmap.text : {
 		__idmap_start = .;
 		*(.idmap.text)
@@ -41,6 +47,27 @@ SECTIONS
 		*(COMMON)
 		. = ALIGN(4);
 		__bss_stop = .;
+
+		. = ALIGN(8);
+		fiq_stack_bottom = .;
+		. += 0x200;
+		fiq_stack_top = .;
+
+		irq_stack_bottom = .;
+		. += 0x1000;
+		irq_stack_top = .;
+
+		abt_stack_bottom = .;
+		. += 0x400;
+		abt_stack_top = .;
+
+		und_stack_bottom = .;
+		. += 0x400;
+		und_stack_top = .;
+
+		svc_stack_bottom = .;
+		. += 0x2000;
+		svc_stack_top = .;
 	}
 
 	. = ALIGN(16384);
