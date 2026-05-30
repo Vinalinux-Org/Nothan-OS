@@ -1,4 +1,5 @@
 #include <nothan/types.h>
+#include <nothan/irq.h>
 
 void und_handler(unsigned int spsr)
 {
@@ -26,8 +27,7 @@ void dabt_handler(unsigned int spsr)
 
 void irq_handler(unsigned int spsr)
 {
-	while (1)
-		;
+	intc_handle_irq();
 }
 
 void fiq_handler(unsigned int spsr)

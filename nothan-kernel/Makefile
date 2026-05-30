@@ -8,7 +8,7 @@ BUILD_DIR := build
 KBUILD_CFLAGS := -mcpu=cortex-a8 -marm -O2 -std=c11 -Wall -Wextra
 KBUILD_CFLAGS += -mno-unaligned-access -fno-common
 KBUILD_CFLAGS += -ffreestanding -nostdlib -fno-stack-protector
-KBUILD_CFLAGS += -Wno-array-bounds
+KBUILD_CFLAGS += -Wno-array-bounds -Wno-unused-parameter
 KBUILD_CFLAGS += -I include -I arch/arm/include
 
 KBUILD_AFLAGS := -mcpu=cortex-a8 -marm -D__ASSEMBLY__
@@ -23,6 +23,8 @@ OBJS += $(BUILD_DIR)/arch/arm/kernel/head.o
 OBJS += $(BUILD_DIR)/arch/arm/mm/mmu.o
 OBJS += $(BUILD_DIR)/arch/arm/mm/mmu_enable.o
 OBJS += $(BUILD_DIR)/arch/arm/mm/pgd.o
+OBJS += $(BUILD_DIR)/drivers/irqchip/irq-omap-intc.o
+OBJS += $(BUILD_DIR)/kernel/irq/irq_core.o
 OBJS += $(BUILD_DIR)/init/main.o
 
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
