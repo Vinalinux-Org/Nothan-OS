@@ -1,23 +1,18 @@
 #ifndef _NOTHAN_TYPES_H
 #define _NOTHAN_TYPES_H
 
-typedef unsigned char      u8;
-typedef unsigned short     u16;
-typedef unsigned int       u32;
-typedef unsigned long long u64;
+#include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
 
-typedef signed char        s8;
-typedef signed short       s16;
-typedef signed int         s32;
-typedef signed long long   s64;
+typedef uint8_t		u8;
+typedef uint16_t	u16;
+typedef uint32_t	u32;
+typedef uint64_t	u64;
 
-typedef unsigned long      size_t;
-typedef long               ssize_t;
-
-typedef int                bool;
-#define true               1
-#define false              0
-
-#define NULL               ((void *)0)
+typedef int8_t		s8;
+typedef int16_t		s16;
+typedef int32_t		s32;
+typedef int64_t		s64;
 
 #endif /* _NOTHAN_TYPES_H */
