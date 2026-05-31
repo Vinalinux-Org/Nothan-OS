@@ -2,6 +2,7 @@
 #include <nothan/uart.h>
 #include <nothan/irq.h>
 #include <nothan/printk.h>
+#include <nothan/mm.h>
 
 extern void timer_init(void);
 
@@ -11,6 +12,7 @@ void kernel_main(void)
 	uart_init();
 	timer_init();
 
+	page_alloc_init();
 	printk("NothanOS v2 kernel started\n");
 
 	/* Enable IRQ at CPU level. */

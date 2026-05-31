@@ -5,7 +5,7 @@ OBJCOPY = $(CROSS_COMPILE)objcopy
 
 BUILD_DIR := build
 
-KBUILD_CFLAGS := -mcpu=cortex-a8 -marm -O2 -std=c11 -Wall -Wextra
+KBUILD_CFLAGS := -mcpu=cortex-a8 -marm -O2 -std=gnu11 -Wall -Wextra
 KBUILD_CFLAGS += -mno-unaligned-access -fno-common
 KBUILD_CFLAGS += -ffreestanding -nostdlib -fno-stack-protector
 KBUILD_CFLAGS += -Wno-array-bounds -Wno-unused-parameter
@@ -28,6 +28,7 @@ OBJS += $(BUILD_DIR)/kernel/irq/irq_core.o
 OBJS += $(BUILD_DIR)/drivers/tty/serial/omap-serial.o
 OBJS += $(BUILD_DIR)/drivers/clocksource/timer-ti-dm.o
 OBJS += $(BUILD_DIR)/kernel/printk.o
+OBJS += $(BUILD_DIR)/mm/page_alloc.o
 OBJS += $(BUILD_DIR)/init/main.o
 
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
