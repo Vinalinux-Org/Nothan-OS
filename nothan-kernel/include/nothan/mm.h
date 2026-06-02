@@ -16,6 +16,11 @@ typedef unsigned int gfp_t;
 #define GFP_KERNEL		0
 #define GFP_ATOMIC		1
 
+/**
+ * struct list_head - Circular doubly linked list node
+ * @next: Pointer to the next node
+ * @prev: Pointer to the previous node
+ */
 struct list_head {
 	struct list_head *next;
 	struct list_head *prev;
@@ -24,18 +29,43 @@ struct list_head {
 /* Page flags */
 #define PG_BUDDY		0
 
+struct slab_cache;
+
+/**
+ * struct page - Physical page metadata
+ * @lru: List node for buddy allocator free lists. Must be first member.
+ * @flags: Page flags (e.g. PG_BUDDY)
+ * @private: Order of the page block if in buddy allocator
+ * @_refcount: Number of references to this page
+ * @slab: Pointer to the owning slab cache, or NULL if managed by buddy
+ */
 struct page {
-	struct list_head lru;		/* must be first (list_head → page cast) */
+	struct list_head lru;
 	unsigned long flags;
 	unsigned long private;
 	int _refcount;
+	struct slab_cache *slab;	/* owning slab cache (NULL if buddy) */
 };
 
+/**
+ * struct free_area - A list of free page blocks of a specific order
+ * @free_list: List of free page blocks
+ * @nr_free: Number of free blocks in this list
+ */
 struct free_area {
 	struct list_head free_list;
 	unsigned long nr_free;
 };
 
+/**
+ * struct zone - Represents a physical memory zone managed by the allocator
+ * @free_area: Array of free lists for each block order
+ * @managed_pages: Total number of pages managed by this zone
+ * @free_pages: Current number of free pages
+ * @page_array: Pointer to the array of struct page metadata
+ * @base_pa: Starting physical address of the managed pool
+ * @end_pa: Ending physical address of the managed pool
+ */
 struct zone {
 	struct free_area free_area[NR_PAGE_ORDERS];
 	unsigned long managed_pages;

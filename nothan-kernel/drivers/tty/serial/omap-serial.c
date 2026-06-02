@@ -37,7 +37,6 @@ static void uart_irq_handler(unsigned int irq)
  */
 void uart_init(void)
 {
-	u32 lcr;
 
 	mmio_write32(CM_PER_UART0_CLKCTRL, 0x02);
 	while ((mmio_read32(CM_PER_UART0_CLKCTRL) & 0x30000) != 0)
@@ -45,7 +44,7 @@ void uart_init(void)
 
 	mmio_write32(UART_BASE + UART_FCR, FCR_FIFO_EN | FCR_RX_TRIG_8);
 
-	lcr = LCR_8N1;
+	u32 lcr = LCR_8N1;
 	mmio_write32(UART_BASE + UART_LCR, lcr | LCR_DLAB);
 
 	/* 115200 baud @ 48 MHz UART clock. */
