@@ -29,6 +29,7 @@ OBJS += $(BUILD_DIR)/drivers/tty/serial/omap-serial.o
 OBJS += $(BUILD_DIR)/drivers/clocksource/timer-ti-dm.o
 OBJS += $(BUILD_DIR)/kernel/printk.o
 OBJS += $(BUILD_DIR)/mm/page_alloc.o
+OBJS += $(BUILD_DIR)/mm/slab.o
 OBJS += $(BUILD_DIR)/init/main.o
 
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf

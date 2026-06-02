@@ -3,6 +3,7 @@
 #include <nothan/irq.h>
 #include <nothan/printk.h>
 #include <nothan/mm.h>
+#include <nothan/slab.h>
 
 extern void timer_init(void);
 
@@ -13,6 +14,8 @@ void kernel_main(void)
 	timer_init();
 
 	page_alloc_init();
+	slab_init();
+
 	printk("NothanOS v2 kernel started\n");
 
 	/* Enable IRQ at CPU level. */
