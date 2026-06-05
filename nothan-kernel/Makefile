@@ -20,6 +20,7 @@ LDFLAGS  := -nostdlib -T $(LDSCRIPT) -Map $(BUILD_DIR)/kernel.map
 OBJS := $(BUILD_DIR)/arch/arm/kernel/vectors.o
 OBJS += $(BUILD_DIR)/arch/arm/kernel/traps.o
 OBJS += $(BUILD_DIR)/arch/arm/kernel/head.o
+OBJS += $(BUILD_DIR)/arch/arm/kernel/switch_to.o
 OBJS += $(BUILD_DIR)/arch/arm/mm/mmu.o
 OBJS += $(BUILD_DIR)/arch/arm/mm/mmu_enable.o
 OBJS += $(BUILD_DIR)/arch/arm/mm/pgd.o
@@ -30,6 +31,9 @@ OBJS += $(BUILD_DIR)/drivers/clocksource/timer-ti-dm.o
 OBJS += $(BUILD_DIR)/kernel/printk.o
 OBJS += $(BUILD_DIR)/mm/page_alloc.o
 OBJS += $(BUILD_DIR)/mm/slab.o
+OBJS += $(BUILD_DIR)/kernel/sched/core.o
+OBJS += $(BUILD_DIR)/kernel/sched/rt.o
+OBJS += $(BUILD_DIR)/kernel/sched/wait.o
 OBJS += $(BUILD_DIR)/init/main.o
 
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf

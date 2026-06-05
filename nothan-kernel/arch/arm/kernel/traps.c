@@ -1,5 +1,6 @@
 #include <nothan/types.h>
 #include <nothan/irq.h>
+#include <nothan/sched.h>
 
 /**
  * und_handler - handle undefined instruction exception
@@ -56,6 +57,11 @@ void irq_handler(unsigned int spsr)
 {
 	(void)spsr;
 	intc_handle_irq();
+
+	if (need_resched) {
+		need_resched = 0;
+		schedule();
+	}
 }
 
 /**

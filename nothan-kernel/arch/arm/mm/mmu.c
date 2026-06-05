@@ -38,27 +38,29 @@ void mmu_init(void)
 			    MT_NORMAL | PMD_SECT_DOMAIN(DOMAIN_KERNEL) |
 			    PMD_SECT_AP_RW);
 
-	/* MMIO: L4_PER at 0xF0000000 */
-	map_section(pgd, 0xF0000000, L4_PER_BASE,
-		    MT_DEVICE | PMD_SECT_DOMAIN(DOMAIN_IO) |
-		    PMD_SECT_AP_RW | PMD_SECT_XN);
+	/* MMIO: L4_PER (32 MB: 0x48000000-0x49FFFFFF) */
+	for (unsigned int i = 0; i < 32; i++)
+		map_section(pgd, 0xF0000000 + (i << 20), L4_PER_BASE + (i << 20),
+			    MT_DEVICE | PMD_SECT_DOMAIN(DOMAIN_IO) |
+			    PMD_SECT_AP_RW | PMD_SECT_XN);
 
-	/* MMIO: L4_WKUP at 0xF0E00000 */
-	map_section(pgd, 0xF0E00000, L4_WKUP_BASE,
-		    MT_DEVICE | PMD_SECT_DOMAIN(DOMAIN_IO) |
-		    PMD_SECT_AP_RW | PMD_SECT_XN);
+	/* MMIO: L4_WKUP (16 MB: 0x44E00000-0x44FFFFFF) */
+	for (unsigned int i = 0; i < 16; i++)
+		map_section(pgd, 0xF0E00000 + (i << 20), L4_WKUP_BASE + (i << 20),
+			    MT_DEVICE | PMD_SECT_DOMAIN(DOMAIN_IO) |
+			    PMD_SECT_AP_RW | PMD_SECT_XN);
 
-	/* MMIO: L4_FAST at 0xF2000000 */
-	map_section(pgd, 0xF2000000, L4_FAST_BASE,
-		    MT_DEVICE | PMD_SECT_DOMAIN(DOMAIN_IO) |
-		    PMD_SECT_AP_RW | PMD_SECT_XN);
+	/* MMIO: L4_FAST (2 MB: 0x4A000000-0x4A1FFFFF) */
+	for (unsigned int i = 0; i < 2; i++)
+		map_section(pgd, 0xF2000000 + (i << 20), L4_FAST_BASE + (i << 20),
+			    MT_DEVICE | PMD_SECT_DOMAIN(DOMAIN_IO) |
+			    PMD_SECT_AP_RW | PMD_SECT_XN);
 
 	/* Identity map for .idmap.text — use phys addresses. */
 	unsigned int i = ((u32)&__idmap_start - MMU_OFFSET) >> 20;
 	while (i <= (((u32)&__idmap_end - MMU_OFFSET) >> 20)) {
 		map_section(pgd, i << 20, i << 20,
-			    MT_NORMAL | PMD_SECT_DOMAIN(DOMAIN_KERNEL) |
-			    PMD_SECT_AP_RW);
+			    MT_NORMAL | PMD_SECT_DOMAIN(DOMAIN_KERNEL) | PMD_SECT_AP_RW);
 		i++;
 	}
 

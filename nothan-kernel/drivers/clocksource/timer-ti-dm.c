@@ -1,6 +1,7 @@
 #include <nothan/types.h>
 #include <nothan/irq.h>
 #include <nothan/mmio.h>
+#include <nothan/sched.h>
 
 /*
  * DMTimer2 at PA 0x48040000 (L4_PER), VA 0xF0040000.
@@ -9,15 +10,15 @@
 #define DMTIMER2_BASE		0xF0040000
 #define DMTIMER2_IRQ		68
 
-#define TCLR			0x38
-#define TCRR			0x3C
-#define TLDR			0x40
-#define TWPS			0x48
+#define TCLR				0x38
+#define TCRR				0x3C
+#define TLDR				0x40
+#define TWPS				0x48
 #define IRQENABLE_SET		0x2C
-#define IRQSTATUS		0x28
+#define IRQSTATUS			0x28
 
-#define TCLR_AR			(1 << 1)
-#define TCLR_ST			(1 << 0)
+#define TCLR_AR				(1 << 1)
+#define TCLR_ST				(1 << 0)
 #define IRQ_OVF_IT_FLAG		(1 << 1)
 #define TWPS_W_PEND_TLDR	(1 << 2)
 #define TWPS_W_PEND_TCRR	(1 << 1)
@@ -30,6 +31,7 @@ static void timer_irq_handler(unsigned int irq)
 
 	mmio_write32(DMTIMER2_BASE + IRQSTATUS, IRQ_OVF_IT_FLAG);
 	jiffies++;
+	scheduler_tick();
 }
 
 unsigned long get_jiffies(void)

@@ -4,6 +4,7 @@
 #include <nothan/printk.h>
 #include <nothan/mm.h>
 #include <nothan/slab.h>
+#include <nothan/sched.h>
 
 extern void timer_init(void);
 
@@ -15,6 +16,7 @@ void kernel_main(void)
 
 	page_alloc_init();
 	slab_init();
+	sched_init();
 
 	printk("NothanOS v2 kernel started\n");
 
