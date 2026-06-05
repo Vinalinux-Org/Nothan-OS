@@ -35,12 +35,12 @@ void dequeue_task(struct rq *rq, struct task_struct *p)
 }
 
 /**
- * pick_next_task - select the highest-priority runnable task
+ * pick_next_task - select and dequeue the highest-priority runnable task
  * @rq: the global runqueue
  *
  * Uses the bitmap to find the highest occupied priority level,
- * then returns the first task from that queue.  Returns NULL
- * if no task is runnable.  O(1).
+ * removes the first task from that queue, and returns it.
+ * Returns NULL if no task is runnable.  O(1).
  *
  * Return: pointer to the next task, or NULL.
  */
@@ -53,6 +53,14 @@ struct task_struct *pick_next_task(struct rq *rq)
 	if (idx >= MAX_PRIO)
 		return NULL;
 
-	return list_first_entry(&rq->active.queue[idx],
-				 struct task_struct, rt.run_list);
+	struct task_struct *p = list_first_entry(&rq->active.queue[idx],
+			     struct task_struct, rt.run_list);
+
+	list_del(&p->rt.run_list);
+	if (list_empty(&rq->active.queue[idx]))
+		sched_clear_bit(rq, idx);
+	rq->nr_running--;
+	p->rt.on_rq = 0;
+
+	return p;
 }

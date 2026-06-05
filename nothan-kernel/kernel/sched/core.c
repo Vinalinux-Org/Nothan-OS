@@ -8,9 +8,9 @@ int need_resched;
 extern void __switch_to(struct task_struct *prev, struct task_struct *next);
 
 /**
- * sched_init - initialise the scheduler runqueue
+ * sched_init() - Initialize the scheduler runqueue
  *
- * Clears the global runqueue, bitmap set to zero, and initialises
+ * Clears the global runqueue, sets bitmap to zero, and initialises
  * each per-priority linked list head.
  */
 void sched_init(void)
@@ -30,16 +30,15 @@ void sched_init(void)
 }
 
 /**
- * schedule - pick the next task and switch to it
+ * schedule() - Pick the next task and switch to it
  *
- * If the current task is still runnable, re-enqueue it before
- * picking the next.  Called from the timer tick (via need_resched)
- * or directly from yield / exit.
+ * If the current task is still runnable, it re-enqueues it before
+ * picking the next task.
  */
 void schedule(void)
 {
 	struct task_struct *prev = runqueue.curr;
-	/* Current task is still runnable: put it back. */
+
 	if (prev && prev->__state == TASK_RUNNING)
 		enqueue_task(&runqueue, prev);
 
@@ -51,17 +50,22 @@ void schedule(void)
 
 	runqueue.curr = next;
 
-	if (prev != next)
+	if (prev == next)
+		return;
+
+	if (prev)
 		__switch_to(prev, next);
+	else
+		__asm__ __volatile__ (
+			"ldr sp, [%0, #0]\n"
+			"ldmfd sp!, {r4-r11, pc}\n"
+			: : "r" (next));
 }
 
 /**
- * scheduler_tick - called from the timer ISR (every 10 ms)
+ * scheduler_tick() - Called from the timer ISR
  *
- * Decrements the current task's timeslice.  On expiry, resets the
- * timeslice, rotates the task to the tail of its priority queue
- * (round-robin), and sets need_resched so the next IRQ return
- * triggers a schedule().
+ * Decrements the current task's timeslice and rotates it if expired.
  */
 void scheduler_tick(void)
 {
@@ -74,6 +78,11 @@ void scheduler_tick(void)
 		return;
 
 	curr->rt.time_slice = RR_TIMESLICE;
-	list_move_tail(&curr->rt.run_list, &runqueue.active.queue[curr->prio]);
+
+	if (curr->rt.on_rq) {
+		list_move_tail(&curr->rt.run_list,
+			       &runqueue.active.queue[curr->prio]);
+	}
+
 	need_resched = 1;
 }
