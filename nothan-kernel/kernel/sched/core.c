@@ -32,11 +32,16 @@ void sched_init(void)
 /**
  * schedule() - Pick the next task and switch to it
  *
- * If the current task is still runnable, it re-enqueues it before
- * picking the next task.
+ * The runqueue manipulation (enqueue prev, dequeue next) is a critical
+ * section: a timer IRQ between those two calls would see on_rq=1 and
+ * attempt list_move_tail(), corrupting the list.  Disable IRQs for
+ * the duration of the runqueue update.
  */
 void schedule(void)
 {
+	/* --- critical section: protect runqueue lists --- */
+	__asm__ __volatile__ ("cpsid i" : : : "memory");
+
 	struct task_struct *prev = runqueue.curr;
 
 	if (prev && prev->__state == TASK_RUNNING)
@@ -45,10 +50,15 @@ void schedule(void)
 	struct task_struct *next = pick_next_task(&runqueue);
 	if (!next) {
 		runqueue.curr = NULL;
+		__asm__ __volatile__ ("cpsie i" : : : "memory");
 		return;
 	}
 
 	runqueue.curr = next;
+	need_resched = 0;
+
+	__asm__ __volatile__ ("cpsie i" : : : "memory");
+	/* --- end critical section --- */
 
 	if (prev == next)
 		return;
@@ -65,7 +75,9 @@ void schedule(void)
 /**
  * scheduler_tick() - Called from the timer ISR
  *
- * Decrements the current task's timeslice and rotates it if expired.
+ * Decrements the current task's timeslice.  Does NOT touch the
+ * runqueue lists — that is schedule()'s job.  Just signals that a
+ * reschedule is needed so the next schedule() call will rotate tasks.
  */
 void scheduler_tick(void)
 {
@@ -78,11 +90,5 @@ void scheduler_tick(void)
 		return;
 
 	curr->rt.time_slice = RR_TIMESLICE;
-
-	if (curr->rt.on_rq) {
-		list_move_tail(&curr->rt.run_list,
-			       &runqueue.active.queue[curr->prio]);
-	}
-
 	need_resched = 1;
 }
