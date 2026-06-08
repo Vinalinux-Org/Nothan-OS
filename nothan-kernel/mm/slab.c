@@ -35,10 +35,16 @@ static void slab_fill_page(struct slab_cache *cache, struct page *page)
 	void *base = (void *)__phys_to_virt(pa);
 	page->slab = cache;
 
+	/*
+	 * Build a singly-linked free list through the objects:
+	 * obj[i]->next = obj[i+1]; obj[last]->next = old free_list head.
+	 */
 	for (unsigned int i = 0; i < cache->objs_per_page; i++) {
-		void *obj = base + i * cache->obj_size;
-		void **next = (void **)obj;
-		*next = cache->free_list;
+		void *obj  = base + i * cache->obj_size;
+		void *next = (i + 1 < cache->objs_per_page)
+			     ? base + (i + 1) * cache->obj_size
+			     : cache->free_list;
+		*(void **)obj = next;
 	}
 
 	cache->free_list = base;
