@@ -124,7 +124,7 @@ void bootloader_main(void)
     uart_puts("\r\n");
 
     /* STAGE 5: DDR3. */
-    uart_puts("DDR:    Initializing 256MB DDR3...\r\n");
+    uart_puts("DDR:    Initializing 512MB DDR3...\r\n");
     ddr_init();
 
     uart_puts("DDR:    Running memory test...\r\n");
@@ -135,7 +135,7 @@ void bootloader_main(void)
         panic("DDR memory test FAILED!");
     }
 
-    uart_puts("DDR:    OK (256MB @ 0x80000000)\r\n");
+    uart_puts("DDR:    OK (512MB @ 0x80000000)\r\n");
     uart_puts("\r\n");
 
     /* STAGE 6: MMC + kernel load. */

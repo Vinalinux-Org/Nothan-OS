@@ -2,7 +2,7 @@
  * ddr.c
  * DDR3 Memory Initialization for AM335x
  * 
- * Target: MT41K256M16HA-125 (256MB DDR3, 16-bit width)
+ * Target: MT41K256M16HA-125 (512MB DDR3, 16-bit width)
  * Frequency: 400 MHz (DDR data pins), 200 MHz (EMIF interface)
  * ============================================================ */
 

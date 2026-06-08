@@ -2,6 +2,11 @@
 #include <nothan/mm.h>
 #include <asm/memory.h>
 
+/*
+ * DDR pool end address.
+ * The BeagleBone Black has 512 MB DDR3 at 0x80000000–0x9FFFFFFF.
+ * Pool ends at 0xA0000000.
+ */
 #define DDR_END			0xA0000000UL
 #define PAGE_ARRAY_GAP		(4UL << 20)
 
@@ -41,13 +46,24 @@ void page_alloc_init(void)
 	for (unsigned int order = 0; order < NR_PAGE_ORDERS; order++)
 		list_init(&zone->free_area[order].free_list);
 
-	/* Mark every page free (order 0). */
+	/*
+	 * Initialise every page and enqueue it at order 0.
+	 * lru MUST be initialised before any list_del() is called;
+	 * the DDR backing page_array is not zero-initialised.
+	 */
 	for (unsigned long i = 0; i < total_pages; i++) {
-		zone->page_array[i].flags = 0;
-		zone->page_array[i].private = 0;
-		zone->page_array[i]._refcount = 0;
-		set_page_flag(&zone->page_array[i], PG_BUDDY);
+		struct page *p = &zone->page_array[i];
+
+		list_init(&p->lru);
+		p->flags = 0;
+		p->private = 0;
+		p->_refcount = 0;
+		p->slab = NULL;
+		set_page_flag(p, PG_BUDDY);
+		set_page_order(p, 0);
+		__add_to_free_list(p, zone, 0);
 	}
+	zone->free_pages = total_pages;
 
 	/*
 	 * Build buddy free lists: for each page, attempt to merge upward.
@@ -87,8 +103,7 @@ void page_alloc_init(void)
 	}
 }
 
-static void expand(struct page *page, struct zone *zone,
-		   unsigned int low, unsigned int high)
+static void expand(struct page *page, struct zone *zone, unsigned int low, unsigned int high)
 {
 	unsigned long size = 1UL << high;
 
