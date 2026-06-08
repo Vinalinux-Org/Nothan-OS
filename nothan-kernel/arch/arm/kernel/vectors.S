@@ -17,13 +17,18 @@
 
 	.globl	vectors
 vectors:
-	b	vector_und
-	b	vector_svc
-	b	vector_pabt
-	b	vector_dabt
-	.word	0		@ reserved
-	b	vector_irq
-	b	vector_fiq
+	b	vector_reset	@ 0x00  Reset
+	b	vector_und	@ 0x04  Undefined Instruction
+	b	vector_svc	@ 0x08  Software Interrupt (SVC)
+	b	vector_pabt	@ 0x0C  Prefetch Abort
+	b	vector_dabt	@ 0x10  Data Abort
+	.word	0		@ 0x14  Reserved (Hypervisor)
+	b	vector_irq	@ 0x18  IRQ
+	b	vector_fiq	@ 0x1C  FIQ
+
+/* --- Reset (should not happen after boot) --- */
+vector_reset:
+	b	vector_reset	@ spin
 
 /* --- Undefined instruction --- */
 vector_und:
@@ -71,14 +76,21 @@ vector_dabt:
 
 /* --- IRQ --- */
 vector_irq:
-	sub	lr, lr, #4
-	push	{r0-r12, lr}
-	mrs	r0, spsr
-	push	{r0}
+	sub	lr, lr, #4		@ Fix return address
+	srsdb	sp!, #0x13		@ Save SPSR_IRQ + LR_IRQ to SVC stack
+	cpsid	if, #0x13		@ Switch to SVC mode (IRQs/FIQ off)
+	push	{r0-r12, lr}		@ Save remaining regs on SVC stack
+
 	bl	irq_handler
-	pop	{r0}
-	msr	spsr_cxsf, r0
-	ldmfd	sp!, {r0-r12, pc}^
+
+	@ NOTE: schedule() must NOT be called from IRQ context.
+	@ __switch_to saves SP mid-frame → corrupts .Lirq_restore.
+	@ scheduler_tick() sets need_resched=1; tasks call schedule()
+	@ cooperatively from thread context.
+
+.Lirq_restore:
+	pop	{r0-r12, lr}		@ Restore interrupted task's registers and original lr_svc
+	rfefd	sp!			@ Atomically pop PC and CPSR (saved by srsdb) and return
 
 /* --- FIQ --- */
 vector_fiq:

@@ -1,5 +1,6 @@
 #include <nothan/types.h>
 #include <nothan/irq.h>
+#include <nothan/printk.h>
 
 /**
  * und_handler - handle undefined instruction exception
@@ -8,6 +9,7 @@
 void und_handler(unsigned int spsr)
 {
 	(void)spsr;
+	printk("\nException: Undefined Instruction!\n");
 	while (1)
 		;
 }
@@ -19,6 +21,7 @@ void und_handler(unsigned int spsr)
 void svc_handler(unsigned int spsr)
 {
 	(void)spsr;
+	printk("\nException: Supervisor Call!\n");
 	while (1)
 		;
 }
@@ -30,6 +33,7 @@ void svc_handler(unsigned int spsr)
 void pabt_handler(unsigned int spsr)
 {
 	(void)spsr;
+	printk("\nException: Prefetch Abort!\n");
 	while (1)
 		;
 }
@@ -41,20 +45,19 @@ void pabt_handler(unsigned int spsr)
 void dabt_handler(unsigned int spsr)
 {
 	(void)spsr;
+	printk("\nException: Data Abort!\n");
 	while (1)
 		;
 }
 
 /**
  * irq_handler - top-level interrupt handler
- * @spsr: saved program status register at interrupt
  *
  * Delegates to the INTC dispatch which reads the active IRQ
  * and calls the registered handler.
  */
-void irq_handler(unsigned int spsr)
+void irq_handler(void)
 {
-	(void)spsr;
 	intc_handle_irq();
 }
 
@@ -65,6 +68,7 @@ void irq_handler(unsigned int spsr)
 void fiq_handler(unsigned int spsr)
 {
 	(void)spsr;
+	printk("\nException: FIQ!\n");
 	while (1)
 		;
 }
