@@ -47,53 +47,35 @@ void page_alloc_init(void)
 		list_init(&zone->free_area[order].free_list);
 
 	/*
-	 * Initialise every page and enqueue it at order 0.
-	 * lru MUST be initialised before any list_del() is called;
-	 * the DDR backing page_array is not zero-initialised.
+	 * Step 1: Initialize metadata for ALL pages.
+	 * DDR memory is not guaranteed to be zeroed, so we must
+	 * explicitly initialize lru, flags, and slab pointers for
+	 * every single page before any buddy operations occur.
 	 */
 	for (unsigned long i = 0; i < total_pages; i++) {
 		struct page *p = &zone->page_array[i];
-
 		list_init(&p->lru);
 		p->flags = 0;
 		p->private = 0;
 		p->_refcount = 0;
 		p->slab = NULL;
-		set_page_flag(p, PG_BUDDY);
-		set_page_order(p, 0);
-		__add_to_free_list(p, zone, 0);
 	}
-	zone->free_pages = total_pages;
 
 	/*
-	 * Build buddy free lists: for each page, attempt to merge upward.
-	 * After the merge loop, the block sits at its highest achievable order.
+	 * Step 2: Build the buddy free lists using greedy block sizes.
 	 */
 	for (unsigned long i = 0; i < total_pages; ) {
-		struct page *page = &zone->page_array[i];
-		unsigned long pfn = i;
-		unsigned int order = 0;
+		unsigned int order = MAX_ORDER;
 
-		while (order < MAX_ORDER) {
-			unsigned long buddy_pfn = __find_buddy_pfn(pfn, order);
-			if (buddy_pfn >= total_pages)
+		/* Find the largest possible buddy block that fits here */
+		while (order > 0) {
+			unsigned long size = 1UL << order;
+			if ((i & (size - 1)) == 0 && i + size <= total_pages)
 				break;
-
-			struct page *buddy = &zone->page_array[buddy_pfn];
-			if (!page_is_buddy(buddy, order))
-				break;
-
-			__del_from_free_list(buddy, zone, order);
-			clear_page_flag(buddy, PG_BUDDY);
-			buddy->private = 0;
-
-			if (buddy_pfn < pfn) {
-				pfn = buddy_pfn;
-				page = buddy;
-			}
-			order++;
+			order--;
 		}
 
+		struct page *page = &zone->page_array[i];
 		set_page_flag(page, PG_BUDDY);
 		set_page_order(page, order);
 		__add_to_free_list(page, zone, order);
