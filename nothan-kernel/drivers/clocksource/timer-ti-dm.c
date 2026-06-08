@@ -9,9 +9,9 @@
  * Clock: 24 MHz M_OSC crystal. IRQ: 68.
  *
  * Clock setup (must happen in order):
- *  1. CM_PER_L4LS_CLKSTCTRL → SW_WKUP  (wake L4LS clock domain)
- *  2. CM_DPLL_CLKSEL_TIMER2  → M_OSC   (select 24 MHz source)
- *  3. CM_PER_TIMER2_CLKCTRL  → ENABLE  (enable module clock)
+ *  1. CM_PER_L4LS_CLKSTCTRL -> SW_WKUP  (wake L4LS clock domain)
+ *  2. CM_DPLL_CLKSEL_TIMER2  -> M_OSC   (select 24 MHz source)
+ *  3. CM_PER_TIMER2_CLKCTRL  -> ENABLE  (enable module clock)
  *  4. Wait IDLEST = FUNCTIONAL
  */
 
@@ -19,11 +19,11 @@
 #define DMTIMER2_BASE		0xF0040000
 #define DMTIMER2_IRQ		68
 
-/* PRCM — CM_PER domain (VA: PA 0x44E00000 → 0xF0E00000) */
+/* PRCM CM_PER domain (VA: PA 0x44E00000 -> 0xF0E00000) */
 #define CM_PER_L4LS_CLKSTCTRL	0xF0E00000	/* PA 0x44E00000 */
 #define CM_PER_TIMER2_CLKCTRL	0xF0E00080	/* PA 0x44E00080 */
 
-/* PRCM — CM_DPLL domain (VA: PA 0x44E00500 → 0xF0E00500) */
+/* PRCM CM_DPLL domain (VA: PA 0x44E00500 -> 0xF0E00500) */
 #define CM_DPLL_CLKSEL_TIMER2	0xF0E00508	/* PA 0x44E00508 */
 
 #define CLKTRCTRL_SW_WKUP	0x2
@@ -68,13 +68,7 @@ unsigned long get_jiffies(void)
 }
 
 /**
- * timer_init - initialise DMTimer2 as a 10 ms scheduler tick
- *
- * Sources the 24 MHz M_OSC crystal, auto-reloads every 10 ms
- * (240 000 cycles), and fires the overflow interrupt on IRQ 68.
- */
-/**
- * timer_init() - Initialise DMTimer2 as a 10 ms scheduler tick
+ * timer_init - Initialize DMTimer2 as a 10 ms scheduler tick
  *
  * Configures the PRCM to enable the timer clock from the 24 MHz M_OSC,
  * soft-resets the timer, sets up the auto-reload value for 10 ms
