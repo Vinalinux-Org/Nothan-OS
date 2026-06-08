@@ -11,6 +11,8 @@
  */
 void enqueue_task(struct rq *rq, struct task_struct *p)
 {
+	if (p->rt.on_rq)
+		return;
 	list_add_tail(&p->rt.run_list, &rq->active.queue[p->prio]);
 	sched_set_bit(rq, p->prio);
 	rq->nr_running++;
