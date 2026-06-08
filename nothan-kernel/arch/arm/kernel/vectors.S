@@ -83,10 +83,14 @@ vector_irq:
 
 	bl	irq_handler
 
-	@ NOTE: schedule() must NOT be called from IRQ context.
-	@ __switch_to saves SP mid-frame → corrupts .Lirq_restore.
-	@ scheduler_tick() sets need_resched=1; tasks call schedule()
-	@ cooperatively from thread context.
+	@ Preemption check: if need_resched is set, switch tasks
+	ldr	r0, =need_resched
+	ldr	r0, [r0]
+	cmp	r0, #0
+	beq	.Lirq_restore
+
+	bl	schedule
+	cpsid	i			@ Re-disable interrupts for the restore sequence
 
 .Lirq_restore:
 	pop	{r0-r12, lr}		@ Restore interrupted task's registers and original lr_svc

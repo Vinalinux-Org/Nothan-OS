@@ -15,10 +15,8 @@ static void task_a(void)
 {
 	while (1) {
 		printk("A");
-		for (volatile int i = 0; i < 700000; i++)
+		for (volatile unsigned int i = 0; i < 700000; i++)
 			;
-		schedule();
-		printk(">"); /* checkpoint: schedule() returned to task_a */
 	}
 }
 
@@ -26,12 +24,11 @@ static void task_b(void)
 {
 	while (1) {
 		printk("B");
-		for (volatile int i = 0; i < 700000; i++)
+		for (volatile unsigned int i = 0; i < 700000; i++)
 			;
-		schedule();
-		printk("<"); /* checkpoint: schedule() returned to task_b */
 	}
 }
+
 
 void kernel_main(void)
 {
@@ -60,6 +57,10 @@ void kernel_main(void)
 	sched_init();
 	printk("f\n"); 
 
+	/* 
+	 * task_a and task_b have the same priority (Round-Robin)
+	 * task_c has a HIGHER priority (lower value means higher priority)
+	 */
 	struct task_struct *t1 = task_create(task_a, DEFAULT_PRIO, "task_a");
 	struct task_struct *t2 = task_create(task_b, DEFAULT_PRIO, "task_b");
 

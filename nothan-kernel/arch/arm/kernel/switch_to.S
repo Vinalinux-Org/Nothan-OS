@@ -24,6 +24,7 @@ __switch_to:
 	.globl	task_entry
 	.type	task_entry, %function
 task_entry:
+	cpsie	i			@ Ensure IRQs enabled (may start from IRQ context)
 	mov	lr, r5
 	bx	r4
 	.size	task_entry, . - task_entry
