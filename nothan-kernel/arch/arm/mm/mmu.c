@@ -1,4 +1,5 @@
 #include <nothan/types.h>
+#include <nothan/printk.h>
 #include <asm/memory.h>
 #include <asm/pgtable.h>
 #include <asm/barrier.h>
@@ -32,7 +33,7 @@ void mmu_init(void)
 	for (unsigned int i = 0; i < 4096; i++)
 		pgd[i] = 0;
 
-	/* Kernel direct: VA 0xC0000000 → PA 0x80000000. */
+	/* Kernel direct: VA 0xC0000000 -> PA 0x80000000. */
 	for (unsigned int i = 0; i < 512; i++)
 		map_section(pgd, 0xC0000000 + (i << 20), 0x80000000 + (i << 20),
 			    MT_NORMAL | PMD_SECT_DOMAIN(DOMAIN_KERNEL) |
@@ -56,7 +57,7 @@ void mmu_init(void)
 			    MT_DEVICE | PMD_SECT_DOMAIN(DOMAIN_IO) |
 			    PMD_SECT_AP_RW | PMD_SECT_XN);
 
-	/* Identity map for .idmap.text — use phys addresses. */
+	/* Identity map for .idmap.text -- use phys addresses. */
 	unsigned int i = ((u32)&__idmap_start - MMU_OFFSET) >> 20;
 	while (i <= (((u32)&__idmap_end - MMU_OFFSET) >> 20)) {
 		map_section(pgd, i << 20, i << 20,
@@ -67,4 +68,17 @@ void mmu_init(void)
 	dsb();
 
 	__turn_mmu_on(pgd_phys);
+}
+
+void mmu_log_config(void)
+{
+	printk("[MMU] 3G/1G split: PAGE_OFFSET=0x%lx PHYS_OFFSET=0x%lx\n",
+	       PAGE_OFFSET, PHYS_OFFSET);
+	printk("[MMU] Kernel VA 0xC0000000 -> PA 0x80000000 (512 MB)\n");
+	printk("[MMU] L4_PER  VA 0xF0000000 -> PA 0x48000000 (32 MB, Device)\n");
+	printk("[MMU] L4_WKUP VA 0xF0E00000 -> PA 0x44E00000 (16 MB, Device)\n");
+	printk("[MMU] L4_FAST VA 0xF2000000 -> PA 0x4A000000 (2 MB, Device)\n");
+	printk("[MMU] DACR=0x%x (D%d=Mgr D%d=Client D%d=Client)\n",
+	       DACR_INIT, DOMAIN_KERNEL, DOMAIN_USER, DOMAIN_IO);
+	printk("[MMU] enabled\n");
 }

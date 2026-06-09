@@ -1,5 +1,6 @@
 #include <nothan/types.h>
 #include <nothan/mm.h>
+#include <nothan/printk.h>
 #include <asm/memory.h>
 
 /*
@@ -83,6 +84,13 @@ void page_alloc_init(void)
 
 		i += (1UL << order);
 	}
+
+	unsigned long pool_mb = (zone->end_pa - zone->base_pa) >> 20;
+	unsigned long meta_kb = (total_pages * sizeof(struct page)) >> 10;
+	printk("[PAGE] Pool %lu MB at PA 0x%lx (%lu pages, metadata %lu KB)\n",
+	       pool_mb, zone->base_pa, total_pages, meta_kb);
+	printk("[PAGE] Free: %lu pages (%lu MB)\n",
+	       zone->free_pages, (zone->free_pages << PAGE_SHIFT) >> 20);
 }
 
 static void expand(struct page *page, struct zone *zone, unsigned int low, unsigned int high)

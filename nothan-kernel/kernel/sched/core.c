@@ -70,7 +70,8 @@ void sched_init(void)
 
 	idle_task_init();
 
-	printk("sched: init OK\n");
+	printk("[SCHED] %d prio levels, RR timeslice=%d tick(s), idle at %d\n",
+	       MAX_PRIO, RR_TIMESLICE, IDLE_PRIO);
 }
 
 /**

@@ -1,6 +1,7 @@
 #include <nothan/types.h>
 #include <nothan/slab.h>
 #include <nothan/mm.h>
+#include <nothan/printk.h>
 #include <asm/memory.h>
 
 #define SLAB_SIZES		7
@@ -69,6 +70,11 @@ void slab_init(void)
 		if (page)
 			slab_fill_page(&caches[i], page);
 	}
+
+	printk("[SLAB] kmalloc classes:");
+	for (unsigned int i = 0; i < SLAB_SIZES; i++)
+		printk(" %d", cache_sizes[i]);
+	printk("\n");
 }
 
 /**

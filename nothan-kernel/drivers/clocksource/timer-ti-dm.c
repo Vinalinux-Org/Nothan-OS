@@ -144,4 +144,5 @@ void timer_init(void)
 	while ((mmio_read32(DMTIMER2_BASE + TWPS) & TWPS_W_PEND_TCLR) && timeout--)
 		;
 	mmio_write32(DMTIMER2_BASE + TCLR, TCLR_AR | TCLR_ST);
+printk("[TIMER] DMTimer2 @ 24 MHz, 10 ms tick, IRQ %d\n", DMTIMER2_IRQ);
 }
