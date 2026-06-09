@@ -7,7 +7,7 @@
  * wait_event - put the current task to sleep on a wait queue
  * @wq: the wait queue to sleep on
  *
- * Sets the current task state to TASK_SLEEPING, removes it from
+ * Sets the current task state to TASK_UNINTERRUPTIBLE, removes it from
  * the runqueue, and calls schedule().  The task must be woken by
  * a matching wake_up() call.
  */
@@ -15,8 +15,7 @@ void wait_event(struct wait_queue_head *wq)
 {
 	struct task_struct *curr = runqueue.curr;
 
-	curr->__state = TASK_SLEEPING;
-	dequeue_task(&runqueue, curr);
+	curr->__state = TASK_UNINTERRUPTIBLE;
 
 	/* Reuse rt.run_list to link into the wait queue. */
 	list_add_tail(&curr->rt.run_list, &wq->task_list);
