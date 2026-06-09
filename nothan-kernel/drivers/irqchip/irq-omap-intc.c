@@ -7,14 +7,14 @@
 #include <nothan/types.h>
 #include <nothan/irq.h>
 #include <nothan/mmio.h>
+#include <nothan/printk.h>
+#include <nothan/platform.h>
+#include <nothan/init.h>
 
-/**
- * intc_init() - Initialize the Interrupt Controller
- *
- * Masks all interrupts, allows all priorities, and clears pending aggregations.
- */
-void intc_init(void)
+static int intc_probe(struct platform_device *pdev)
 {
+	(void)pdev;
+
 	mmio_write32(INTC_BASE + INTC_MIR_SET(0), 0xFFFFFFFF);
 	mmio_write32(INTC_BASE + INTC_MIR_SET(1), 0xFFFFFFFF);
 	mmio_write32(INTC_BASE + INTC_MIR_SET(2), 0xFFFFFFFF);
@@ -23,7 +23,21 @@ void intc_init(void)
 	mmio_write32(INTC_BASE + INTC_THRESHOLD, 0xFF);
 
 	mmio_write32(INTC_BASE + INTC_CONTROL, NEWIRQAGR);
+
+	printk("[INTC] AM335x INTC ready\n");
+	return 0;
 }
+
+static struct platform_driver intc_driver = {
+	.probe = intc_probe,
+};
+
+static int __init omap_intc_init(void)
+{
+	intc_driver.drv.name = "omap_intc";
+	return platform_driver_register(&intc_driver);
+}
+subsys_initcall(omap_intc_init);
 
 /**
  * intc_enable_irq() - Unmask an interrupt

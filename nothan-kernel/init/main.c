@@ -5,26 +5,23 @@
  */
 
 #include <nothan/types.h>
-#include <nothan/uart.h>
-#include <nothan/irq.h>
 #include <nothan/printk.h>
 #include <nothan/mm.h>
 #include <nothan/slab.h>
 #include <nothan/sched.h>
+#include <nothan/timer.h>
+#include <nothan/init.h>
 
-extern void timer_init(void);
+extern void mmu_init(void);
 extern void mmu_log_config(void);
 extern struct task_struct *user_task_create(const char *name);
 
 void kernel_main(void)
 {
-	intc_init();
-	printk("[INTC] AM335x INTC ready\n");
 
-	uart_init();
-	printk("[UART] 115200 8N1\n");
-
-	timer_init();
+	/* Platform init: board registers devices → drivers match → probe.
+	 * UART must be initialized before any printk() calls. */
+	do_initcalls();
 
 	page_alloc_init();
 
@@ -33,6 +30,8 @@ void kernel_main(void)
 	mmu_log_config();
 
 	sched_init();
+
+	timer_start();
 
 	struct task_struct *ut = user_task_create("user1");
 	if (ut)

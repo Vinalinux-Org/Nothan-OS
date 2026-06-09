@@ -42,6 +42,10 @@ OBJS += $(BUILD_DIR)/kernel/syscall.o
 OBJS += $(BUILD_DIR)/kernel/exit.o
 OBJS += $(BUILD_DIR)/init/main.o
 OBJS += $(BUILD_DIR)/kernel/userspace_blobs.o
+OBJS += $(BUILD_DIR)/drivers/base/bus.o
+OBJS += $(BUILD_DIR)/drivers/base/platform.o
+OBJS += $(BUILD_DIR)/drivers/base/init.o
+OBJS += $(BUILD_DIR)/arch/arm/mach-omap2/board-bbb.o
 
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 KERNEL_BIN := $(BUILD_DIR)/kernel.bin

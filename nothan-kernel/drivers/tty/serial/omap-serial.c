@@ -8,6 +8,9 @@
 #include <nothan/uart.h>
 #include <nothan/irq.h>
 #include <nothan/mmio.h>
+#include <nothan/printk.h>
+#include <nothan/platform.h>
+#include <nothan/init.h>
 
 /*
  * PRCM clock control for UART0.
@@ -35,14 +38,12 @@ static void uart_irq_handler(unsigned int irq)
 	}
 }
 
-/**
- * uart_init - initialise UART0 for 115200 8N1 with interrupt-driven RX
- *
- * Enables the UART clock via PRCM, configures the line, baud rate,
- * and FIFO threshold, then registers the interrupt handler.
+/*
+ * uart_probe - initialise UART0 for 115200 8N1 with interrupt-driven RX
  */
-void uart_init(void)
+static int uart_probe(struct platform_device *pdev)
 {
+	(void)pdev;
 
 	mmio_write32(CM_PER_UART0_CLKCTRL, 0x02);
 	while ((mmio_read32(CM_PER_UART0_CLKCTRL) & 0x30000) != 0)
@@ -53,7 +54,6 @@ void uart_init(void)
 	u32 lcr = LCR_8N1;
 	mmio_write32(UART_BASE + UART_LCR, lcr | LCR_DLAB);
 
-	/* 115200 baud @ 48 MHz UART clock. */
 	mmio_write32(UART_BASE + UART_DLL, 26);
 	mmio_write32(UART_BASE + UART_DLH, 0);
 
@@ -63,8 +63,21 @@ void uart_init(void)
 
 	request_irq(UART_IRQ, uart_irq_handler);
 	intc_enable_irq(UART_IRQ);
+
+	printk("[UART] 115200 8N1\n");
+	return 0;
 }
 
+static struct platform_driver uart_driver = {
+	.probe = uart_probe,
+};
+
+static int __init omap_uart_init(void)
+{
+	uart_driver.drv.name = "omap_uart";
+	return platform_driver_register(&uart_driver);
+}
+device_initcall(omap_uart_init);
 /**
  * uart_putchar - transmit a single character (polling)
  * @c: character to transmit

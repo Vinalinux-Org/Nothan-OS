@@ -27,6 +27,7 @@ SECTIONS
 
 	.text : {
 		*(.text)
+		*(.init.text)
 	}
 
 	.rodata : {
@@ -37,6 +38,17 @@ SECTIONS
 	.data : {
 		*(.data)
 	}
+
+	. = ALIGN(4);
+	__initcall_start = .;
+	.initcall : {
+		*(.initcall.0)
+		*(.initcall.1)
+		*(.initcall.2)
+		*(.initcall.3)
+		*(.initcall.4)
+	}
+	__initcall_end = .;
 
 	. = ALIGN(8);
 

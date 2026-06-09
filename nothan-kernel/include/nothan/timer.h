@@ -23,5 +23,6 @@ void add_timer(struct timer_list *timer);
 int  del_timer(struct timer_list *timer);
 int  mod_timer(struct timer_list *timer, unsigned long expires);
 void run_local_timers(void);
+void timer_start(void);
 
 #endif /* _NOTHAN_TIMER_H */

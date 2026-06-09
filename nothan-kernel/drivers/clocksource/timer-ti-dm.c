@@ -10,6 +10,8 @@
 #include <nothan/sched.h>
 #include <nothan/timer.h>
 #include <nothan/printk.h>
+#include <nothan/platform.h>
+#include <nothan/init.h>
 
 /*
  * DMTimer2 at PA 0x48040000 (L4_PER), VA 0xF0040000.
@@ -75,16 +77,17 @@ unsigned long get_jiffies(void)
 	return jiffies;
 }
 
-/**
- * timer_init - Initialize DMTimer2 as a 10 ms scheduler tick
+/*
+ * timer_probe - Initialize DMTimer2 as a 10 ms scheduler tick
  *
  * Configures the PRCM to enable the timer clock from the 24 MHz M_OSC,
  * soft-resets the timer, sets up the auto-reload value for 10 ms
  * (240,000 cycles), and enables the overflow interrupt (IRQ 68) which
  * drives the preemptive scheduler tick.
  */
-void timer_init(void)
+static int timer_probe(struct platform_device *pdev)
 {
+	(void)pdev;
 	/* Step 1: Force L4LS clock domain to SW_WKUP. */
 	u32 val = mmio_read32(CM_PER_L4LS_CLKSTCTRL);
 	unsigned int timeout;
@@ -149,6 +152,27 @@ void timer_init(void)
 	timeout = 10000;
 	while ((mmio_read32(DMTIMER2_BASE + TWPS) & TWPS_W_PEND_TCLR) && timeout--)
 		;
-	mmio_write32(DMTIMER2_BASE + TCLR, TCLR_AR | TCLR_ST);
+	/* Timer intentionally NOT started yet — timer_start() after sched_init() */
 printk("[TIMER] DMTimer2 @ 24 MHz, 10 ms tick, IRQ %d\n", DMTIMER2_IRQ);
+	return 0;
 }
+
+void timer_start(void)
+{
+	unsigned int timeout = 10000;
+	mmio_write32(DMTIMER2_BASE + TCLR, TCLR_AR | TCLR_ST);
+	timeout = 10000;
+	while ((mmio_read32(DMTIMER2_BASE + TWPS) & TWPS_W_PEND_TCLR) && timeout--)
+		;
+}
+
+static struct platform_driver timer_driver = {
+	.probe = timer_probe,
+};
+
+static int __init omap_timer_init(void)
+{
+	timer_driver.drv.name = "omap_timer";
+	return platform_driver_register(&timer_driver);
+}
+device_initcall(omap_timer_init);
