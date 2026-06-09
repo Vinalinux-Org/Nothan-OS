@@ -7,11 +7,53 @@ int need_resched;
 
 extern void __switch_to(struct task_struct *prev, struct task_struct *next);
 
+/* Idle task — always runnable, lowest priority, no kmalloc needed. */
+#define IDLE_STACK_WORDS 256
+static unsigned long idle_stack[IDLE_STACK_WORDS];
+static struct task_struct idle_tsk;
+
+static void idle_main(void)
+{
+	while (1) {
+		__asm__ __volatile__ ("cpsie i\nwfi" : : : "memory");
+		schedule();
+	}
+}
+
+static void idle_task_init(void)
+{
+	unsigned long *sp = idle_stack + IDLE_STACK_WORDS;
+
+	/* Pre-fill the switch frame (see fork.c for layout): */
+	*--sp = (unsigned long)idle_main;	/* lr → PC */
+	*--sp = 0;				/* r11 */
+	*--sp = 0;				/* r10 */
+	*--sp = 0;				/* r9  */
+	*--sp = 0;				/* r8  */
+	*--sp = 0;				/* r7  */
+	*--sp = 0;				/* r6  */
+	*--sp = (unsigned long)idle_main;	/* r5 (fallback exit) */
+	*--sp = (unsigned long)idle_main;	/* r4 (fn) */
+
+	idle_tsk.stack     = sp;
+	idle_tsk.__state   = TASK_RUNNING;
+	idle_tsk.exit_state = 0;
+	idle_tsk.pid       = 0;
+	idle_tsk.prio      = IDLE_PRIO;
+	idle_tsk.rt.time_slice = RR_TIMESLICE;
+	idle_tsk.rt.on_rq  = 0;
+
+	const char *name = "idle";
+	unsigned int i = 0;
+	for (; i < 15 && name[i]; i++)
+		idle_tsk.comm[i] = name[i];
+	idle_tsk.comm[i] = '\0';
+
+	enqueue_task(&runqueue, &idle_tsk);
+}
+
 /**
  * sched_init() - Initialize the scheduler runqueue
- *
- * Clears the global runqueue, sets bitmap to zero, and initialises
- * each per-priority linked list head.
  */
 void sched_init(void)
 {
@@ -26,20 +68,19 @@ void sched_init(void)
 
 	need_resched = 0;
 
+	idle_task_init();
+
 	printk("sched: init OK\n");
 }
 
 /**
  * schedule() - Pick the next task and switch to it
  *
- * The runqueue manipulation (enqueue prev, dequeue next) is a critical
- * section: a timer IRQ between those two calls would see on_rq=1 and
- * attempt list_move_tail(), corrupting the list.  Disable IRQs for
- * the duration of the runqueue update.
+ * The idle task is always on the runqueue, so pick_next_task()
+ * never returns NULL.
  */
 void schedule(void)
 {
-	/* --- critical section: protect runqueue lists --- */
 	__asm__ __volatile__ ("cpsid i" : : : "memory");
 
 	struct task_struct *prev = runqueue.curr;
@@ -49,6 +90,7 @@ void schedule(void)
 
 	struct task_struct *next = pick_next_task(&runqueue);
 	if (!next) {
+		/* Should never happen — idle task is always available. */
 		runqueue.curr = NULL;
 		__asm__ __volatile__ ("cpsie i" : : : "memory");
 		return;
@@ -58,7 +100,6 @@ void schedule(void)
 	need_resched = 0;
 
 	__asm__ __volatile__ ("cpsie i" : : : "memory");
-	/* --- end critical section --- */
 
 	if (prev == next)
 		return;
@@ -72,13 +113,6 @@ void schedule(void)
 			: : "r" (next));
 }
 
-/**
- * scheduler_tick() - Called from the timer ISR
- *
- * Decrements the current task's timeslice.  Does NOT touch the
- * runqueue lists — that is schedule()'s job.  Just signals that a
- * reschedule is needed so the next schedule() call will rotate tasks.
- */
 void scheduler_tick(void)
 {
 	struct task_struct *curr = runqueue.curr;

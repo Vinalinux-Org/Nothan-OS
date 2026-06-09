@@ -6,8 +6,8 @@ static int next_pid = 1;
 
 static void task_exit(void)
 {
-	runqueue.curr->__state = TASK_ZOMBIE;
-	enqueue_task(&runqueue, runqueue.curr);
+	runqueue.curr->__state = TASK_UNINTERRUPTIBLE;
+	runqueue.curr->exit_state = EXIT_ZOMBIE;
 	schedule();
 	while (1)
 		;
