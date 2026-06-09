@@ -44,15 +44,39 @@ vector_und:
 	ldmfd	sp!, {r0-r12, pc}^
 
 /* --- Supervisor call (syscall) --- */
+/*
+ * Stack layout after entry:
+ *   push {r0-r12, lr} → 14 regs, ascending: r0=sp+4, r1=sp+8, …, r7=sp+32, …, lr=sp+56
+ *   push {r0= SPSR}  → SPSR at sp+0
+ *
+ * Syscall convention (Linux style):
+ *   r7 = syscall number
+ *   r0-r3 = arguments
+ *   svc #0   (immediate is ignored)
+ *   r0 = return value
+ */
 vector_svc:
-	sub	lr, lr, #0
-	push	{r0-r12, lr}
+	push	{r0-r12, lr}		@ save registers (56 bytes)
 	mrs	r0, spsr
-	push	{r0}
-	bl	svc_handler
-	pop	{r0}
+	push	{r0}			@ save SPSR (4 bytes)
+
+	@ --- Read syscall number from r7 (stack offset +32) ---
+	ldr	r4, [sp, #32]		@ r4 = r7 = syscall number
+
+	@ --- Call do_syscall(nr, arg0, arg1, arg2) ---
+	mov	r0, r4			@ r0 = syscall nr
+	ldr	r1, [sp, #4]		@ r1 = arg0 (original r0)
+	ldr	r2, [sp, #8]		@ r2 = arg1 (original r1)
+	ldr	r3, [sp, #12]		@ r3 = arg2 (original r2)
+	bl	do_syscall
+
+	@ --- Store return value into r0 slot on stack ---
+	str	r0, [sp, #4]		@ [sp+4] → r0 on ldmfd
+
+	@ --- Restore state and return ---
+	pop	{r0}			@ r0 = SPSR
 	msr	spsr_cxsf, r0
-	ldmfd	sp!, {r0-r12, pc}^
+	ldmfd	sp!, {r0-r12, pc}^	@ restore regs, pc = lr, CPSR = SPSR
 
 /* --- Prefetch abort --- */
 vector_pabt:

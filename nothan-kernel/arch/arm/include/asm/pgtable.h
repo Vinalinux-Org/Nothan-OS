@@ -33,19 +33,26 @@
 /* L1 table descriptor (points to L2 page table) */
 #define PMD_TABLE_PTR(x)	(((x) & 0xFFFFFC00) | PMD_TYPE_TABLE)
 
-/* L2 small page descriptor bits */
+/* L2 small page descriptor bits — extended format (ARMv6+, ARMv7 short-desc) */
 #define PTE_TYPE_MASK		3
-#define PTE_TYPE_SMALL		2
+#define PTE_TYPE_SMALL		(1 << 1)	/* bit[1]=1, bit[0]=XN (extended format) */
 #define PTE_TYPE_LARGE		1
+#define PTE_TYPE_FAULT		0
 
-#define PTE_SMALL_AP_RW		(1 << 10)
-#define PTE_SMALL_AP_USER	(2 << 10)
-#define PTE_SMALL_XN		(1 << 4)
-#define PTE_SMALL_C			(1 << 3)
-#define PTE_SMALL_B			(1 << 2)
-#define PTE_SMALL_TEX(x)	((x) << 6)
-#define PTE_SMALL_NG		(1 << 12)
-#define PTE_SMALL_S			(1 << 16)
+#define PTE_SMALL_XN		(1 << 0)	/* Execute Never */
+#define PTE_SMALL_B			(1 << 2)	/* Bufferable / Outer cacheable */
+#define PTE_SMALL_C			(1 << 3)	/* Cacheable / Inner cacheable */
+#define PTE_SMALL_AP0		(1 << 4)	/* AP[0] */
+#define PTE_SMALL_AP1		(1 << 5)	/* AP[1] */
+#define PTE_SMALL_TEX(x)	((x) << 6)	/* TEX[2:0] at bits [8:6] */
+#define PTE_SMALL_APX		(1 << 9)	/* AP extension */
+#define PTE_SMALL_S			(1 << 10)	/* Shareable */
+#define PTE_SMALL_NG		(1 << 11)	/* Not Global */
+
+/* AP convenience combos (APX=0 unless overridden) */
+#define PTE_SMALL_AP_RW		PTE_SMALL_AP0				/* AP=01: kernel RW only */
+#define PTE_SMALL_AP_URO	PTE_SMALL_AP1				/* AP=10: kernel RW, user RO */
+#define PTE_SMALL_AP_BOTH	(PTE_SMALL_AP0 | PTE_SMALL_AP1)	/* AP=11: kernel RW, user RW */
 
 #define PTE_SMALL_PAGE(x)	(((x) & 0xFFFFF000) | PTE_TYPE_SMALL)
 

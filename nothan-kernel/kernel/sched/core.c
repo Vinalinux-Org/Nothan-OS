@@ -41,13 +41,18 @@ static void idle_task_init(void)
 	*--sp = (unsigned long)idle_main;	/* r5 (fallback exit) */
 	*--sp = (unsigned long)idle_main;	/* r4 (fn) */
 
-	idle_tsk.stack     = sp;
-	idle_tsk.__state   = TASK_RUNNING;
-	idle_tsk.exit_state = 0;
-	idle_tsk.pid       = 0;
-	idle_tsk.prio      = IDLE_PRIO;
-	idle_tsk.rt.time_slice = RR_TIMESLICE;
-	idle_tsk.rt.on_rq  = 0;
+		idle_tsk.stack      = sp;
+		idle_tsk.__state    = TASK_RUNNING;
+		idle_tsk.exit_state = 0;
+		idle_tsk.pid        = 0;
+		idle_tsk.tgid       = 0;
+		idle_tsk.prio       = IDLE_PRIO;
+		idle_tsk.rt.time_slice = RR_TIMESLICE;
+		idle_tsk.rt.on_rq   = 0;
+		idle_tsk.exit_code  = 0;
+		idle_tsk.real_parent = &idle_tsk;
+		idle_tsk.parent     = &idle_tsk;
+		idle_tsk.mm         = NULL;
 
 	const char *name = "idle";
 	unsigned int i = 0;
@@ -56,6 +61,7 @@ static void idle_task_init(void)
 	idle_tsk.comm[i] = '\0';
 
 	enqueue_task(&runqueue, &idle_tsk);
+		runqueue.curr = &idle_tsk;
 }
 
 /**
@@ -106,10 +112,20 @@ void schedule(void)
 	runqueue.curr = next;
 	need_resched = 0;
 
-	__asm__ __volatile__ ("cpsie i" : : : "memory");
-
-	if (prev == next)
+	/*
+	 * Keep IRQs disabled across __switch_to to prevent a timer IRQ
+	 * from firing between "ldr sp, [next]" and "ldmfd ... pc" inside
+	 * __switch_to, which would corrupt the task stack mid-switch.
+	 *
+	 * IRQs are re-enabled:
+	 *  - Here, after __switch_to returns (prev resumed after re-schedule)
+	 *  - In task_entry, for newly-created tasks (cpsie i at entry)
+	 *  - In vector_irq path: cpsid after schedule + rfefd restores CPSR
+	 */
+	if (prev == next) {
+		__asm__ __volatile__ ("cpsie i" : : : "memory");
 		return;
+	}
 
 	if (prev)
 		__switch_to(prev, next);
@@ -118,6 +134,9 @@ void schedule(void)
 			"ldr sp, [%0, #0]\n"
 			"ldmfd sp!, {r4-r11, pc}\n"
 			: : "r" (next));
+
+	/* Reached only when prev is resumed by a later __switch_to. */
+	__asm__ __volatile__ ("cpsie i" : : : "memory");
 }
 
 void scheduler_tick(void)

@@ -38,10 +38,31 @@ OBJS += $(BUILD_DIR)/kernel/sched/core.o
 OBJS += $(BUILD_DIR)/kernel/sched/rt.o
 OBJS += $(BUILD_DIR)/kernel/sched/wait.o
 OBJS += $(BUILD_DIR)/kernel/sched/completion.o
+OBJS += $(BUILD_DIR)/kernel/syscall.o
+OBJS += $(BUILD_DIR)/kernel/exit.o
 OBJS += $(BUILD_DIR)/init/main.o
+OBJS += $(BUILD_DIR)/kernel/userspace_blobs.o
 
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 KERNEL_BIN := $(BUILD_DIR)/kernel.bin
+
+# Default target: build kernel binary
+.PHONY: all
+all: $(KERNEL_BIN)
+
+# User-space binary blob (embedded into kernel image)
+USER_HELLO_BIN := $(BUILD_DIR)/hello.usr
+
+.PHONY: userspace
+userspace:
+	$(MAKE) -C ../userspace
+
+$(USER_HELLO_BIN): userspace | $(BUILD_DIR)
+	cp ../userspace/build/hello.bin $@
+
+$(BUILD_DIR)/kernel/userspace_blobs.o: kernel/userspace_blobs.S $(USER_HELLO_BIN) | $(BUILD_DIR)
+	@mkdir -p $(dir $@)
+	$(CC) $(KBUILD_AFLAGS) -c -o $@ $<
 
 $(KERNEL_BIN): $(KERNEL_ELF)
 	$(OBJCOPY) -O binary $< $@

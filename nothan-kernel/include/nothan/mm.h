@@ -15,6 +15,28 @@ typedef unsigned int gfp_t;
 
 #define GFP_KERNEL		0
 #define GFP_ATOMIC		1
+#define GFP_USER		2   /* user-space page allocation */
+
+/* Kernel direct-map: VA = PA + (PAGE_OFFSET - PHYS_OFFSET) */
+#define PAGE_OFFSET		0xC0000000UL
+#define PHYS_OFFSET		0x80000000UL
+#define phys_to_kva(pa)		((void *)((unsigned long)(pa) + (PAGE_OFFSET - PHYS_OFFSET)))
+
+/*
+ * struct mm_struct - per-process memory descriptor (Phase 10b)
+ *
+ * Tracks the L2 page table and user-space pages for a single
+ * user task.  The global L1 table entry pointing to this L2 is
+ * updated by mmu_map_user() at task creation time.
+ */
+struct mm_struct {
+	u32  *l2;               /* L2 page table (1 KB, 256 entries × 4 B) */
+	u32   l1_idx;           /* L1 index used (VA >> 20) */
+	unsigned long code_pa;  /* physical address of user code page  */
+	unsigned long stack_pa; /* physical address of user stack page */
+	unsigned long entry_va; /* user-space entry point VA */
+	unsigned long sp_top;   /* user stack top VA (initial sp) */
+};
 
 /**
  * struct list_head - Circular doubly linked list node

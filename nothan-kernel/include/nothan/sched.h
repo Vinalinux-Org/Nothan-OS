@@ -52,6 +52,13 @@ struct sched_rt_entity {
  * @prio:    static priority, 0 = highest, MAX_PRIO-1 = lowest
  * @rt:      embedded scheduling entity
  * @comm:    human-readable task name (for printk debugging)
+ * @mm:      NULL = kernel thread
+ *
+ * Linux-style process fields:
+ * @tgid:         thread group ID (= pid, single-thread for now)
+ * @real_parent:  original parent (set at creation, immutable)
+ * @parent:       receiving parent for wait (normally == real_parent)
+ * @exit_code:    exit status code set by do_exit()
  */
 struct task_struct {
 	void				*stack;
@@ -61,6 +68,13 @@ struct task_struct {
 	int				prio;
 	struct sched_rt_entity		rt;
 	char				comm[16];
+	struct mm_struct		*mm;    /* NULL = kernel thread */
+
+	/* Process identity (Linux 6.17 naming) */
+	pid_t				tgid;
+	struct task_struct		*real_parent;
+	struct task_struct		*parent;
+	int				exit_code;
 };
 
 /**
@@ -134,5 +148,7 @@ void scheduler_tick(void);
 
 extern struct rq runqueue;
 extern int need_resched;
+
+void do_exit(int code);
 
 #endif /* _NOTHAN_SCHED_H */

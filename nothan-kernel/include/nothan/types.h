@@ -15,4 +15,7 @@ typedef int16_t		s16;
 typedef int32_t		s32;
 typedef int64_t		s64;
 
+/* Process ID — follows Linux: int on 32-bit */
+typedef int		pid_t;
+
 #endif /* _NOTHAN_TYPES_H */
