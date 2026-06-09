@@ -29,12 +29,15 @@ OBJS += $(BUILD_DIR)/kernel/irq/irq_core.o
 OBJS += $(BUILD_DIR)/drivers/tty/serial/omap-serial.o
 OBJS += $(BUILD_DIR)/drivers/clocksource/timer-ti-dm.o
 OBJS += $(BUILD_DIR)/kernel/printk.o
+OBJS += $(BUILD_DIR)/kernel/time/delay.o
+OBJS += $(BUILD_DIR)/kernel/time/timer.o
 OBJS += $(BUILD_DIR)/mm/page_alloc.o
 OBJS += $(BUILD_DIR)/mm/slab.o
 OBJS += $(BUILD_DIR)/kernel/fork.o
 OBJS += $(BUILD_DIR)/kernel/sched/core.o
 OBJS += $(BUILD_DIR)/kernel/sched/rt.o
 OBJS += $(BUILD_DIR)/kernel/sched/wait.o
+OBJS += $(BUILD_DIR)/kernel/sched/completion.o
 OBJS += $(BUILD_DIR)/init/main.o
 
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf

@@ -4,10 +4,25 @@
 #include <nothan/types.h>
 #include <nothan/mm.h>
 
-/* Task state constants */
-#define TASK_RUNNING		0	/* on runqueue or currently executing */
-#define TASK_SLEEPING		1	/* blocked, waiting for an event */
-#define TASK_ZOMBIE			2	/* exited, not yet reaped */
+/* Task state constants (Linux v6.17 compatible, bitmask-style) */
+#define TASK_RUNNING		0x00000000	/* running or on runqueue */
+#define TASK_INTERRUPTIBLE	0x00000001	/* sleep, wakeable by signal */
+#define TASK_UNINTERRUPTIBLE	0x00000002	/* sleep, no signal wakeup */
+#define __TASK_STOPPED		0x00000004	/* paused (SIGSTOP) */
+#define __TASK_TRACED		0x00000008	/* ptrace (gdb/strace) */
+
+#define TASK_STOPPED		__TASK_STOPPED
+#define TASK_TRACED		__TASK_TRACED
+
+/* Flag-like modifiers (ORed with basic states): */
+#define TASK_WAKEKILL		0x00000100	/* allow SIGKILL while unkillable */
+#define TASK_KILLABLE		(TASK_UNINTERRUPTIBLE | TASK_WAKEKILL)
+
+#define TASK_NEW		0x00000800	/* just forked, not yet seen by scheduler */
+
+/* Exit states (in tsk->exit_state, not __state): */
+#define EXIT_DEAD		0x00000010	/* parent wait()ed, entry can be freed */
+#define EXIT_ZOMBIE		0x00000020	/* exited, parent hasn't wait()ed */
 
 /* Scheduling constants */
 #define MAX_PRIO			32	/* 32 fixed priority levels */
@@ -31,19 +46,21 @@ struct sched_rt_entity {
  * struct task_struct - per-task descriptor
  * @stack:   saved kernel SP (points to top of saved register frame on
  *           the task's kernel stack, set by __switch_to on context out)
- * @__state: TASK_RUNNING / TASK_SLEEPING / TASK_ZOMBIE
+ * @__state: TASK_RUNNING / TASK_INTERRUPTIBLE / TASK_UNINTERRUPTIBLE / ...
+ * @exit_state: EXIT_ZOMBIE / EXIT_DEAD (valid after task calls do_exit)
  * @pid:     process identifier (monotonically increasing)
  * @prio:    static priority, 0 = highest, MAX_PRIO-1 = lowest
  * @rt:      embedded scheduling entity
  * @comm:    human-readable task name (for printk debugging)
  */
 struct task_struct {
-	void					*stack;
+	void				*stack;
 	unsigned int			__state;
-	int						pid;
-	int						prio;
-	struct sched_rt_entity	rt;
-	char					comm[16];
+	unsigned int			exit_state;
+	int				pid;
+	int				prio;
+	struct sched_rt_entity		rt;
+	char				comm[16];
 };
 
 /**
@@ -93,15 +110,6 @@ static inline int sched_find_first_bit(u32 bitmap)
 	return __builtin_ctz(bitmap);
 }
 
-/* list_add_tail: insert before head (append to tail) */
-static inline void list_add_tail(struct list_head *new, struct list_head *head)
-{
-	new->next = head;
-	new->prev = head->prev;
-	head->prev->next = new;
-	head->prev = new;
-}
-
 /* list_move_tail: re-append entry to tail of list */
 static inline void list_move_tail(struct list_head *entry, struct list_head *head)
 {
@@ -112,6 +120,9 @@ static inline void list_move_tail(struct list_head *entry, struct list_head *hea
 /* list_first_entry: return pointer to first struct in list */
 #define list_first_entry(head, type, member) \
 	((type *)((char *)((head)->next) - __builtin_offsetof(type, member)))
+
+#define set_current_state(state)			\
+	do { runqueue.curr->__state = (state); } while (0)
 
 void sched_init(void);
 struct task_struct *task_create(void (*fn)(void), int prio, const char *name);

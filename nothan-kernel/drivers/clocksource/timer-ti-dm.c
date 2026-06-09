@@ -2,6 +2,7 @@
 #include <nothan/irq.h>
 #include <nothan/mmio.h>
 #include <nothan/sched.h>
+#include <nothan/timer.h>
 #include <nothan/printk.h>
 
 /*
@@ -60,6 +61,7 @@ static void timer_irq_handler(unsigned int irq)
 	mmio_write32(DMTIMER2_BASE + IRQSTATUS, IRQ_OVF_IT_FLAG);
 	jiffies++;
 	scheduler_tick();
+	run_local_timers();
 }
 
 unsigned long get_jiffies(void)

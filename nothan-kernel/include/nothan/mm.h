@@ -112,6 +112,21 @@ static inline unsigned long __find_buddy_pfn(unsigned long pfn, unsigned int ord
 }
 
 /* List helpers */
+
+#define list_entry(ptr, type, member) \
+	((type *)((char *)(ptr) - __builtin_offsetof(type, member)))
+
+#define list_for_each(pos, head) \
+	for (pos = (head)->next; pos != (head); pos = pos->next)
+
+#define list_for_each_entry_safe(pos, tmp, head, type, member)		\
+	for (pos = list_entry((head)->next, type, member),		\
+	     tmp = list_entry(pos->member.next, type, member);		\
+	     &pos->member != (head);					\
+	     pos = tmp, tmp = list_entry(tmp->member.next, type, member))
+
+#define LIST_HEAD(name) struct list_head name = { &(name), &(name) }
+
 static inline void list_init(struct list_head *head)
 {
 	head->next = head;
@@ -135,6 +150,14 @@ static inline void list_del(struct list_head *entry)
 static inline int list_empty(struct list_head *head)
 {
 	return head->next == head;
+}
+
+static inline void list_add_tail(struct list_head *new, struct list_head *head)
+{
+	new->next = head;
+	new->prev = head->prev;
+	head->prev->next = new;
+	head->prev = new;
 }
 
 /* Free-list helpers */
