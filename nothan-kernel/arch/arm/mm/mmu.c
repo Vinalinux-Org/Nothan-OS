@@ -1,3 +1,9 @@
+/*
+ * arch/arm/mm/mmu.c - ARMv7 MMU setup (page tables, TTBR, DACR)
+ *
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
+ */
+
 #include <nothan/types.h>
 #include <nothan/printk.h>
 #include <asm/memory.h>

@@ -1,3 +1,9 @@
+/*
+ * kernel/sched/rt.c - O(1) bitmap-based real-time runqueue operations
+ *
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
+ */
+
 #include <nothan/types.h>
 #include <nothan/sched.h>
 

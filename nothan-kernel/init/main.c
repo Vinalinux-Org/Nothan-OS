@@ -1,3 +1,9 @@
+/*
+ * init/main.c - Kernel entry point and early boot sequence
+ *
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
+ */
+
 #include <nothan/types.h>
 #include <nothan/uart.h>
 #include <nothan/irq.h>

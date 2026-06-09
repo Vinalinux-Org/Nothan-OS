@@ -1,5 +1,7 @@
 /*
- * ARM exception vector table and trampolines.
+ * arch/arm/kernel/vectors.S - ARM exception vector table and trampolines
+ *
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
  *
  * VBAR points here (set after MMU is on).  Each vector entry
  * branches to a trampoline that saves context and calls the

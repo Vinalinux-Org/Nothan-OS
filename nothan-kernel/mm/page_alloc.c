@@ -1,3 +1,9 @@
+/*
+ * mm/page_alloc.c - Physical page allocator (buddy system)
+ *
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
+ */
+
 #include <nothan/types.h>
 #include <nothan/mm.h>
 #include <nothan/printk.h>

@@ -1,5 +1,8 @@
 /*
- * Page table space — 16KB aligned to 16KB boundary.
+ * arch/arm/mm/pgd.S - Page global directory space (16KB, 16KB-aligned)
+ *
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
+ *
  * Must be placed right after kernel BSS by the linker script.
  */
 .section .pgd, "aw"

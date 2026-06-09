@@ -1,3 +1,9 @@
+/*
+ * kernel/time/timer.c - Software timer list (add/del/mod/run)
+ *
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
+ */
+
 #include <nothan/timer.h>
 #include <nothan/time.h>
 

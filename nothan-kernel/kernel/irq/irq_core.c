@@ -1,3 +1,9 @@
+/*
+ * kernel/irq/irq_core.c - IRQ descriptor table and handler dispatch
+ *
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
+ */
+
 #include <nothan/types.h>
 #include <nothan/irq.h>
 #include <nothan/mmio.h>

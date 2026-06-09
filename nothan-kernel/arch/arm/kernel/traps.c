@@ -1,3 +1,9 @@
+/*
+ * arch/arm/kernel/traps.c - ARM exception handlers (abort, undefined, FIQ)
+ *
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
+ */
+
 #include <nothan/types.h>
 #include <nothan/irq.h>
 #include <nothan/printk.h>

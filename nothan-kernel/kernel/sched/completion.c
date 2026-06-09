@@ -1,3 +1,9 @@
+/*
+ * kernel/sched/completion.c - Completion synchronisation primitives
+ *
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
+ */
+
 #include <nothan/mm.h>
 #include <nothan/sched.h>
 #include <nothan/wait.h>

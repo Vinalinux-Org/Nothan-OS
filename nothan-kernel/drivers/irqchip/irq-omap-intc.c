@@ -1,3 +1,9 @@
+/*
+ * drivers/irqchip/irq-omap-intc.c - OMAP INTC interrupt controller driver
+ *
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
+ */
+
 #include <nothan/types.h>
 #include <nothan/irq.h>
 #include <nothan/mmio.h>

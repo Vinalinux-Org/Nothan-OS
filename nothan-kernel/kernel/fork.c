@@ -1,3 +1,9 @@
+/*
+ * kernel/fork.c - Task creation and kernel thread setup
+ *
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
+ */
+
 #include <nothan/types.h>
 #include <nothan/sched.h>
 #include <nothan/slab.h>

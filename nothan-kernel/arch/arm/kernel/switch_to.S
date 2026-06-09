@@ -1,4 +1,8 @@
 /*
+ * arch/arm/kernel/switch_to.S - Low-level context switch for ARM
+ *
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
+ *
  * void __switch_to(struct task_struct *prev, struct task_struct *next)
  *
  * r0 = prev, r1 = next

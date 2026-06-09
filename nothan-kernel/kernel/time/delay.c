@@ -1,3 +1,9 @@
+/*
+ * kernel/time/delay.c - Busy-wait and sleep delay primitives
+ *
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
+ */
+
 #include <nothan/delay.h>
 #include <nothan/time.h>
 #include <nothan/sched.h>

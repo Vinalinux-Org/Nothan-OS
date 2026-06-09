@@ -1,4 +1,8 @@
 /*
+ * arch/arm/kernel/head.S - Early boot: MMU setup and jump to kernel_main
+ *
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
+ *
  * Bootloader hands off: MMU off, D-cache off, I-cache off,
  * CPU in SVC mode, UART already initialised.
  *

@@ -1,3 +1,9 @@
+/*
+ * arch/arm/mm/mmu_enable.S - Enable the ARMv7 MMU and jump to virtual address
+ *
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
+ */
+
 #include <asm/pgtable.h>
 
 	.section ".idmap.text", "ax"

@@ -1,3 +1,9 @@
+/*
+ * kernel/printk.c - Formatted kernel console output (vsnprintf + printk)
+ *
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
+ */
+
 #include <stdarg.h>
 #include <stdint.h>
 #include <stddef.h>

@@ -1,3 +1,9 @@
+/*
+ * mm/slab.c - Slab allocator (kmalloc/kfree for fixed-size objects)
+ *
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
+ */
+
 #include <nothan/types.h>
 #include <nothan/slab.h>
 #include <nothan/mm.h>

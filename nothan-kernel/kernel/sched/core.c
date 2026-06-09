@@ -1,3 +1,9 @@
+/*
+ * kernel/sched/core.c - Core scheduler: runqueue, schedule(), and tick
+ *
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
+ */
+
 #include <nothan/types.h>
 #include <nothan/sched.h>
 #include <nothan/printk.h>

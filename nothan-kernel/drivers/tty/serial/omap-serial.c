@@ -1,3 +1,9 @@
+/*
+ * drivers/tty/serial/omap-serial.c - OMAP UART driver
+ *
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
+ */
+
 #include <nothan/types.h>
 #include <nothan/uart.h>
 #include <nothan/irq.h>
