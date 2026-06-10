@@ -11,8 +11,37 @@
 #define __NR_getpid     2   /* return current task PID (tgid)     */
 #define __NR_write      3   /* write NUL-terminated string to log */
 #define __NR_getppid    4   /* return parent PID                  */
+#define __NR_open       5   /* open a file                       */
+#define __NR_read       6   /* read from file descriptor         */
+#define __NR_writefile  7   /* write to file descriptor          */
+#define __NR_close      8   /* close a file descriptor           */
+#define __NR_gettasklist 9  /* get list of running tasks         */
+#define __NR_sysinfo    10  /* get system info                   */
+#define __NR_listdir    11  /* list directory contents           */
+#define __NR_exec       12  /* exec a .bin file from VFS         */
 
-#define NR_SYSCALLS     5
+#define NR_SYSCALLS     13
+
+/* Data structures for syscall arguments */
+#define TASK_NAME_LEN 16
+#define FILE_NAME_LEN 32
+
+struct task_info {
+	int pid;
+	char name[TASK_NAME_LEN];
+	int state;
+	int prio;
+};
+
+struct sys_info {
+	unsigned long total_pages;
+	unsigned long free_pages;
+};
+
+struct file_entry {
+	char name[FILE_NAME_LEN];
+	unsigned long size;
+};
 
 /**
  * do_syscall() - central syscall dispatcher

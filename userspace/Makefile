@@ -5,38 +5,38 @@ OBJCOPY = $(CROSS_COMPILE)objcopy
 OBJDUMP = $(CROSS_COMPILE)objdump
 
 BUILD_DIR := build
-HELLO_DIR := hello
 
 CFLAGS := -mcpu=cortex-a8 -marm -O2 -std=gnu11 -ffreestanding -nostdlib
 CFLAGS += -Wall -Wextra -Wno-unused-parameter -I lib
 AFLAGS := -mcpu=cortex-a8 -marm -D__ASSEMBLY__
-LDFLAGS := -nostdlib -T $(HELLO_DIR)/user.lds
 
-.PHONY: all hello clean size
+.PHONY: all shell clean size
 
-all: hello
+all: shell
 
-hello: $(BUILD_DIR)/hello.bin
+# === shell ===
+SHELL_DIR := shell
 
-$(BUILD_DIR)/hello.elf: $(BUILD_DIR)/hello/start.o $(BUILD_DIR)/hello/main.o | $(BUILD_DIR)/hello
-	$(LD) $(LDFLAGS) -o $@ $^
-	$(OBJDUMP) -d $@ > $(BUILD_DIR)/hello.dis
-
-$(BUILD_DIR)/hello.bin: $(BUILD_DIR)/hello.elf
-	$(OBJCOPY) -O binary $< $@
-
-$(BUILD_DIR)/hello/%.o: $(HELLO_DIR)/%.c | $(BUILD_DIR)/hello
+$(BUILD_DIR)/shell/%.o: $(SHELL_DIR)/%.c | $(BUILD_DIR)/shell
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD_DIR)/hello/%.o: $(HELLO_DIR)/%.S | $(BUILD_DIR)/hello
+$(BUILD_DIR)/shell/%.o: $(SHELL_DIR)/%.S | $(BUILD_DIR)/shell
 	$(CC) $(AFLAGS) -c -o $@ $<
 
-$(BUILD_DIR)/hello:
+$(BUILD_DIR)/shell.elf: $(BUILD_DIR)/shell/start.o $(BUILD_DIR)/shell/main.o
+	$(CC) -nostdlib -T $(SHELL_DIR)/user.lds -o $@ $^ -lgcc
+	$(OBJDUMP) -d $@ > $(BUILD_DIR)/shell.dis
+
+$(BUILD_DIR)/shell.bin: $(BUILD_DIR)/shell.elf
+	$(OBJCOPY) -O binary $< $@
+
+$(BUILD_DIR)/shell:
 	mkdir -p $@
 
-size: $(BUILD_DIR)/hello.bin
-	ls -la $(BUILD_DIR)/hello.bin
-	$(OBJDUMP) -h $(BUILD_DIR)/hello.elf
+shell: $(BUILD_DIR)/shell.bin
+
+size: $(BUILD_DIR)/shell.bin
+	ls -la $(BUILD_DIR)/shell.bin
 
 clean:
 	rm -rf $(BUILD_DIR)

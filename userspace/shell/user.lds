@@ -1,10 +1,3 @@
-/*
- * userspace/hello/user.lds - Linker script for user program
- *
- * Links the user binary at VA 0x00010000.
- * Merges .text and .rodata into one RO+X page.
- * .data and .bss follow (will become RW in a separate page).
- */
 OUTPUT_ARCH(arm)
 ENTRY(_start)
 

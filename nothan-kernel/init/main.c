@@ -64,7 +64,7 @@ void kernel_main(void)
 
 	timer_start();
 
-	struct task_struct *ut = user_task_create("user1");
+	struct task_struct *ut = user_task_create("shell");
 	if (ut)
 		enqueue_task(&runqueue, ut);
 

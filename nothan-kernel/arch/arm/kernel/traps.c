@@ -61,11 +61,35 @@ void pabt_handler(unsigned int spsr)
 /**
  * dabt_handler - handle data abort
  * @spsr: saved program status register at fault
+ *
+ * Reads DFAR (Data Fault Address) and DFSR (Data Fault Status)
+ * from CP15 to determine the fault address and reason.
  */
 void dabt_handler(unsigned int spsr)
 {
-	(void)spsr;
+	unsigned int dfar, dfsr;
+	__asm__ __volatile__(
+		"mrc p15, 0, %0, c6, c0, 0\n"	/* DFAR */
+		"mrc p15, 0, %1, c5, c0, 0\n"	/* DFSR */
+		: "=r"(dfar), "=r"(dfsr) : : "memory");
+
 	printk("\nException: Data Abort!\n");
+	printk("  DFAR=0x%08x, DFSR=0x%08x\n", dfar, dfsr);
+	printk("  SPSR=0x%08x\n", spsr);
+
+	const char *reason;
+	switch (dfsr & 0xF) {
+	case 1:  reason = "Alignment fault"; break;
+	case 4:  reason = "ICache maintenance fault"; break;
+	case 7:  reason = "Translation fault (page/section)"; break;
+	case 9:  reason = "Domain fault (section)"; break;
+	case 10: reason = "Domain fault (page)"; break;
+	case 13: reason = "Permission fault (section)"; break;
+	case 15: reason = "Permission fault (page)"; break;
+	default: reason = "Unknown"; break;
+	}
+	printk("  Reason: %s\n", reason);
+
 	while (1)
 		;
 }

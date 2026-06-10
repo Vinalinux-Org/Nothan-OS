@@ -1,10 +1,64 @@
 #ifndef __USER_SYSCALL_H
 #define __USER_SYSCALL_H
 
-#define __NR_yield   0
-#define __NR_exit    1
-#define __NR_getpid  2
-#define __NR_write   3
+#define __NR_yield      0
+#define __NR_exit       1
+#define __NR_getpid     2
+#define __NR_write      3
+#define __NR_getppid    4
+#define __NR_open       5
+#define __NR_read       6
+#define __NR_writefile  7
+#define __NR_close      8
+#define __NR_gettasklist 9
+#define __NR_sysinfo    10
+#define __NR_listdir    11
+#define __NR_exec       12
+
+#define TASK_NAME_LEN 16
+#define FILE_NAME_LEN 32
+
+struct task_info {
+	int pid;
+	char name[TASK_NAME_LEN];
+	int state;
+	int prio;
+};
+
+struct sys_info {
+	unsigned long total_pages;
+	unsigned long free_pages;
+};
+
+struct file_entry {
+	char name[FILE_NAME_LEN];
+	unsigned long size;
+};
+
+static inline long __syscall2(long nr, long a0, long a1)
+{
+	register long r0 __asm__("r0") = a0;
+	register long r1 __asm__("r1") = a1;
+	register long r7 __asm__("r7") = nr;
+	__asm__ __volatile__("svc #0"
+			     : "+r"(r0)
+			     : "r"(r7), "r"(r1)
+			     : "r2", "r3", "memory");
+	return r0;
+}
+
+static inline long __syscall3(long nr, long a0, long a1, long a2)
+{
+	register long r0 __asm__("r0") = a0;
+	register long r1 __asm__("r1") = a1;
+	register long r2 __asm__("r2") = a2;
+	register long r7 __asm__("r7") = nr;
+	__asm__ __volatile__("svc #0"
+			     : "+r"(r0)
+			     : "r"(r7), "r"(r1), "r"(r2)
+			     : "memory");
+	return r0;
+}
 
 static inline long __syscall1(long nr, long a0)
 {
@@ -28,24 +82,49 @@ static inline long __syscall0(long nr)
 	return r0;
 }
 
-static inline void yield(void)
+static inline void yield(void)		{ __syscall0(__NR_yield); }
+static inline void user_exit(int s)	{ __syscall1(__NR_exit, s); }
+static inline long getpid(void)		{ return __syscall0(__NR_getpid); }
+static inline long write(const char *b){ return __syscall1(__NR_write, (long)b); }
+
+static inline long open(const char *path, int flags)
 {
-	__syscall0(__NR_yield);
+	return __syscall2(__NR_open, (long)path, (long)flags);
 }
 
-static inline void user_exit(int status)
+static inline long read(int fd, void *buf, unsigned long count)
 {
-	__syscall1(__NR_exit, status);
+	return __syscall3(__NR_read, (long)fd, (long)buf, (long)count);
 }
 
-static inline long getpid(void)
+static inline long writefile(int fd, const void *buf, unsigned long count)
 {
-	return __syscall0(__NR_getpid);
+	return __syscall3(__NR_writefile, (long)fd, (long)buf, (long)count);
 }
 
-static inline long write(const char *buf)
+static inline long close(int fd)
 {
-	return __syscall1(__NR_write, (long)buf);
+	return __syscall1(__NR_close, (long)fd);
+}
+
+static inline long gettasklist(struct task_info *buf, unsigned long max)
+{
+	return __syscall2(__NR_gettasklist, (long)buf, (long)max);
+}
+
+static inline long sysinfo(struct sys_info *buf)
+{
+	return __syscall1(__NR_sysinfo, (long)buf);
+}
+
+static inline long listdir(const char *path, struct file_entry *buf, unsigned long max)
+{
+	return __syscall3(__NR_listdir, (long)path, (long)buf, (long)max);
+}
+
+static inline long exec(const char *path)
+{
+	return __syscall1(__NR_exec, (long)path);
 }
 
 #endif

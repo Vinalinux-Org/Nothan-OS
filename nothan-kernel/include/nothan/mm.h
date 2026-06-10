@@ -36,6 +36,7 @@ struct mm_struct {
 	unsigned long stack_pa; /* physical address of user stack page */
 	unsigned long entry_va; /* user-space entry point VA */
 	unsigned long sp_top;   /* user stack top VA (initial sp) */
+	unsigned int  code_pages; /* number of 4KB code pages */
 };
 
 /**

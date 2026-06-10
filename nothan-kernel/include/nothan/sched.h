@@ -135,6 +135,9 @@ static inline void list_move_tail(struct list_head *entry, struct list_head *hea
 #define list_first_entry(head, type, member) \
 	((type *)((char *)((head)->next) - __builtin_offsetof(type, member)))
 
+#define container_of(ptr, type, member) \
+	((type *)((char *)(ptr) - __builtin_offsetof(type, member)))
+
 #define set_current_state(state)			\
 	do { runqueue.curr->__state = (state); } while (0)
 

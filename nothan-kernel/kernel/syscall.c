@@ -9,6 +9,12 @@
 #include <nothan/sched.h>
 #include <nothan/printk.h>
 #include <nothan/slab.h>
+#include <nothan/fs.h>
+#include <nothan/uart.h>
+#include <nothan/mm.h>
+
+extern struct task_struct *user_task_create_bin(const char *name,
+	char *blob_start, char *blob_end);
 
 /**
  * sys_yield - yield the CPU to the next runnable task
@@ -80,6 +86,201 @@ static long sys_write(unsigned long a0, unsigned long a1, unsigned long a2)
 	return 0;
 }
 
+/**
+ * sys_open - open a file
+ * @a0: pathname
+ * @a1: flags (O_RDONLY, O_WRONLY, etc.)
+ *
+ * Return: file descriptor, or -1 on error.
+ */
+static long sys_open(unsigned long a0, unsigned long a1, unsigned long a2)
+{
+	(void)a2;
+	return vfs_open((const char *)a0, (int)a1);
+}
+
+/**
+ * sys_read - read from a file descriptor
+ * @a0: file descriptor
+ * @a1: buffer
+ * @a2: count
+ *
+ * fd=0 reads from UART (stdin). Other fds read from VFS.
+ * Return: bytes read, 0 on EOF, -1 on error.
+ */
+static long sys_read(unsigned long a0, unsigned long a1, unsigned long a2)
+{
+	int fd = (int)a0;
+	char *buf = (char *)a1;
+	size_t count = (size_t)a2;
+
+	if (fd == 0) {
+		for (size_t i = 0; i < count; i++) {
+			int c = uart_getchar();
+			if (c < 0)
+				return i > 0 ? (long)i : -1;
+			buf[i] = (char)c;
+		}
+		return (long)count;
+	}
+
+	return vfs_read(fd, buf, count);
+}
+
+/**
+ * sys_writefile - write to a file descriptor
+ * @a0: file descriptor
+ * @a1: buffer
+ * @a2: count
+ *
+ * fd=1 writes to UART (stdout). Other fds write to VFS.
+ * Return: bytes written, or -1 on error.
+ */
+static long sys_writefile(unsigned long a0, unsigned long a1, unsigned long a2)
+{
+	int fd = (int)a0;
+	const char *buf = (const char *)a1;
+	size_t count = (size_t)a2;
+
+	if (fd == 1) {
+		for (size_t i = 0; i < count; i++)
+			uart_putchar((unsigned char)buf[i]);
+		return (long)count;
+	}
+
+	return vfs_write(fd, buf, count);
+}
+
+/**
+ * sys_close - close a file descriptor
+ * @a0: file descriptor
+ *
+ * Return: 0 on success, -1 on error.
+ */
+static long sys_close(unsigned long a0, unsigned long a1, unsigned long a2)
+{
+	(void)a1; (void)a2;
+	return vfs_close((int)a0);
+}
+
+/**
+ * sys_gettasklist - fill buffer with task info
+ * @a0: task_info buffer (user)
+ * @a1: max entries
+ *
+ * Return: number of tasks written, or -1 on error.
+ */
+static long sys_gettasklist(unsigned long a0, unsigned long a1, unsigned long a2)
+{
+	(void)a2;
+	struct task_info *buf = (struct task_info *)a0;
+	unsigned long max = a1;
+	unsigned long count = 0;
+	struct rq *rq = &runqueue;
+
+	/* Always include the currently running task */
+	if (count < max && rq->curr) {
+		buf[count].pid = rq->curr->pid;
+		buf[count].state = rq->curr->__state;
+		buf[count].prio = rq->curr->prio;
+		unsigned int i;
+		for (i = 0; i < TASK_NAME_LEN - 1 && rq->curr->comm[i]; i++)
+			buf[count].name[i] = rq->curr->comm[i];
+		buf[count].name[i] = '\0';
+		count++;
+	}
+
+	/* Then iterate the runqueue for other tasks */
+	for (int prio = 0; prio < MAX_PRIO && count < max; prio++) {
+		struct list_head *pos;
+		list_for_each(pos, &rq->active.queue[prio]) {
+			if (count >= max)
+				break;
+			struct sched_rt_entity *rt = list_entry(pos, struct sched_rt_entity, run_list);
+			struct task_struct *tsk = container_of(rt, struct task_struct, rt);
+			buf[count].pid = tsk->pid;
+			buf[count].state = tsk->__state;
+			buf[count].prio = tsk->prio;
+			unsigned int i;
+			for (i = 0; i < TASK_NAME_LEN - 1 && tsk->comm[i]; i++)
+				buf[count].name[i] = tsk->comm[i];
+			buf[count].name[i] = '\0';
+			count++;
+		}
+	}
+	return (long)count;
+}
+
+/**
+ * sys_sysinfo - fill buffer with system info
+ * @a0: sys_info buffer (user)
+ */
+static long sys_sysinfo(unsigned long a0, unsigned long a1, unsigned long a2)
+{
+	(void)a1; (void)a2;
+	struct sys_info *buf = (struct sys_info *)a0;
+	struct zone *z = get_zone();
+
+	buf->total_pages = z->managed_pages;
+	buf->free_pages = z->free_pages;
+	return 0;
+}
+
+/**
+ * sys_listdir - list directory files
+ * @a0: path (user)
+ * @a1: file_entry buffer (user)
+ * @a2: max entries
+ *
+ * Uses VFS to look up files. Currently only supports root directory.
+ */
+static long sys_listdir(unsigned long a0, unsigned long a1, unsigned long a2)
+{
+	(void)a0;
+	(void)a2;
+	/* TODO: implement directory listing via VFS/FAT */
+	return 0;
+}
+
+/**
+ * sys_exec - load and run a .bin file from the mounted filesystem
+ * @a0: path to .bin file (user)
+ *
+ * Opens the file, reads its content, creates a new user task,
+ * and enqueues it. Returns the new PID, or -1 on error.
+ */
+static long sys_exec(unsigned long a0, unsigned long a1, unsigned long a2)
+{
+	(void)a1; (void)a2;
+	const char *path = (const char *)a0;
+	unsigned long blob_size = 4096;
+
+	int fd = vfs_open(path, 0);
+	if (fd < 0)
+		return -1;
+
+	u8 *buf = (u8 *)kmalloc(blob_size, GFP_KERNEL);
+	if (!buf) {
+		vfs_close(fd);
+		return -1;
+	}
+
+	int bytes = vfs_read(fd, (char *)buf, blob_size);
+	vfs_close(fd);
+	if (bytes <= 0) {
+		kfree(buf);
+		return -1;
+	}
+
+	struct task_struct *tsk = user_task_create_bin(path, (char *)buf, (char *)(buf + bytes));
+	kfree(buf);
+	if (!tsk)
+		return -1;
+
+	enqueue_task(&runqueue, tsk);
+	return (long)tsk->pid;
+}
+
 /*
  * Syscall dispatch table
  * Indexed by syscall number; must match __NR_xxx constants.
@@ -92,6 +293,14 @@ static const syscall_fn_t syscall_table[NR_SYSCALLS] = {
 	[__NR_getpid]  = sys_getpid,
 	[__NR_write]   = sys_write,
 	[__NR_getppid] = sys_getppid,
+	[__NR_open]    = sys_open,
+	[__NR_read]    = sys_read,
+	[__NR_writefile] = sys_writefile,
+	[__NR_close]   = sys_close,
+	[__NR_gettasklist] = sys_gettasklist,
+	[__NR_sysinfo]     = sys_sysinfo,
+	[__NR_listdir]     = sys_listdir,
+	[__NR_exec]        = sys_exec,
 };
 
 /**

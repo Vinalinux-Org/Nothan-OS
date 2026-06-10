@@ -131,13 +131,16 @@ void mmu_map_user(struct mm_struct *mm)
 	 *   AP1|nG = user RO,  AP1|AP0|nG = user RW
 	 */
 #define L2_ATTR_MEM     (PTE_SMALL_C | PTE_SMALL_B)
-#define L2_USER_RO      (PTE_SMALL_AP_URO | PTE_SMALL_NG)
+#define L2_USER_RW      (PTE_SMALL_AP_URO | PTE_SMALL_NG)
 #define L2_USER_RW      (PTE_SMALL_AP_BOTH | PTE_SMALL_NG)
 
 	/* Code page: RO from user, executable */
 	unsigned int code_l2_idx = (mm->entry_va & 0x000FF000) >> 12;
-	l2[code_l2_idx] = (mm->code_pa & 0xFFFFF000)
-			  | PTE_TYPE_SMALL | L2_ATTR_MEM | L2_USER_RO;
+	for (unsigned int i = 0; i < mm->code_pages; i++) {
+		unsigned long pa = mm->code_pa + (i << 12);
+		l2[code_l2_idx + i] = (pa & 0xFFFFF000)
+			  | PTE_TYPE_SMALL | L2_ATTR_MEM | L2_USER_RW;
+	}
 
 	/* Stack page: RW from user, XN */
 	unsigned int stack_l2_idx = ((mm->sp_top - 1) & 0x000FF000) >> 12;

@@ -61,16 +61,16 @@ KERNEL_BIN := $(BUILD_DIR)/kernel.bin
 all: $(KERNEL_BIN)
 
 # User-space binary blob (embedded into kernel image)
-USER_HELLO_BIN := $(BUILD_DIR)/hello.usr
+USER_SHELL_BIN := $(BUILD_DIR)/shell.usr
 
 .PHONY: userspace
 userspace:
 	$(MAKE) -C ../userspace
 
-$(USER_HELLO_BIN): userspace | $(BUILD_DIR)
-	cp ../userspace/build/hello.bin $@
+$(USER_SHELL_BIN): userspace | $(BUILD_DIR)
+	cp ../userspace/build/shell.bin $@
 
-$(BUILD_DIR)/kernel/userspace_blobs.o: kernel/userspace_blobs.S $(USER_HELLO_BIN) | $(BUILD_DIR)
+$(BUILD_DIR)/kernel/userspace_blobs.o: kernel/userspace_blobs.S $(USER_SHELL_BIN) | $(BUILD_DIR)
 	@mkdir -p $(dir $@)
 	$(CC) $(KBUILD_AFLAGS) -c -o $@ $<
 

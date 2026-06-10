@@ -87,15 +87,15 @@ extern void mmu_map_user(struct mm_struct *mm);
 
 /*
  * Embedded user-space binaries (provided by userspace_blobs.S)
- *   _binary_user_hello_start — compiled "hello" user program
- *   _binary_user_hello_end   — end of that program
  */
-extern char _binary_user_hello_start[];
-extern char _binary_user_hello_end[];
+extern char _binary_user_shell_start[];
+extern char _binary_user_shell_end[];
 
 /**
- * user_task_create() - create a new task that runs in ARM User mode (PL0)
+ * user_task_create_bin() - create a user task from an embedded binary
  * @name: task name for debugging
+ * @blob_start: start of embedded binary
+ * @blob_end: end of embedded binary
  *
  * Allocates:
  *   - task_struct + kernel stack (SVC mode stack for exceptions/syscalls)
@@ -106,7 +106,8 @@ extern char _binary_user_hello_end[];
  *
  * Return: pointer to task_struct ready to enqueue, or NULL on failure.
  */
-struct task_struct *user_task_create(const char *name)
+struct task_struct *user_task_create_bin(const char *name,
+	char *blob_start, char *blob_end)
 {
 	/* Allocate task_struct */
 	struct task_struct *p =
@@ -122,25 +123,41 @@ struct task_struct *user_task_create(const char *name)
 	/* Allocate mm_struct */
 	struct mm_struct *mm =
 		(struct mm_struct *)kmalloc(sizeof(*mm), GFP_KERNEL);
-	if (!mm) { kfree(ksp); kfree(p); return NULL; }
+	if (!mm) {
+		kfree(ksp);
+		kfree(p);
+		return NULL;
+	}
 
-	/* Allocate user code page */
-	struct page *code_pg = alloc_pages(GFP_USER, 0);
-	if (!code_pg) { kfree(mm); kfree(ksp); kfree(p); return NULL; }
+	unsigned long blob_size = (unsigned long)(blob_end - blob_start);
+
+	/* Calculate number of 4KB pages needed */
+	unsigned int code_pages = (blob_size + PAGE_SIZE - 1) / PAGE_SIZE;
+	unsigned int order = 0;
+	while ((1u << order) < code_pages) order++;
+
+	/* Allocate user code pages */
+	struct page *code_pg = alloc_pages(GFP_USER, order);
+	if (!code_pg) {
+		kfree(mm);
+		kfree(ksp);
+		kfree(p);
+		return NULL;
+	}
 
 	struct zone *zone = get_zone();
 	unsigned long code_pa = page_to_phys(zone, code_pg);
+	mm->code_pages = code_pages;
 
-	/* copy embedded user binary to code page */
-	unsigned long blob_size = (unsigned long)(_binary_user_hello_end - _binary_user_hello_start);
+	/* copy binary to code pages */
 	u8 *code_kva = (u8 *)phys_to_kva(code_pa);
 	for (unsigned long i = 0; i < blob_size; i++)
-		code_kva[i] = _binary_user_hello_start[i];
+		code_kva[i] = blob_start[i];
 
 	/* Allocate user stack page */
 	struct page *stack_pg = alloc_pages(GFP_USER, 0);
 	if (!stack_pg) {
-		__free_pages(code_pg, 0);
+		__free_pages(code_pg, order);
 		kfree(mm); kfree(ksp); kfree(p);
 		return NULL;
 	}
@@ -154,7 +171,7 @@ struct task_struct *user_task_create(const char *name)
 	u32 *l2 = (u32 *)kmalloc(1024, GFP_KERNEL);
 	if (!l2) {
 		__free_pages(stack_pg, 0);
-		__free_pages(code_pg, 0);
+		__free_pages(code_pg, order);
 		kfree(mm); kfree(ksp); kfree(p);
 		return NULL;
 	}
@@ -218,5 +235,11 @@ struct task_struct *user_task_create(const char *name)
 	       p->comm, p->pid, code_pa, stack_pa);
 
 	return p;
+}
+
+struct task_struct *user_task_create(const char *name)
+{
+	return user_task_create_bin(name, _binary_user_shell_start,
+				    _binary_user_shell_end);
 }
 
