@@ -18,13 +18,12 @@
 #define __NR_gettasklist 9  /* get list of running tasks         */
 #define __NR_sysinfo    10  /* get system info                   */
 #define __NR_listdir    11  /* list directory contents           */
-#define __NR_exec       12  /* exec a .bin file from VFS         */
+#define __NR_spawn      12  /* spawn a .bin file from VFS        */
 
 #define NR_SYSCALLS     13
 
 /* Data structures for syscall arguments */
 #define TASK_NAME_LEN 16
-#define FILE_NAME_LEN 32
 
 struct task_info {
 	int pid;
@@ -36,11 +35,6 @@ struct task_info {
 struct sys_info {
 	unsigned long total_pages;
 	unsigned long free_pages;
-};
-
-struct file_entry {
-	char name[FILE_NAME_LEN];
-	unsigned long size;
 };
 
 /**

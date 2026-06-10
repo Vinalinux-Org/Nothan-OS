@@ -6,6 +6,7 @@
 
 #include <nothan/types.h>
 #include <nothan/sched.h>
+#include <nothan/mm.h>
 #include <nothan/printk.h>
 
 struct rq runqueue;
@@ -30,7 +31,7 @@ static void idle_task_init(void)
 {
 	unsigned long *sp = idle_stack + IDLE_STACK_WORDS;
 
-	/* Pre-fill the switch frame (see fork.c for layout): */
+	/* Pre-fill the switch frame (see spawn.c for layout): */
 	*--sp = (unsigned long)idle_main;	/* lr → PC */
 	*--sp = 0;				/* r11 */
 	*--sp = 0;				/* r10 */
@@ -42,6 +43,8 @@ static void idle_task_init(void)
 	*--sp = (unsigned long)idle_main;	/* r4 (fn) */
 
 		idle_tsk.stack      = sp;
+		idle_tsk.user_sp    = 0;
+		idle_tsk.user_lr    = 0;
 		idle_tsk.__state    = TASK_RUNNING;
 		idle_tsk.exit_state = 0;
 		idle_tsk.pid        = 0;
@@ -127,13 +130,25 @@ void schedule(void)
 		return;
 	}
 
-	if (prev)
+	if (prev) {
+		/* Set up user mapping BEFORE context switch — __switch_to to a
+		 * new user task branches to user_task_trampoline directly and
+		 * never returns, so mmu_switch_mm after it would be skipped. */
+		if (next->mm)
+			mmu_switch_mm(next->mm);
 		__switch_to(prev, next);
-	else
+	} else {
+		if (next->mm)
+			mmu_switch_mm(next->mm);
 		__asm__ __volatile__ (
+			"cps #0x1f\n"
+			"ldr sp, [%0, #4]\n"
+			"ldr lr, [%0, #8]\n"
+			"cps #0x13\n"
 			"ldr sp, [%0, #0]\n"
 			"ldmfd sp!, {r4-r11, pc}\n"
 			: : "r" (next));
+	}
 
 	/* Reached only when prev is resumed by a later __switch_to. */
 	__asm__ __volatile__ ("cpsie i" : : : "memory");

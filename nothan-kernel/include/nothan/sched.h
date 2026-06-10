@@ -18,7 +18,7 @@
 #define TASK_WAKEKILL		0x00000100	/* allow SIGKILL while unkillable */
 #define TASK_KILLABLE		(TASK_UNINTERRUPTIBLE | TASK_WAKEKILL)
 
-#define TASK_NEW		0x00000800	/* just forked, not yet seen by scheduler */
+#define TASK_NEW		0x00000800	/* just spawned, not yet seen by scheduler */
 
 /* Exit states (in tsk->exit_state, not __state): */
 #define EXIT_DEAD		0x00000010	/* parent wait()ed, entry can be freed */
@@ -62,6 +62,8 @@ struct sched_rt_entity {
  */
 struct task_struct {
 	void				*stack;
+	unsigned long			user_sp;
+	unsigned long			user_lr;
 	unsigned int			__state;
 	unsigned int			exit_state;
 	int				pid;

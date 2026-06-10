@@ -33,7 +33,7 @@ OBJS += $(BUILD_DIR)/kernel/time/delay.o
 OBJS += $(BUILD_DIR)/kernel/time/timer.o
 OBJS += $(BUILD_DIR)/mm/page_alloc.o
 OBJS += $(BUILD_DIR)/mm/slab.o
-OBJS += $(BUILD_DIR)/kernel/fork.o
+OBJS += $(BUILD_DIR)/kernel/spawn.o
 OBJS += $(BUILD_DIR)/kernel/sched/core.o
 OBJS += $(BUILD_DIR)/kernel/sched/rt.o
 OBJS += $(BUILD_DIR)/kernel/sched/wait.o
@@ -60,8 +60,9 @@ KERNEL_BIN := $(BUILD_DIR)/kernel.bin
 .PHONY: all
 all: $(KERNEL_BIN)
 
-# User-space binary blob (embedded into kernel image)
+# User-space binary blobs (embedded into kernel image)
 USER_SHELL_BIN := $(BUILD_DIR)/shell.usr
+USER_EXAMPLE_BIN := $(BUILD_DIR)/example.usr
 
 .PHONY: userspace
 userspace:
@@ -70,7 +71,10 @@ userspace:
 $(USER_SHELL_BIN): userspace | $(BUILD_DIR)
 	cp ../userspace/build/shell.bin $@
 
-$(BUILD_DIR)/kernel/userspace_blobs.o: kernel/userspace_blobs.S $(USER_SHELL_BIN) | $(BUILD_DIR)
+$(USER_EXAMPLE_BIN): userspace | $(BUILD_DIR)
+	cp ../userspace/build/example.bin $@
+
+$(BUILD_DIR)/kernel/userspace_blobs.o: kernel/userspace_blobs.S $(USER_SHELL_BIN) $(USER_EXAMPLE_BIN) | $(BUILD_DIR)
 	@mkdir -p $(dir $@)
 	$(CC) $(KBUILD_AFLAGS) -c -o $@ $<
 

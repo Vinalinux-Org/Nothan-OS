@@ -120,8 +120,6 @@ static inline u32 *pgd_kva(void)
 void mmu_map_user(struct mm_struct *mm)
 {
 	u32 *l2  = mm->l2;
-	u32 *pgd = pgd_kva();
-
 	/* Zero L2 table (256 entries = 1 KB). */
 	for (unsigned int i = 0; i < 256; i++)
 		l2[i] = 0;
@@ -131,7 +129,6 @@ void mmu_map_user(struct mm_struct *mm)
 	 *   AP1|nG = user RO,  AP1|AP0|nG = user RW
 	 */
 #define L2_ATTR_MEM     (PTE_SMALL_C | PTE_SMALL_B)
-#define L2_USER_RW      (PTE_SMALL_AP_URO | PTE_SMALL_NG)
 #define L2_USER_RW      (PTE_SMALL_AP_BOTH | PTE_SMALL_NG)
 
 	/* Code page: RO from user, executable */
@@ -148,44 +145,45 @@ void mmu_map_user(struct mm_struct *mm)
 			   | PTE_TYPE_SMALL | PTE_SMALL_XN
 			   | L2_ATTR_MEM | L2_USER_RW;
 
-	/*
-	 * Patch L1: install table pointer for this 1MB window.
-	 * Domain = USER (1), type = TABLE (coarse page table, bits[1:0]=01).
-	 */
-	u32 l2_phys = (u32)(unsigned long)l2 - (PAGE_OFFSET - PHYS_OFFSET);
-	u32 l1_entry = (l2_phys & 0xFFFFFC00)
-		       | PMD_SECT_DOMAIN(DOMAIN_USER)
-		       | PMD_TYPE_TABLE;
+	/* Save L2 physical address for context-switch by schedule() */
+	mm->l2_pa = (u32)(unsigned long)l2 - (PAGE_OFFSET - PHYS_OFFSET);
 
-	printk("[MMU] user map: L1[%lu] -> L2@0x%lx, code@VA=0x%lx, stack_top@VA=0x%lx\n",
-	       mm->l1_idx, (unsigned long)l2_phys,
-	       mm->entry_va, mm->sp_top);
 
-	pgd[mm->l1_idx] = l1_entry;
-	dsb();
-
-	/*
-	 * ARMv7 requires explicit cache maintenance after translation table
-	 * updates.  Clean L2 + PGD lines to PoC so the table walker sees them.
-	 * (D-side MMU table walks may not hit D-cache unless cleaned).
-	 */
-	for (unsigned int i = 0; i < 1024; i += 64) {
+	/* Cache maintenance: clean L2 table to PoC */
+	for (unsigned int i = 0; i < 1024; i += 64)
 		__asm__ __volatile__(
 			"mcr p15, 0, %0, c7, c10, 1\n"
 			: : "r" ((char *)l2 + i) : "memory");
+	dsb();
+}
+
+
+/*
+ * mmu_switch_mm() - switch L1[0] to a task's L2 table
+ * @mm: the new task's mm_struct (NULL clears user mapping)
+ *
+ * Called during schedule() after __switch_to.  Writes L1[0] in the
+ * global PGD to point to @mm->l2_pa so the new task's user pages
+ * are visible.  Flushes the TLB after the change.
+ */
+void mmu_switch_mm(struct mm_struct *mm)
+{
+	u32 *pgd = pgd_kva();
+
+	if (mm && mm->l2_pa) {
+		u32 l1_entry = (mm->l2_pa & 0xFFFFFC00)
+			     | PMD_SECT_DOMAIN(DOMAIN_USER)
+			     | PMD_TYPE_TABLE;
+		pgd[0] = l1_entry;
+
+	} else {
+		pgd[0] = PMD_TYPE_FAULT;
+
 	}
 	dsb();
 
-	__asm__ __volatile__(
-		"mcr p15, 0, %0, c7, c10, 1\n"	/* DCCMVAC */
-		"dsb\n"
-		: : "r" (&pgd[mm->l1_idx]) : "memory");
-
-	/* Flush TLB so walker re-fetches from PoC */
-	__asm__ __volatile__(
-		"mcr p15, 0, %0, c8, c7, 0\n"	/* TLBIALL */
-		"dsb\n"
-		"isb\n"
-		: : "r" (0) : "memory");
+	/* Clean PGD entry + flush TLB */
+	__asm__ __volatile__("mcr p15, 0, %0, c7, c10, 1\n" : : "r" (&pgd[0]) : "memory");
+	dsb();
+	__asm__ __volatile__("mcr p15, 0, %0, c8, c7, 0\n" "dsb\n" "isb\n" : : "r"(0) : "memory");
 }
-

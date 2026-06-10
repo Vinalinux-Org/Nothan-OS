@@ -14,6 +14,14 @@
 __switch_to:
 	stmfd	sp!, {r4-r11, lr}
 	str	sp, [r0, #0]
+
+	cps	#0x1F
+	str	sp, [r0, #4]
+	str	lr, [r0, #8]
+	ldr	sp, [r1, #4]
+	ldr	lr, [r1, #8]
+	cps	#0x13
+
 	ldr	sp, [r1, #0]
 	ldmfd	sp!, {r4-r11, pc}
 	.size	__switch_to, . - __switch_to

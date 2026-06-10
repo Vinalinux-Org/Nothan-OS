@@ -37,6 +37,7 @@ struct mm_struct {
 	unsigned long entry_va; /* user-space entry point VA */
 	unsigned long sp_top;   /* user stack top VA (initial sp) */
 	unsigned int  code_pages; /* number of 4KB code pages */
+	unsigned long l2_pa;      /* physical address of L2 table */
 };
 
 /**
@@ -211,6 +212,7 @@ static inline void set_page_order(struct page *page, unsigned int order)
 struct zone *get_zone(void);
 void page_alloc_init(void);
 struct page *alloc_pages(gfp_t gfp, unsigned int order);
+void mmu_switch_mm(struct mm_struct *mm);
 void __free_pages(struct page *page, unsigned int order);
 
 #endif /* _MM_H */

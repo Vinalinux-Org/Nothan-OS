@@ -1,5 +1,5 @@
 /*
- * kernel/fork.c - Task creation and kernel thread setup
+ * kernel/spawn.c - Task creation and kernel thread setup
  *
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
@@ -58,6 +58,8 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 	*--sp = (unsigned long)fn;			/* r4 */
 
 	p->stack = sp;
+	p->user_sp = 0;
+	p->user_lr = 0;
 	p->__state = TASK_RUNNING;
 	p->exit_state = 0;
 	p->pid = next_pid++;
@@ -110,19 +112,19 @@ struct task_struct *user_task_create_bin(const char *name,
 	char *blob_start, char *blob_end)
 {
 	/* Allocate task_struct */
-	struct task_struct *p =
-		(struct task_struct *)kmalloc(sizeof(*p), GFP_KERNEL);
+	struct task_struct *p = (struct task_struct *)kmalloc(sizeof(*p), GFP_KERNEL);
 	if (!p)
 		return NULL;
 
 	/* Allocate kernel stack (SVC mode) */
-	unsigned long *ksp =
-		(unsigned long *)kmalloc(PAGE_SIZE, GFP_KERNEL);
-	if (!ksp) { kfree(p); return NULL; }
+	unsigned long *ksp = (unsigned long *)kmalloc(PAGE_SIZE, GFP_KERNEL);
+	if (!ksp) {
+		kfree(p);
+		return NULL;
+	}
 
 	/* Allocate mm_struct */
-	struct mm_struct *mm =
-		(struct mm_struct *)kmalloc(sizeof(*mm), GFP_KERNEL);
+	struct mm_struct *mm = (struct mm_struct *)kmalloc(sizeof(*mm), GFP_KERNEL);
 	if (!mm) {
 		kfree(ksp);
 		kfree(p);
@@ -134,7 +136,8 @@ struct task_struct *user_task_create_bin(const char *name,
 	/* Calculate number of 4KB pages needed */
 	unsigned int code_pages = (blob_size + PAGE_SIZE - 1) / PAGE_SIZE;
 	unsigned int order = 0;
-	while ((1u << order) < code_pages) order++;
+	while ((1u << order) < code_pages)
+		order++;
 
 	/* Allocate user code pages */
 	struct page *code_pg = alloc_pages(GFP_USER, order);
@@ -158,7 +161,9 @@ struct task_struct *user_task_create_bin(const char *name,
 	struct page *stack_pg = alloc_pages(GFP_USER, 0);
 	if (!stack_pg) {
 		__free_pages(code_pg, order);
-		kfree(mm); kfree(ksp); kfree(p);
+		kfree(mm);
+		kfree(ksp);
+		kfree(p);
 		return NULL;
 	}
 	unsigned long stack_pa = page_to_phys(zone, stack_pg);
@@ -172,7 +177,9 @@ struct task_struct *user_task_create_bin(const char *name,
 	if (!l2) {
 		__free_pages(stack_pg, 0);
 		__free_pages(code_pg, order);
-		kfree(mm); kfree(ksp); kfree(p);
+		kfree(mm);
+		kfree(ksp);
+		kfree(p);
 		return NULL;
 	}
 
@@ -209,6 +216,8 @@ struct task_struct *user_task_create_bin(const char *name,
 
 	/* Init task_struct */
 	p->stack      = sp;
+	p->user_sp    = mm->sp_top;
+	p->user_lr    = 0;
 	p->__state    = TASK_RUNNING;
 	p->exit_state = 0;
 	p->pid        = next_pid++;
@@ -231,7 +240,7 @@ struct task_struct *user_task_create_bin(const char *name,
 		p->comm[i] = name[i];
 	p->comm[i] = '\0';
 
-	printk("[FORK] user task \"%s\" pid=%d, code_pa=0x%lx, stack_pa=0x%lx\n",
+	printk("[SPAWN] user task \"%s\" pid=%d, code_pa=0x%lx, stack_pa=0x%lx\n",
 	       p->comm, p->pid, code_pa, stack_pa);
 
 	return p;
@@ -242,4 +251,3 @@ struct task_struct *user_task_create(const char *name)
 	return user_task_create_bin(name, _binary_user_shell_start,
 				    _binary_user_shell_end);
 }
-

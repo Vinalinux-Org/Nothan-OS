@@ -30,6 +30,9 @@ void do_exit(int code)
 	if (tsk->mm) {
 		struct zone *zone = get_zone();
 
+		/* Clear L1[0] before freeing L2 */
+		mmu_switch_mm(NULL);
+
 		/* free L2 page table */
 		if (tsk->mm->l2)
 			kfree(tsk->mm->l2);
