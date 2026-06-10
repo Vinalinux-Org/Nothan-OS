@@ -7,30 +7,30 @@
 #include <nothan/printk.h>
 #include <nothan/slab.h>
 
-
-static inline u32 rd32(const u8 *p) {
+static inline u32 rd32(const u8 *p)
+{
 	return (u32)p[0] | ((u32)p[1] << 8) | ((u32)p[2] << 16) | ((u32)p[3] << 24);
 }
 
 static struct super_operations fat32_s_op = {
-	.alloc_inode = NULL,
+	.alloc_inode   = NULL,
 	.destroy_inode = NULL,
-	.read_inode = NULL,
-	.lookup_root = fat32_lookup_root,
-	.dirlookup = fat32_dirlookup,
-	.readdir = fat32_readdir,
+	.read_inode    = NULL,
+	.lookup_root   = fat32_lookup_root,
+	.dirlookup     = fat32_dirlookup,
+	.readdir       = fat32_readdir,
 };
 
 /**
  * fat32_mount() - Read BPB and initialize FAT32 in-memory structures
  * @sb: The super_block to initialize
  *
- * Return: 0 on success, < 0 on error
+ * Return: 0 on success, -1 on error.
  */
 int fat32_mount(struct super_block *sb)
 {
 	struct block_device *bdev = sb->s_bdev;
-	u8 buf[512]; /* Read 1 sector */
+	u8 buf[512];
 
 	if (bdev->ops->read_block(bdev, 0, buf) != 0) {
 		printk("[FAT] Failed to read sector 0\n");
@@ -39,7 +39,6 @@ int fat32_mount(struct super_block *sb)
 
 	struct fat32_bpb *bpb = (struct fat32_bpb *)buf;
 
-	/* Basic validation */
 	if (buf[510] != 0x55 || buf[511] != 0xAA) {
 		printk("[FAT] Invalid BPB signature\n");
 		return -1;
@@ -57,42 +56,43 @@ int fat32_mount(struct super_block *sb)
 		return -1;
 	}
 
-	/* FAT32 specific checks */
+	/* root_entry_count and fat_size_16 must be 0 on FAT32 — if not, this is FAT16. */
 	if (bpb->root_entry_count != 0 || bpb->fat_size_16 != 0 || bpb->total_sectors_16 != 0) {
 		printk("[FAT] Not a FAT32 filesystem (might be FAT16)\n");
 		return -1;
 	}
 
-	/* Initialize fs_info */
 	struct fat32_fs_info *info = (struct fat32_fs_info *)kmalloc(sizeof(*info), GFP_KERNEL);
 	if (!info)
 		return -1;
 
-	info->bytes_per_sector = bpb->bytes_per_sector;
+	info->bytes_per_sector    = bpb->bytes_per_sector;
 	info->sectors_per_cluster = bpb->sectors_per_cluster;
-	info->bytes_per_cluster = bpb->bytes_per_sector * bpb->sectors_per_cluster;
-	
-	info->fat_start_lba = bpb->reserved_sector_count;
-	info->cluster_start_lba = info->fat_start_lba + (bpb->num_fats * bpb->fat_size_32);
-	info->root_cluster = bpb->root_cluster;
+	info->bytes_per_cluster   = bpb->bytes_per_sector * bpb->sectors_per_cluster;
+	info->fat_start_lba       = bpb->reserved_sector_count;
+	info->cluster_start_lba   = info->fat_start_lba + (bpb->num_fats * bpb->fat_size_32);
+	info->root_cluster        = bpb->root_cluster;
 
-	sb->s_fs_info = info;
-	sb->s_op = &fat32_s_op;
+	sb->s_fs_info  = info;
+	sb->s_op       = &fat32_s_op;
 	sb->s_blocksize = bpb->bytes_per_sector;
 
-	/* Create root inode */
 	struct inode *root = (struct inode *)kmalloc(sizeof(*root), GFP_KERNEL);
-	if (!root) return -1;
-	root->i_ino = info->root_cluster;
-	root->i_size = 0;
-	root->i_mode = S_IFDIR;
-	root->i_sb = sb;
-	root->i_fop = NULL;
+	if (!root)
+		return -1;
+
+	root->i_ino     = info->root_cluster;
+	root->i_size    = 0;
+	root->i_mode    = S_IFDIR;
+	root->i_sb      = sb;
+	root->i_fop     = NULL;
 	root->i_private = NULL;
 
 	sb->s_root = (struct dentry *)kmalloc(sizeof(struct dentry), GFP_KERNEL);
-	if (!sb->s_root) return -1;
-	sb->s_root->d_inode = root;
+	if (!sb->s_root)
+		return -1;
+
+	sb->s_root->d_inode  = root;
 	sb->s_root->d_parent = NULL;
 
 	printk("[FAT] Mounted (%u B/sector, %u s/cl, %u FAT sectors)\n",
@@ -108,7 +108,7 @@ int fat32_mount(struct super_block *sb)
  * @sb: The super_block
  * @current_cluster: The current cluster number
  *
- * Return: The next cluster number, or FAT32_EOC if end of file.
+ * Return: The next cluster number, or FAT32_EOC if end of chain.
  */
 uint32_t fat32_get_next_cluster(struct super_block *sb, uint32_t current_cluster)
 {
@@ -116,20 +116,20 @@ uint32_t fat32_get_next_cluster(struct super_block *sb, uint32_t current_cluster
 	struct block_device *bdev = sb->s_bdev;
 	u8 buf[512];
 
-	/* In FAT32, each entry is 4 bytes. */
+	/* Each FAT32 entry is 4 bytes wide. */
 	uint32_t fat_offset = current_cluster * 4;
 	uint32_t fat_sector = info->fat_start_lba + (fat_offset / info->bytes_per_sector);
 	uint32_t ent_offset = fat_offset % info->bytes_per_sector;
 
 	if (bdev->ops->read_block(bdev, fat_sector, buf) != 0) {
 		printk("[FAT] Failed to read FAT sector %u\n", (unsigned int)fat_sector);
-		return FAT32_EOC; /* Treat read error as EOF */
+		return FAT32_EOC;
 	}
 
 	uint32_t next_cluster = rd32(&buf[ent_offset]) & 0x0FFFFFFF;
-	
+
 	if (next_cluster >= FAT32_EOC)
 		return FAT32_EOC;
-	
+
 	return next_cluster;
 }

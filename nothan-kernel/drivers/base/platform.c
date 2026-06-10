@@ -11,10 +11,12 @@ static int platform_match(struct device *dev, struct driver *drv)
 {
 	if (!dev->name || !drv->name)
 		return 0;
-	/* Simple name string match */
 	const char *dn = dev->name;
 	const char *dr = drv->name;
-	while (*dn && *dr && *dn == *dr) { dn++; dr++; }
+	while (*dn && *dr && *dn == *dr) {
+		dn++;
+		dr++;
+	}
 	return *dn == *dr;
 }
 
@@ -23,6 +25,16 @@ struct bus_type platform_bus = {
 	.match = platform_match,
 };
 
+/**
+ * platform_device_register() - Register a platform device on the platform bus
+ * @pdev: The platform_device to register (must have .name and .base set)
+ *
+ * Translates pdev->base and pdev->irq into struct resource entries and
+ * adds the device to the platform bus.  A matching driver will be probed
+ * if already registered.
+ *
+ * Return: 0 on success, -1 on error.
+ */
 int platform_device_register(struct platform_device *pdev)
 {
 	int n = 0;
@@ -43,8 +55,8 @@ int platform_device_register(struct platform_device *pdev)
 	pdev->dev.num_resources = n;
 	pdev->dev.driver = 0;
 
-		printk("[PLAT] device '%s' base=0x%lx irq=%d\n",
-		       pdev->name, (unsigned long)pdev->base, pdev->irq);
+	printk("[PLAT] device '%s' base=0x%lx irq=%d\n",
+	       pdev->name, (unsigned long)pdev->base, pdev->irq);
 
 	return bus_add_device(&platform_bus, &pdev->dev);
 }
@@ -69,6 +81,15 @@ static int platform_remove_thunk(struct device *dev)
 	return pdrv->remove(pdev);
 }
 
+/**
+ * platform_driver_register() - Register a platform driver
+ * @pdrv: The platform_driver to register
+ *
+ * Installs probe/remove thunks so the generic bus core can call the
+ * platform-specific callbacks with the correct pdev pointer.
+ *
+ * Return: 0 on success, -1 on error.
+ */
 int platform_driver_register(struct platform_driver *pdrv)
 {
 	pdrv->drv.name   = pdrv->drv.name ? pdrv->drv.name : "(unnamed)";
@@ -77,6 +98,14 @@ int platform_driver_register(struct platform_driver *pdrv)
 	return bus_add_driver(&platform_bus, &pdrv->drv);
 }
 
+/**
+ * platform_get_resource() - Look up a resource by type and index
+ * @pdev: The platform device to search
+ * @type: Resource type flag (IORESOURCE_MEM or IORESOURCE_IRQ)
+ * @index: Zero-based index among resources of the given type
+ *
+ * Return: Pointer to the matching resource, or NULL if not found.
+ */
 struct resource *platform_get_resource(struct platform_device *pdev,
 				       u32 type, unsigned int index)
 {
@@ -91,6 +120,13 @@ struct resource *platform_get_resource(struct platform_device *pdev,
 	return 0;
 }
 
+/**
+ * platform_get_irq() - Get the IRQ number for a platform device
+ * @pdev: The platform device
+ * @index: Zero-based index of the IRQ resource
+ *
+ * Return: IRQ number on success, -1 if not found.
+ */
 int platform_get_irq(struct platform_device *pdev, unsigned int index)
 {
 	struct resource *r = platform_get_resource(pdev, IORESOURCE_IRQ, index);

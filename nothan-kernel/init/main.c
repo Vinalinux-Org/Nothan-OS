@@ -37,13 +37,16 @@ void kernel_main(void)
 		}
 	}
 
-	/* Read SHELL.BIN to verify VFS */
+	/* Smoke-test VFS: open SHELL.BIN and read first bytes. */
 	{
 		int fd = vfs_open("SHELL.BIN", O_RDONLY);
 		if (fd >= 0) {
 			char buf[64];
 			int n = vfs_read(fd, buf, 63);
-			if (n > 0) { buf[n] = '\0'; printk("[VFS] Read %d bytes from SHELL.BIN: '%s'\n", n, buf); }
+			if (n > 0) {
+				buf[n] = '\0';
+				printk("[VFS] Read %d bytes from SHELL.BIN: '%s'\n", n, buf);
+			}
 			vfs_close(fd);
 		}
 	}

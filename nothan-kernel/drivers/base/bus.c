@@ -7,6 +7,12 @@
 #include <nothan/device.h>
 #include <nothan/printk.h>
 
+/**
+ * bus_register() - Initialize a bus type
+ * @bus: The bus_type to register
+ *
+ * Return: 0 always.
+ */
 int bus_register(struct bus_type *bus)
 {
 	bus->num_devices = 0;
@@ -14,6 +20,15 @@ int bus_register(struct bus_type *bus)
 	return 0;
 }
 
+/**
+ * bus_add_device() - Add a device to a bus and try to match a driver
+ * @bus: The bus to add the device to
+ * @dev: The device to add
+ *
+ * If a matching driver is already registered, calls its probe function.
+ *
+ * Return: 0 on success, -1 if the device table is full.
+ */
 int bus_add_device(struct bus_type *bus, struct device *dev)
 {
 	if (bus->num_devices >= BUS_MAX_DEVICES)
@@ -22,7 +37,7 @@ int bus_add_device(struct bus_type *bus, struct device *dev)
 	dev->bus = bus;
 	bus->devices[bus->num_devices++] = dev;
 
-	/* Try to match with already-registered drivers */
+	/* Try to match with already-registered drivers. */
 	for (int i = 0; i < bus->num_drivers; i++) {
 		if (bus->match && bus->match(dev, bus->drivers[i])) {
 			dev->driver = bus->drivers[i];
@@ -36,6 +51,15 @@ int bus_add_device(struct bus_type *bus, struct device *dev)
 	return 0;
 }
 
+/**
+ * bus_add_driver() - Register a driver on a bus and probe matching devices
+ * @bus: The bus to register the driver on
+ * @drv: The driver to register
+ *
+ * Probes any device already on the bus that matches by name.
+ *
+ * Return: 0 on success, -1 if the driver table is full.
+ */
 int bus_add_driver(struct bus_type *bus, struct driver *drv)
 {
 	if (bus->num_drivers >= BUS_MAX_DRIVERS)
@@ -44,7 +68,7 @@ int bus_add_driver(struct bus_type *bus, struct driver *drv)
 	drv->bus = bus;
 	bus->drivers[bus->num_drivers++] = drv;
 
-	/* Match against all already-registered devices */
+	/* Match against all already-registered devices. */
 	for (int i = 0; i < bus->num_devices; i++) {
 		if (bus->match && bus->match(bus->devices[i], drv)) {
 			bus->devices[i]->driver = drv;

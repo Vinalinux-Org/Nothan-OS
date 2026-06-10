@@ -13,6 +13,13 @@ static struct file *fd_table[MAX_FDS];
 extern int fat32_mount(struct super_block *sb);
 struct super_block *root_sb = NULL;
 
+/**
+ * vfs_mount() - Mount a file system
+ * @dev_name: Name of the block device to mount
+ * @fs_type: File system type (e.g., "fat32")
+ *
+ * Return: 0 on success, -1 on error.
+ */
 int vfs_mount(const char *dev_name, const char *fs_type)
 {
 	struct block_device *bdev = get_block_device(dev_name);
@@ -85,6 +92,13 @@ static struct inode *walk_path(const char *pathname)
 	return current;
 }
 
+/**
+ * vfs_open() - Open a file
+ * @pathname: Path to the file (e.g., "SHELL.BIN", "/bin/hello")
+ * @flags: Open flags (O_RDONLY, O_WRONLY, etc.)
+ *
+ * Return: File descriptor (fd >= 0) on success, -1 on error.
+ */
 int vfs_open(const char *pathname, int flags)
 {
 	int fd = -1;
@@ -133,6 +147,14 @@ int vfs_open(const char *pathname, int flags)
 	return fd;
 }
 
+/**
+ * vfs_read() - Read from a file descriptor
+ * @fd: File descriptor (returned by vfs_open)
+ * @buf: User buffer to store data
+ * @count: Number of bytes to read
+ *
+ * Return: Number of bytes read, -1 on error, or 0 if EOF.
+ */
 int vfs_read(int fd, char *buf, size_t count)
 {
 	if (fd < 0 || fd >= MAX_FDS || !fd_table[fd])
@@ -143,6 +165,14 @@ int vfs_read(int fd, char *buf, size_t count)
 	return 0;
 }
 
+/**
+ * vfs_write() - Write to a file descriptor
+ * @fd: File descriptor (returned by vfs_open)
+ * @buf: User buffer containing data
+ * @count: Number of bytes to write
+ *
+ * Return: Number of bytes written, -1 on error.
+ */
 int vfs_write(int fd, const char *buf, size_t count)
 {
 	if (fd < 0 || fd >= MAX_FDS || !fd_table[fd])
@@ -153,6 +183,12 @@ int vfs_write(int fd, const char *buf, size_t count)
 	return -1;
 }
 
+/**
+ * vfs_close() - Close a file descriptor
+ * @fd: File descriptor (returned by vfs_open)
+ *
+ * Return: 0 on success, -1 on error.
+ */
 int vfs_close(int fd)
 {
 	if (fd < 0 || fd >= MAX_FDS || !fd_table[fd])
@@ -165,6 +201,14 @@ int vfs_close(int fd)
 	return 0;
 }
 
+/**
+ * vfs_listdir() - List directory contents
+ * @path: Path to the directory
+ * @buf: Buffer to store file_entry array
+ * @max: Maximum number of entries to return
+ *
+ * Return: Number of entries filled in @buf, -1 on error.
+ */
 int vfs_listdir(const char *path, struct file_entry *buf, int max)
 {
 	if (!root_sb || !root_sb->s_op || !root_sb->s_op->readdir)

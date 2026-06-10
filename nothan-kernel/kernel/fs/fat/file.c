@@ -69,8 +69,8 @@ int fat32_file_read(struct file *f, char *buf, size_t count)
 			bytes_read += to_copy;
 			offset_in_sector = 0; /* Next sectors are aligned */
 		}
-		
-		offset_in_cluster = 0; /* Next clusters are aligned */
+
+		offset_in_cluster = 0;	/* next clusters start at offset 0 */
 		if (bytes_read < count)
 			current_cluster = fat32_get_next_cluster(sb, current_cluster);
 	}

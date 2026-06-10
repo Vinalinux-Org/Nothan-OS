@@ -15,13 +15,17 @@ static int intc_probe(struct platform_device *pdev)
 {
 	(void)pdev;
 
+	/* Mask all 128 IRQ lines (4 banks × 32 bits) before enabling
+	 * individual IRQs via intc_enable_irq(). */
 	mmio_write32(INTC_BASE + INTC_MIR_SET(0), 0xFFFFFFFF);
 	mmio_write32(INTC_BASE + INTC_MIR_SET(1), 0xFFFFFFFF);
 	mmio_write32(INTC_BASE + INTC_MIR_SET(2), 0xFFFFFFFF);
 	mmio_write32(INTC_BASE + INTC_MIR_SET(3), 0xFFFFFFFF);
 
+	/* Priority threshold 0xFF = no threshold, all priorities pass through. */
 	mmio_write32(INTC_BASE + INTC_THRESHOLD, 0xFF);
 
+	/* Acknowledge any stale IRQ so the controller is in a clean state. */
 	mmio_write32(INTC_BASE + INTC_CONTROL, NEWIRQAGR);
 
 	printk("[INTC] AM335x INTC ready\n");

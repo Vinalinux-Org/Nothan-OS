@@ -72,6 +72,11 @@ static void timer_irq_handler(unsigned int irq)
 	run_local_timers();
 }
 
+/**
+ * get_jiffies() - Return the current tick count
+ *
+ * Return: Number of timer ticks since boot (1 tick = 10 ms).
+ */
 unsigned long get_jiffies(void)
 {
 	return jiffies;
@@ -153,10 +158,16 @@ static int timer_probe(struct platform_device *pdev)
 	while ((mmio_read32(DMTIMER2_BASE + TWPS) & TWPS_W_PEND_TCLR) && timeout--)
 		;
 	/* Timer intentionally NOT started yet — timer_start() after sched_init() */
-printk("[TIMER] DMTimer2 @ 24 MHz, 10 ms tick, IRQ %d\n", DMTIMER2_IRQ);
+	printk("[TIMER] DMTimer2 @ 24 MHz, 10 ms tick, IRQ %d\n", DMTIMER2_IRQ);
 	return 0;
 }
 
+/**
+ * timer_start() - Start the DMTimer2 counter
+ *
+ * Called after sched_init() so the first tick does not preempt before
+ * the scheduler is ready.
+ */
 void timer_start(void)
 {
 	unsigned int timeout = 10000;

@@ -148,7 +148,6 @@ void mmu_map_user(struct mm_struct *mm)
 	/* Save L2 physical address for context-switch by schedule() */
 	mm->l2_pa = (u32)(unsigned long)l2 - (PAGE_OFFSET - PHYS_OFFSET);
 
-
 	/* Cache maintenance: clean L2 table to PoC */
 	for (unsigned int i = 0; i < 1024; i += 64)
 		__asm__ __volatile__(
@@ -156,7 +155,6 @@ void mmu_map_user(struct mm_struct *mm)
 			: : "r" ((char *)l2 + i) : "memory");
 	dsb();
 }
-
 
 /*
  * mmu_switch_mm() - switch L1[0] to a task's L2 table
@@ -175,10 +173,8 @@ void mmu_switch_mm(struct mm_struct *mm)
 			     | PMD_SECT_DOMAIN(DOMAIN_USER)
 			     | PMD_TYPE_TABLE;
 		pgd[0] = l1_entry;
-
 	} else {
 		pgd[0] = PMD_TYPE_FAULT;
-
 	}
 	dsb();
 
