@@ -15,7 +15,7 @@
 /* L4_WKUP peripherals */
 #define L4_WKUP_BASE		0x44E00000
 #define UART0_BASE		(L4_WKUP_BASE + 0x9000)		/* 0x44E09000 */
-#define MMC0_BASE		(L4_WKUP_BASE + 0x60000)	/* 0x48060000 */
+#define MMC0_BASE		(L4_PER_BASE + 0x60000)		/* 0x48060000 */
 
 static struct platform_device bbb_devices[] = {
 	{
@@ -32,6 +32,11 @@ static struct platform_device bbb_devices[] = {
 		.name = "omap_uart",
 		.base = UART0_BASE,
 		.irq  = 72,		/* UART0 IRQ */
+	},
+	{
+		.name = "omap_mmc",
+		.base = MMC0_BASE,
+		.irq  = 64,		/* MMC0 IRQ */
 	},
 };
 
