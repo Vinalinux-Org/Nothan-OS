@@ -4,10 +4,13 @@
 #include <nothan/types.h>
 #include <nothan/fs.h>
 
-/* Cluster values */
-#define FAT32_EOC 0x0FFFFFF8        /* End of cluster chain (≥ this value) */
+#define FAT32_EOC 0x0FFFFFF8
 
-/* FAT32 BIOS Parameter Block */
+#define ATTR_DIRECTORY  0x10
+#define ATTR_ARCHIVE    0x20
+#define ATTR_LFN        0x0F
+#define ATTR_VOLUME     0x08
+
 struct fat32_bpb {
 	u8  jmp_boot[3];
 	u8  oem_name[8];
@@ -15,16 +18,14 @@ struct fat32_bpb {
 	u8  sectors_per_cluster;
 	u16 reserved_sector_count;
 	u8  num_fats;
-	u16 root_entry_count; /* 0 for FAT32 */
-	u16 total_sectors_16; /* 0 for FAT32 */
+	u16 root_entry_count;
+	u16 total_sectors_16;
 	u8  media;
-	u16 fat_size_16;      /* 0 for FAT32 */
+	u16 fat_size_16;
 	u16 sectors_per_track;
 	u16 num_heads;
 	u32 hidden_sectors;
 	u32 total_sectors_32;
-	
-	/* FAT32 Extended fields */
 	u32 fat_size_32;
 	u16 ext_flags;
 	u16 fs_version;
@@ -34,10 +35,10 @@ struct fat32_bpb {
 	u8  reserved[12];
 	u8  drive_number;
 	u8  reserved1;
-	u8  boot_signature; /* 0x29 */
+	u8  boot_signature;
 	u32 volume_id;
 	u8  volume_label[11];
-	u8  fs_type[8];     /* "FAT32   " */
+	u8  fs_type[8];
 } __attribute__((packed));
 
 struct fat32_fs_info {
@@ -73,6 +74,8 @@ int fat32_mount(struct super_block *sb);
 uint32_t fat32_get_next_cluster(struct super_block *sb, uint32_t current_cluster);
 void fat32_list_dir(struct super_block *sb, uint32_t dir_cluster);
 struct inode *fat32_lookup_root(struct super_block *sb, const char *name);
+struct inode *fat32_dirlookup(struct inode *dir, const char *name);
+int fat32_readdir(struct inode *dir, struct file_entry *buf, int max);
 
 extern const struct file_operations fat32_file_operations;
 

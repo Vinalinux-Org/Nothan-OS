@@ -119,37 +119,80 @@ void mock_bdev_init(void)
 	bpb[510] = 0x55;
 	bpb[511] = 0xAA;
 
-	/* FAT table: cluster 2 → EOC (root dir), cluster 3 → EOC (SHELL.BIN data) */
-	u8 *fat_table = mock_ram_disk + (32 * 512); /* FAT starts at sector 32 */
-	fat_table[8]  = 0xFF; fat_table[9]  = 0xFF; fat_table[10] = 0xFF; fat_table[11] = 0x0F; /* cluster 2 = EOC */
-	fat_table[12] = 0xFF; fat_table[13] = 0xFF; fat_table[14] = 0xFF; fat_table[15] = 0x0F; /* cluster 3 = EOC */
-
-	/* Fake Directory Entry at Root Cluster (Cluster 2)
-	 * FAT_START = 32, FAT_SIZE = 16 * 2 = 32. DATA_START = 64.
-	 * So Cluster 2 is at Sector 64.
-	 */
-	u8 *root_dir = mock_ram_disk + (64 * 512);
-	/* "SHELL   BIN", attr=0x20 (Archive) */
-	root_dir[0] = 'S'; root_dir[1] = 'H'; root_dir[2] = 'E'; root_dir[3] = 'L'; root_dir[4] = 'L';
-	root_dir[5] = ' '; root_dir[6] = ' '; root_dir[7] = ' '; 
-	root_dir[8] = 'B'; root_dir[9] = 'I'; root_dir[10] = 'N';
-	root_dir[11] = 0x20; 
-	/* Start cluster = 3 (0x0003) */
-	root_dir[20] = 0x00; root_dir[21] = 0x00; /* fst_clus_hi */
-	root_dir[26] = 0x03; root_dir[27] = 0x00; /* fst_clus_lo */
-	/* File size = 44 bytes */
-	root_dir[28] = 44; root_dir[29] = 0x00; root_dir[30] = 0x00; root_dir[31] = 0x00;
-	
-	/* Second entry: End of directory (0x00) is already there since ram disk is 0-initialized */
-
-	/* SHELL.BIN data is at cluster 3 */
-	/* cluster 3 sector = cluster_start_lba + (3 - 2) * sectors_per_cluster = 64 + 8 = 72 */
-	u8 *shell_data = mock_ram_disk + (72 * 512);
-	const char *msg = "Hello from NothanOS FAT32 mock file system!";
-	for (int i = 0; msg[i]; i++) {
-		shell_data[i] = msg[i];
+	/* FAT table: cluster 2-6 -> EOC */
+	u8 *fat_table = mock_ram_disk + (32 * 512);
+	for (int i = 2; i <= 7; i++) {
+		int off = i * 4;
+		fat_table[off] = 0xFF; fat_table[off+1] = 0xFF;
+		fat_table[off+2] = 0xFF; fat_table[off+3] = 0x0F;
 	}
 
-	register_block_device(&mock_bdev);
+	/* Root directory at Cluster 2 (sector 64) */
+	u8 *root_dir = mock_ram_disk + (64 * 512);
+
+	/* Entry 0: SHELL.BIN (deleted) */
+	root_dir[0] = 0xE5; /* 0xE5 is the FAT32 marker for deleted file */
+
+	/* Entry 1: EXAMPLE.BIN, archive */
+	root_dir[32] = 'E'; root_dir[33] = 'X'; root_dir[34] = 'A'; root_dir[35] = 'M'; root_dir[36] = 'P';
+	root_dir[37] = 'L'; root_dir[38] = 'E'; root_dir[39] = ' ';
+	root_dir[40] = 'B'; root_dir[41] = 'I'; root_dir[42] = 'N';
+	root_dir[43] = 0x20;
+	root_dir[52] = 0; root_dir[53] = 0;
+	root_dir[58] = 7; root_dir[59] = 0;
+	root_dir[60] = 74; root_dir[61] = 0; root_dir[62] = 0; root_dir[63] = 0;
+
+	/* Entry 2: "bin" directory */
+	int e2 = 64;
+	root_dir[e2+0] = 'B'; root_dir[e2+1] = 'I'; root_dir[e2+2] = 'N';
+	root_dir[e2+11] = 0x10;
+	root_dir[e2+20] = 0; root_dir[e2+21] = 0;
+	root_dir[e2+26] = 4; root_dir[e2+27] = 0;
+
+	/* Entry 3: "sbin" directory */
+	int e3 = 96;
+	root_dir[e3+0] = 'S'; root_dir[e3+1] = 'B'; root_dir[e3+2] = 'I'; root_dir[e3+3] = 'N';
+	root_dir[e3+11] = 0x10;
+	root_dir[e3+20] = 0; root_dir[e3+21] = 0;
+	root_dir[e3+26] = 5; root_dir[e3+27] = 0;
+
+	/* Entry 4: End marker (zeroed ram) */
+
+	/* SHELL.BIN data at cluster 3 (sector 72) */
+	u8 *shell_data = mock_ram_disk + (72 * 512);
+	const char *msg = "Hello from NothanOS FAT32 mock file system!";
+	for (int i = 0; msg[i]; i++) shell_data[i] = msg[i];
+
+	/* /bin directory at cluster 4 (sector 80): hello.bin */
+	u8 *bin_dir = mock_ram_disk + (80 * 512);
+	bin_dir[0] = 'H'; bin_dir[1] = 'E'; bin_dir[2] = 'L'; bin_dir[3] = 'L'; bin_dir[4] = 'O';
+	bin_dir[5] = ' '; bin_dir[6] = ' '; bin_dir[7] = ' ';
+	bin_dir[8] = 'B'; bin_dir[9] = 'I'; bin_dir[10] = 'N';
+	bin_dir[11] = 0x20;
+	bin_dir[20] = 0; bin_dir[21] = 0;
+	bin_dir[26] = 6; bin_dir[27] = 0;
+	bin_dir[28] = 48; bin_dir[29] = 0; bin_dir[30] = 0; bin_dir[31] = 0;
+
+	/* /bin/hello.bin data at cluster 6 (sector 96) */
+	u8 *hello_data = mock_ram_disk + (96 * 512);
+	const char *hmsg = "Hello from /bin/hello.bin!\n";
+	for (int i = 0; hmsg[i]; i++) hello_data[i] = hmsg[i];
+
+	/* /sbin at cluster 5 (sector 88): empty directory */
+
+	/* EXAMPLE.BIN at cluster 7 (sector 104), 74 bytes */
+	{
+		u8 *d = mock_ram_disk + (104 * 512);
+		d[0]=0x02; d[1]=0x00; d[2]=0x00; d[3]=0xeb; d[4]=0x01; d[5]=0x70; d[6]=0xa0; d[7]=0xe3;
+		d[8]=0x00; d[9]=0x00; d[10]=0x00; d[11]=0xef; d[12]=0xfb; d[13]=0xff; d[14]=0xff; d[15]=0xea;
+		d[16]=0x04; d[17]=0x70; d[18]=0x2d; d[19]=0xe5; d[20]=0x34; d[21]=0x00; d[22]=0x00; d[23]=0xe3;
+		d[24]=0x03; d[25]=0x70; d[26]=0xa0; d[27]=0xe3; d[28]=0x01; d[29]=0x00; d[30]=0x40; d[31]=0xe3;
+		d[32]=0x00; d[33]=0x00; d[34]=0x00; d[35]=0xef; d[36]=0x00; d[37]=0x00; d[38]=0xa0; d[39]=0xe3;
+		d[40]=0x01; d[41]=0x70; d[42]=0xa0; d[43]=0xe3; d[44]=0x00; d[45]=0x00; d[46]=0x00; d[47]=0xef;
+		d[48]=0xfe; d[49]=0xff; d[50]=0xff; d[51]=0xea; d[52]=0x57; d[53]=0x65; d[54]=0x6c; d[55]=0x63;
+		d[56]=0x6f; d[57]=0x6d; d[58]=0x65; d[59]=0x20; d[60]=0x74; d[61]=0x6f; d[62]=0x20; d[63]=0x4e;
+		d[64]=0x6f; d[65]=0x74; d[66]=0x68; d[67]=0x61; d[68]=0x6e; d[69]=0x4f; d[70]=0x53; d[71]=0x21;
+		d[72]=0x0a; d[73]=0x00;
+	}	register_block_device(&mock_bdev);
 	printk("[BLOCK] Mock RAM disk initialized with Fake FAT32 BPB\n");
 }

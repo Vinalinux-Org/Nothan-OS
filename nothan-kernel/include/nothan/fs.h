@@ -9,10 +9,17 @@
 #define O_WRONLY 0x0001
 #define O_RDWR   0x0002
 
+#define S_IFMT   0xF000
+#define S_IFDIR  0x4000
+#define S_IFREG  0x8000
+
+#define FILE_NAME_LEN 32
+
 struct inode;
 struct file;
 struct super_block;
 struct dentry;
+struct file_entry;
 
 struct file_operations {
 	int (*read)(struct file *file, char *buf, size_t count);
@@ -26,13 +33,15 @@ struct super_operations {
 	void (*destroy_inode)(struct inode *inode);
 	int (*read_inode)(struct inode *inode);
 	struct inode *(*lookup_root)(struct super_block *sb, const char *name);
+	struct inode *(*dirlookup)(struct inode *dir, const char *name);
+	int (*readdir)(struct inode *dir, struct file_entry *buf, int max);
 };
 
 struct super_block {
 	struct block_device *s_bdev;
 	const struct super_operations *s_op;
 	struct dentry *s_root;
-	void *s_fs_info; /* FS specific data */
+	void *s_fs_info;
 	uint32_t s_blocksize;
 };
 
@@ -62,11 +71,17 @@ struct file {
 	void *private_data;
 };
 
+struct file_entry {
+	char name[FILE_NAME_LEN];
+	unsigned long size;
+};
+
 /* VFS API */
 int vfs_mount(const char *dev_name, const char *fs_type);
 int vfs_open(const char *pathname, int flags);
 int vfs_read(int fd, char *buf, size_t count);
 int vfs_write(int fd, const char *buf, size_t count);
 int vfs_close(int fd);
+int vfs_listdir(const char *path, struct file_entry *buf, int max);
 
 #endif /* _NOTHAN_FS_H */

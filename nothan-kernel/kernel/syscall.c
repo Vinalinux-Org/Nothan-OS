@@ -236,20 +236,21 @@ static long sys_sysinfo(unsigned long a0, unsigned long a1, unsigned long a2)
  */
 static long sys_listdir(unsigned long a0, unsigned long a1, unsigned long a2)
 {
-	(void)a0;
-	(void)a2;
-	/* TODO: implement directory listing via VFS/FAT */
-	return 0;
+	const char *path = (const char *)a0;
+	struct file_entry *buf = (struct file_entry *)a1;
+	unsigned long max = a2;
+
+	return vfs_listdir(path, buf, (int)max);
 }
 
 /**
- * sys_exec - load and run a .bin file from the mounted filesystem
+ * sys_spawn - load and run a .bin file from the mounted filesystem
  * @a0: path to .bin file (user)
  *
  * Opens the file, reads its content, creates a new user task,
  * and enqueues it. Returns the new PID, or -1 on error.
  */
-static long sys_exec(unsigned long a0, unsigned long a1, unsigned long a2)
+static long sys_spawn(unsigned long a0, unsigned long a1, unsigned long a2)
 {
 	(void)a1; (void)a2;
 	const char *path = (const char *)a0;
@@ -300,7 +301,7 @@ static const syscall_fn_t syscall_table[NR_SYSCALLS] = {
 	[__NR_gettasklist] = sys_gettasklist,
 	[__NR_sysinfo]     = sys_sysinfo,
 	[__NR_listdir]     = sys_listdir,
-	[__NR_exec]        = sys_exec,
+	[__NR_spawn]       = sys_spawn,
 };
 
 /**

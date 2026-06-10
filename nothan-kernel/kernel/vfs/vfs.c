@@ -13,13 +13,6 @@ static struct file *fd_table[MAX_FDS];
 extern int fat32_mount(struct super_block *sb);
 struct super_block *root_sb = NULL;
 
-/**
- * vfs_mount() - Mount a file system
- * @dev_name: Name of the block device to mount
- * @fs_type: Name of the file system type
- *
- * Return: 0 on success, < 0 on error
- */
 int vfs_mount(const char *dev_name, const char *fs_type)
 {
 	struct block_device *bdev = get_block_device(dev_name);
@@ -29,16 +22,14 @@ int vfs_mount(const char *dev_name, const char *fs_type)
 	}
 
 	printk("[VFS] Mounting %s on %s\n", fs_type, dev_name);
-	
-	/* Allocate super_block */
+
 	struct super_block *sb = (struct super_block *)kmalloc(sizeof(*sb), GFP_KERNEL);
 	if (!sb)
 		return -1;
-	
+
 	sb->s_bdev = bdev;
 	sb->s_root = NULL;
 
-	/* Simple fs type dispatch */
 	if (fs_type[0] == 'f' && fs_type[1] == 'a' && fs_type[2] == 't') {
 		if (fat32_mount(sb) != 0) {
 			kfree(sb);
@@ -54,13 +45,46 @@ int vfs_mount(const char *dev_name, const char *fs_type)
 	return 0;
 }
 
-/**
- * vfs_open() - Open a file
- * @pathname: Path to the file
- * @flags: Open flags (O_RDONLY, etc.)
- *
- * Return: File descriptor (fd) >= 0 on success, < 0 on error
- */
+
+static struct inode *walk_path(const char *pathname)
+{
+	if (!root_sb || !root_sb->s_op || !root_sb->s_op->dirlookup)
+		return NULL;
+
+	/* Skip leading slashes */
+	while (*pathname == '/')
+		pathname++;
+
+	/* Root inode must be created by the FS during mount */
+	if (!root_sb->s_root || !root_sb->s_root->d_inode)
+		return NULL;
+
+	struct inode *current = root_sb->s_root->d_inode;
+
+	/* Walk each path component */
+	char component[256];
+	while (*pathname) {
+		int len = 0;
+		while (pathname[len] && pathname[len] != '/') {
+			if (len < 255)
+				component[len] = pathname[len];
+			len++;
+		}
+		component[len] = '\0';
+
+		struct inode *next = root_sb->s_op->dirlookup(current, component);
+		if (!next)
+			return NULL;
+
+		current = next;
+		pathname += len;
+		while (*pathname == '/')
+			pathname++;
+	}
+
+	return current;
+}
+
 int vfs_open(const char *pathname, int flags)
 {
 	int fd = -1;
@@ -70,20 +94,20 @@ int vfs_open(const char *pathname, int flags)
 			break;
 		}
 	}
-
 	if (fd < 0) {
 		printk("[VFS] Out of file descriptors\n");
 		return -1;
 	}
 
-	if (!root_sb || !root_sb->s_op || !root_sb->s_op->lookup_root) {
-		printk("[VFS] No root filesystem available\n");
-		return -1;
-	}
-
-	struct inode *inode = root_sb->s_op->lookup_root(root_sb, pathname);
+	struct inode *inode = walk_path(pathname);
 	if (!inode)
 		return -1;
+
+	/* Directories cannot be opened as files */
+	if (inode->i_mode & S_IFDIR) {
+		kfree(inode);
+		return -1;
+	}
 
 	struct file *f = (struct file *)kmalloc(sizeof(*f), GFP_KERNEL);
 	if (!f) {
@@ -109,62 +133,47 @@ int vfs_open(const char *pathname, int flags)
 	return fd;
 }
 
-/**
- * vfs_read() - Read from a file descriptor
- * @fd: File descriptor
- * @buf: User buffer
- * @count: Number of bytes to read
- *
- * Return: Number of bytes read, < 0 on error
- */
 int vfs_read(int fd, char *buf, size_t count)
 {
 	if (fd < 0 || fd >= MAX_FDS || !fd_table[fd])
 		return -1;
-
 	struct file *f = fd_table[fd];
 	if (f->f_op && f->f_op->read)
 		return f->f_op->read(f, buf, count);
-
 	return 0;
 }
 
-/**
- * vfs_write() - Write to a file descriptor
- * @fd: File descriptor
- * @buf: User buffer
- * @count: Number of bytes to write
- *
- * Return: Number of bytes written, < 0 on error
- */
 int vfs_write(int fd, const char *buf, size_t count)
 {
 	if (fd < 0 || fd >= MAX_FDS || !fd_table[fd])
 		return -1;
-
 	struct file *f = fd_table[fd];
 	if (f->f_op && f->f_op->write)
 		return f->f_op->write(f, buf, count);
-
 	return -1;
 }
 
-/**
- * vfs_close() - Close a file descriptor
- * @fd: File descriptor
- *
- * Return: 0 on success, < 0 on error
- */
 int vfs_close(int fd)
 {
 	if (fd < 0 || fd >= MAX_FDS || !fd_table[fd])
 		return -1;
-
 	struct file *f = fd_table[fd];
 	if (f->f_op && f->f_op->release)
 		f->f_op->release(f->f_inode, f);
-
 	kfree(f);
 	fd_table[fd] = NULL;
 	return 0;
+}
+
+int vfs_listdir(const char *path, struct file_entry *buf, int max)
+{
+	if (!root_sb || !root_sb->s_op || !root_sb->s_op->readdir)
+		return -1;
+
+	struct inode *dir = walk_path(path);
+	if (!dir || !(dir->i_mode & S_IFDIR))
+		return -1;
+
+	int n = root_sb->s_op->readdir(dir, buf, max);
+	return n;
 }

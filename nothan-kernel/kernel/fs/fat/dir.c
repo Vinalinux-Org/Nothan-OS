@@ -7,10 +7,6 @@
 #include <nothan/printk.h>
 #include <nothan/slab.h>
 
-/*
- * Format an 8.3 raw name ("HELLO   TXT") into a human-readable form
- * ("HELLO.TXT" or "HELLO" if no extension).
- */
 static void fmt_name_83(const u8 raw[11], char *out)
 {
 	int si, di = 0;
@@ -24,11 +20,31 @@ static void fmt_name_83(const u8 raw[11], char *out)
 	out[di] = '\0';
 }
 
-/**
- * fat32_list_dir() - List contents of a directory cluster (For testing)
- * @sb: The super_block
- * @dir_cluster: The starting cluster of the directory
- */
+static void name_to_raw(const char *in, u8 raw[11])
+{
+	int i, pos;
+	for (i = 0; i < 11; i++) raw[i] = ' ';
+	pos = 0;
+	while (in[pos] && in[pos] != '.' && pos < 8) {
+		char c = in[pos];
+		if (c >= 'a' && c <= 'z') c -= 32;
+		raw[pos] = (u8)c;
+		pos++;
+	}
+	if (in[pos] == '.') {
+		pos++;
+		for (i = 0; i < 3 && in[pos]; i++, pos++) {
+			char c = in[pos];
+			if (c >= 'a' && c <= 'z') c -= 32;
+			raw[8 + i] = (u8)c;
+		}
+	}
+}
+
+static inline u32 rd16(const u8 *p) {
+	return (u32)p[0] | ((u32)p[1] << 8);
+}
+
 void fat32_list_dir(struct super_block *sb, uint32_t dir_cluster)
 {
 	struct fat32_fs_info *info = (struct fat32_fs_info *)sb->s_fs_info;
@@ -36,123 +52,133 @@ void fat32_list_dir(struct super_block *sb, uint32_t dir_cluster)
 	u8 buf[512];
 	uint32_t current_cluster = dir_cluster;
 
-	if (info->bytes_per_sector > sizeof(buf)) {
-		printk("[FAT] Sector size too large for dir buffer (%u)\n",
-		       (unsigned int)info->bytes_per_sector);
-		return;
-	}
-
-	printk("[FAT] --- Directory Listing (Cluster %u) ---\n", (unsigned int)dir_cluster);
+	if (info->bytes_per_sector > sizeof(buf)) return;
 
 	while (current_cluster < FAT32_EOC) {
 		uint32_t first_sector = fat32_cluster_to_sector(info, current_cluster);
-		
 		for (uint32_t i = 0; i < info->sectors_per_cluster; i++) {
-			if (bdev->ops->read_block(bdev, first_sector + i, buf) != 0) {
-				printk("[FAT] Error reading dir sector\n");
+			if (bdev->ops->read_block(bdev, first_sector + i, buf) != 0)
 				return;
-			}
-
 			struct fat32_dir_entry *ent = (struct fat32_dir_entry *)buf;
-			uint32_t entries_per_sector = info->bytes_per_sector / sizeof(struct fat32_dir_entry);
-			
-			for (uint32_t j = 0; j < entries_per_sector; j++, ent++) {
-				if (ent->name[0] == 0x00) {
-					/* End of directory */
-					printk("[FAT] --- End of Directory ---\n");
-					return;
-				}
-				if (ent->name[0] == 0xE5) /* Deleted entry */
-					continue;
-				if (ent->attr == 0x0F) /* LFN entry */
-					continue;
-				if (ent->attr & 0x08) /* Volume Label */
-					continue;
-
-				/* Format and print the 8.3 name */
-				char name_buf[13];
-				fmt_name_83(ent->name, name_buf);
-
-				uint32_t start_cluster = ((uint32_t)ent->fst_clus_hi << 16) | ent->fst_clus_lo;
-				
-				if (ent->attr & 0x10) {
-					printk("[FAT] [DIR]  %s (Cluster: %u)\n", 
-						name_buf, (unsigned int)start_cluster);
-				} else {
-					printk("[FAT] [FILE] %s (Size: %u bytes, Cluster: %u)\n", 
-						name_buf, (unsigned int)ent->file_size, (unsigned int)start_cluster);
-				}
+			uint32_t n = info->bytes_per_sector / sizeof(struct fat32_dir_entry);
+			for (uint32_t j = 0; j < n; j++, ent++) {
+				if (ent->name[0] == 0x00) return;
+				if (ent->name[0] == 0xE5) continue;
+				if (ent->attr == ATTR_LFN || (ent->attr & ATTR_VOLUME)) continue;
+				char name[13];
+				fmt_name_83(ent->name, name);
+				uint32_t cl = ((uint32_t)ent->fst_clus_hi << 16) | ent->fst_clus_lo;
+				if (ent->attr & ATTR_DIRECTORY)
+					printk("[FAT] [DIR]  %s (Cluster: %u)\n", name, (unsigned int)cl);
+				else
+					printk("[FAT] [FILE] %s (Size: %u bytes, Cluster: %u)\n", name, (unsigned int)ent->file_size, (unsigned int)cl);
 			}
 		}
 		current_cluster = fat32_get_next_cluster(sb, current_cluster);
 	}
-	printk("[FAT] --- End of Directory ---\n");
 }
 
 static int inline_strcmp(const char *s1, const char *s2)
 {
-	while (*s1 && (*s1 == *s2)) {
-		s1++;
-		s2++;
-	}
+	while (*s1 && (*s1 == *s2)) { s1++; s2++; }
 	return *(const unsigned char *)s1 - *(const unsigned char *)s2;
 }
 
-/**
- * fat32_lookup_root() - Search for a file in the root directory
- * @sb: The super_block
- * @name: Name of the file to find (e.g. "SHELL.BIN")
- *
- * Return: A newly allocated inode, or NULL if not found
- */
+static struct inode *fat_entry_to_inode(struct super_block *sb,
+	const struct fat32_dir_entry *ent)
+{
+	struct inode *inode = (struct inode *)kmalloc(sizeof(*inode), GFP_KERNEL);
+	if (!inode) return NULL;
+
+	inode->i_ino = ((uint32_t)ent->fst_clus_hi << 16) | ent->fst_clus_lo;
+	inode->i_size = ent->file_size;
+	inode->i_sb = sb;
+	inode->i_mode = (ent->attr & ATTR_DIRECTORY) ? S_IFDIR : S_IFREG;
+	inode->i_fop = (ent->attr & ATTR_DIRECTORY) ? NULL : &fat32_file_operations;
+	inode->i_private = NULL;
+	return inode;
+}
+
 struct inode *fat32_lookup_root(struct super_block *sb, const char *name)
 {
-	struct fat32_fs_info *info = (struct fat32_fs_info *)sb->s_fs_info;
-	struct block_device *bdev = sb->s_bdev;
+	struct inode *root_inode = (struct inode *)kmalloc(sizeof(*root_inode), GFP_KERNEL);
+	if (!root_inode) return NULL;
+	root_inode->i_ino = ((struct fat32_fs_info *)sb->s_fs_info)->root_cluster;
+	root_inode->i_sb = sb;
+	root_inode->i_mode = S_IFDIR;
+	return fat32_dirlookup(root_inode, name);
+}
+
+struct inode *fat32_dirlookup(struct inode *dir, const char *name)
+{
+	struct fat32_fs_info *info = (struct fat32_fs_info *)dir->i_sb->s_fs_info;
+	struct block_device *bdev = dir->i_sb->s_bdev;
 	u8 buf[512];
-	uint32_t current_cluster = info->root_cluster;
+	uint32_t cluster = dir->i_ino;
+	u8 query[11];
 
-	if (info->bytes_per_sector > sizeof(buf))
-		return NULL;
+	if (info->bytes_per_sector > sizeof(buf)) return NULL;
+	name_to_raw(name, query);
 
-	while (current_cluster < FAT32_EOC) {
-		uint32_t first_sector = fat32_cluster_to_sector(info, current_cluster);
-		
-		for (uint32_t i = 0; i < info->sectors_per_cluster; i++) {
-			if (bdev->ops->read_block(bdev, first_sector + i, buf) != 0)
-				return NULL;
-
+	while (cluster >= 2 && cluster < FAT32_EOC) {
+		uint32_t base = fat32_cluster_to_sector(info, cluster);
+		for (uint32_t s = 0; s < info->sectors_per_cluster; s++) {
+			if (bdev->ops->read_block(bdev, base + s, buf) != 0) return NULL;
 			struct fat32_dir_entry *ent = (struct fat32_dir_entry *)buf;
-			uint32_t entries_per_sector = info->bytes_per_sector / sizeof(struct fat32_dir_entry);
-			
-			for (uint32_t j = 0; j < entries_per_sector; j++, ent++) {
-				if (ent->name[0] == 0x00)
-					return NULL; /* End of dir */
-				if (ent->name[0] == 0xE5)
-					continue;
-				if (ent->attr == 0x0F || (ent->attr & 0x08))
-					continue;
+			uint32_t n = info->bytes_per_sector / sizeof(struct fat32_dir_entry);
+			for (uint32_t j = 0; j < n; j++, ent++) {
+				if (ent->name[0] == 0x00) return NULL;
+				if (ent->name[0] == 0xE5) continue;
+				if (ent->attr == ATTR_LFN || (ent->attr & ATTR_VOLUME)) continue;
 
-				char name_buf[13];
-				fmt_name_83(ent->name, name_buf);
-
-				if (inline_strcmp(name_buf, name) == 0) {
-					/* Found it! Allocate inode */
-					struct inode *inode = kmalloc(sizeof(struct inode), GFP_KERNEL);
-					if (!inode)
-						return NULL;
-					
-					inode->i_ino = ((uint32_t)ent->fst_clus_hi << 16) | ent->fst_clus_lo;
-					inode->i_size = ent->file_size;
-					inode->i_sb = sb;
-					inode->i_fop = &fat32_file_operations;
-					inode->i_mode = 0; /* regular file */
-					
-					return inode;
+				int match = 1;
+				for (int k = 0; k < 11; k++) {
+					if (ent->name[k] != query[k]) { match = 0; break; }
 				}
+				if (match)
+					return fat_entry_to_inode(dir->i_sb, ent);
 			}
 		}
-		current_cluster = fat32_get_next_cluster(sb, current_cluster);
+		cluster = fat32_get_next_cluster(dir->i_sb, cluster);
 	}
 	return NULL;
+}
+
+int fat32_readdir(struct inode *dir, struct file_entry *buf, int max)
+{
+	struct fat32_fs_info *info = (struct fat32_fs_info *)dir->i_sb->s_fs_info;
+	struct block_device *bdev = dir->i_sb->s_bdev;
+	u8 buf512[512];
+	uint32_t cluster = dir->i_ino;
+	int count = 0;
+
+	if (info->bytes_per_sector > sizeof(buf512)) return 0;
+
+	while (cluster >= 2 && cluster < FAT32_EOC && count < max) {
+		uint32_t base = fat32_cluster_to_sector(info, cluster);
+		for (uint32_t s = 0; s < info->sectors_per_cluster && count < max; s++) {
+			if (bdev->ops->read_block(bdev, base + s, buf512) != 0) return count;
+			struct fat32_dir_entry *ent = (struct fat32_dir_entry *)buf512;
+			uint32_t n = info->bytes_per_sector / sizeof(struct fat32_dir_entry);
+			for (uint32_t j = 0; j < n && count < max; j++, ent++) {
+				if (ent->name[0] == 0x00) return count;
+				if (ent->name[0] == 0xE5) continue;
+				if (ent->attr == ATTR_LFN || (ent->attr & ATTR_VOLUME)) continue;
+				fmt_name_83(ent->name, buf[count].name);
+				buf[count].size = ent->file_size;
+				/* Append '/' for directories */
+				if (ent->attr & ATTR_DIRECTORY) {
+					int sl = 0;
+					while (buf[count].name[sl]) sl++;
+					if (sl < FILE_NAME_LEN - 1) {
+						buf[count].name[sl] = '/';
+						buf[count].name[sl + 1] = '\0';
+					}
+				}
+				count++;
+			}
+		}
+		cluster = fat32_get_next_cluster(dir->i_sb, cluster);
+	}
+	return count;
 }

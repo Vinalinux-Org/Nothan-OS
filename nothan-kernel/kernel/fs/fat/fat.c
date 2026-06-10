@@ -13,10 +13,12 @@ static inline u32 rd32(const u8 *p) {
 }
 
 static struct super_operations fat32_s_op = {
-	.alloc_inode = NULL, /* To be implemented in Step 4 */
+	.alloc_inode = NULL,
 	.destroy_inode = NULL,
 	.read_inode = NULL,
 	.lookup_root = fat32_lookup_root,
+	.dirlookup = fat32_dirlookup,
+	.readdir = fat32_readdir,
 };
 
 /**
@@ -77,6 +79,21 @@ int fat32_mount(struct super_block *sb)
 	sb->s_fs_info = info;
 	sb->s_op = &fat32_s_op;
 	sb->s_blocksize = bpb->bytes_per_sector;
+
+	/* Create root inode */
+	struct inode *root = (struct inode *)kmalloc(sizeof(*root), GFP_KERNEL);
+	if (!root) return -1;
+	root->i_ino = info->root_cluster;
+	root->i_size = 0;
+	root->i_mode = S_IFDIR;
+	root->i_sb = sb;
+	root->i_fop = NULL;
+	root->i_private = NULL;
+
+	sb->s_root = (struct dentry *)kmalloc(sizeof(struct dentry), GFP_KERNEL);
+	if (!sb->s_root) return -1;
+	sb->s_root->d_inode = root;
+	sb->s_root->d_parent = NULL;
 
 	printk("[FAT] Mounted (%u B/sector, %u s/cl, %u FAT sectors)\n",
 	       (unsigned int)bpb->bytes_per_sector,
