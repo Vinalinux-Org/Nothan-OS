@@ -76,7 +76,7 @@ static void cmd_help(void)
 	puts("  info\t\tShow system info\n");
 	puts("  ls\t\tList files\n");
 	puts("  clear\t\tClear screen\n");
-	puts("  ./<file>\tExecute a .bin file\n");
+	puts("  ./<file>\tSpawn a .bin file\n");
 	putchar('\n');
 }
 
@@ -182,15 +182,30 @@ static void execute(char *line)
 	else if (compare(cmd, "ls") == 0)	cmd_ls();
 	else if (compare(cmd, "clear") == 0) { putnchar('\n', 200); puts("\033[H"); }
 	else if (cmd[0] == '.' && cmd[1] == '/') {
-		long pid = exec(cmd + 2);
+		long pid = spawn(cmd + 2);
 		if (pid < 0) {
-			puts("exec failed: ");
+			puts("spawn failed: ");
 			puts(cmd);
 			putchar('\n');
 		} else {
-			puts("Started task pid=");
+			puts("pid=");
 			putint(pid, 0);
 			putchar('\n');
+			
+			/* Chờ tiến trình con chạy xong mới in prompt tiếp theo */
+			while (1) {
+				struct task_info tasks[16];
+				long count = gettasklist(tasks, 16);
+				int found = 0;
+				for (long i = 0; i < count; i++) {
+					if (tasks[i].pid == pid) {
+						found = 1;
+						break;
+					}
+				}
+				if (!found) break;
+				yield();
+			}
 		}
 	} else {
 		puts("Unknown: '");

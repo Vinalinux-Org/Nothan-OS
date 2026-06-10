@@ -37,26 +37,16 @@ void kernel_main(void)
 		}
 	}
 
-	/* Look for a test file — try HELLO.BIN first, then SHELL.BIN (mock) */
-	const char *test_files[] = { "HELLO.BIN", "SHELL.BIN" };
-	int found = 0;
-	for (unsigned int i = 0; i < sizeof(test_files) / sizeof(test_files[0]); i++) {
-		int fd = vfs_open(test_files[i], O_RDONLY);
+	/* Read SHELL.BIN to verify VFS */
+	{
+		int fd = vfs_open("SHELL.BIN", O_RDONLY);
 		if (fd >= 0) {
-			char test_buf[64];
-			int bytes = vfs_read(fd, test_buf, sizeof(test_buf) - 1);
-			if (bytes > 0) {
-				test_buf[bytes] = '\0';
-				printk("[VFS] Read %d bytes from %s: '%s'\n",
-				       bytes, test_files[i], test_buf);
-			}
+			char buf[64];
+			int n = vfs_read(fd, buf, 63);
+			if (n > 0) { buf[n] = '\0'; printk("[VFS] Read %d bytes from SHELL.BIN: '%s'\n", n, buf); }
 			vfs_close(fd);
-			found = 1;
-			break;
 		}
 	}
-	if (!found)
-		printk("[VFS] No test file found\n");
 
 	mmu_log_config();
 

@@ -9,3 +9,9 @@
 _binary_user_shell_start:
 	.incbin	"build/shell.usr"
 _binary_user_shell_end:
+
+	.globl	_binary_user_example_start
+	.globl	_binary_user_example_end
+_binary_user_example_start:
+	.incbin	"build/example.usr"
+_binary_user_example_end:

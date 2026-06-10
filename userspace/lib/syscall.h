@@ -13,7 +13,7 @@
 #define __NR_gettasklist 9
 #define __NR_sysinfo    10
 #define __NR_listdir    11
-#define __NR_exec       12
+#define __NR_spawn      12
 
 #define TASK_NAME_LEN 16
 #define FILE_NAME_LEN 32
@@ -122,9 +122,9 @@ static inline long listdir(const char *path, struct file_entry *buf, unsigned lo
 	return __syscall3(__NR_listdir, (long)path, (long)buf, (long)max);
 }
 
-static inline long exec(const char *path)
+static inline long spawn(const char *path)
 {
-	return __syscall1(__NR_exec, (long)path);
+	return __syscall1(__NR_spawn, (long)path);
 }
 
 #endif
