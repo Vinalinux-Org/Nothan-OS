@@ -11,6 +11,9 @@
 #include <nothan/printk.h>
 #include <nothan/platform.h>
 #include <nothan/init.h>
+#include <nothan/cdev.h>
+#include <nothan/ioctl.h>
+#include <nothan/fs.h>
 
 /*
  * PRCM clock control for UART0.
@@ -38,8 +41,75 @@ static void uart_irq_handler(unsigned int irq)
 	}
 }
 
-/*
+/* ioctl commands for /dev/ttyS0 */
+#define TIOC_MAGIC     't'
+#define TIOCSETBAUD    _IOW(TIOC_MAGIC, 1, unsigned int)
+#define TIOCGETBAUD    _IOR(TIOC_MAGIC, 2, unsigned int)
+
+static unsigned int uart_current_baud = 115200;
+
+static int ttyS0_read(struct file *file, char *buf, size_t count)
+{
+	(void)file;
+	size_t i = 0;
+
+	while (i < count) {
+		int c = uart_getchar();
+		if (c < 0)
+			break;
+		buf[i++] = (char)c;
+	}
+	return i > 0 ? (int)i : -1;
+}
+
+static int ttyS0_write(struct file *file, const char *buf, size_t count)
+{
+	(void)file;
+	for (size_t i = 0; i < count; i++)
+		uart_putchar((unsigned char)buf[i]);
+	return (int)count;
+}
+
+static int ttyS0_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+	(void)file;
+
+	switch (cmd) {
+	case TIOCSETBAUD: {
+		unsigned int baud = (unsigned int)arg;
+		unsigned int div = 24000000 / (16 * baud);
+		u32 lcr = mmio_read32(UART_BASE + UART_LCR);
+		mmio_write32(UART_BASE + UART_LCR, lcr | LCR_DLAB);
+		mmio_write32(UART_BASE + UART_DLL, div & 0xFF);
+		mmio_write32(UART_BASE + UART_DLH, (div >> 8) & 0xFF);
+		mmio_write32(UART_BASE + UART_LCR, lcr);
+		uart_current_baud = baud;
+		return 0;
+	}
+	case TIOCGETBAUD:
+		return (int)uart_current_baud;
+	default:
+		return -1;
+	}
+}
+
+static const struct file_operations ttyS0_fops = {
+	.read    = ttyS0_read,
+	.write   = ttyS0_write,
+	.ioctl   = ttyS0_ioctl,
+};
+
+static struct cdev ttyS0_cdev = {
+	.dev  = MKDEV(4, 64),
+	.fops = &ttyS0_fops,
+	.name = "ttyS0",
+};
+
+/**
  * uart_probe - initialise UART0 for 115200 8N1 with interrupt-driven RX
+ * @pdev: platform device (unused; base address and IRQ come from uart.h macros)
+ *
+ * Return: 0 always.
  */
 static int uart_probe(struct platform_device *pdev)
 {
@@ -65,6 +135,7 @@ static int uart_probe(struct platform_device *pdev)
 	intc_enable_irq(UART_IRQ);
 
 	printk("[UART] 115200 8N1\n");
+	cdev_register(&ttyS0_cdev);
 	return 0;
 }
 
