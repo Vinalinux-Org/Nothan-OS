@@ -12,6 +12,7 @@
 #define S_IFMT   0xF000
 #define S_IFDIR  0x4000
 #define S_IFREG  0x8000
+#define S_IFCHR  0x2000
 
 #define FILE_NAME_LEN 32
 
@@ -26,6 +27,7 @@ struct file_operations {
 	int (*write)(struct file *file, const char *buf, size_t count);
 	int (*open)(struct inode *inode, struct file *file);
 	int (*release)(struct inode *inode, struct file *file);
+	int (*ioctl)(struct file *file, unsigned int cmd, unsigned long arg);
 };
 
 struct super_operations {
@@ -82,6 +84,8 @@ int vfs_open(const char *pathname, int flags);
 int vfs_read(int fd, char *buf, size_t count);
 int vfs_write(int fd, const char *buf, size_t count);
 int vfs_close(int fd);
+int vfs_ioctl(int fd, unsigned int cmd, unsigned long arg);
+int vfs_chdir(const char *path);
 int vfs_listdir(const char *path, struct file_entry *buf, int max);
 
 #endif /* _NOTHAN_FS_H */

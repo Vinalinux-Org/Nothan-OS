@@ -4,6 +4,7 @@
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 #include <nothan/fs.h>
+#include <nothan/devfs.h>
 #include <nothan/printk.h>
 #include <nothan/slab.h>
 
@@ -22,6 +23,10 @@ struct super_block *root_sb = NULL;
  */
 int vfs_mount(const char *dev_name, const char *fs_type)
 {
+	/* devfs has no block device — handle before get_block_device() */
+	if (fs_type[0] == 'd' && fs_type[1] == 'e' && fs_type[2] == 'v')
+		return devfs_mount();
+
 	struct block_device *bdev = get_block_device(dev_name);
 	if (!bdev) {
 		printk("[VFS] Cannot find block device '%s'\n", dev_name);
@@ -53,6 +58,18 @@ int vfs_mount(const char *dev_name, const char *fs_type)
 }
 
 
+/**
+ * is_dev_prefix - check if path component starts with "dev"
+ * @p: path with leading slashes already stripped
+ *
+ * Return: 1 if path is "dev" or starts with "dev/", 0 otherwise.
+ */
+static int is_dev_prefix(const char *p)
+{
+	return p[0] == 'd' && p[1] == 'e' && p[2] == 'v' &&
+	       (p[3] == '/' || p[3] == '\0');
+}
+
 static struct inode *walk_path(const char *pathname)
 {
 	if (!root_sb || !root_sb->s_op || !root_sb->s_op->dirlookup)
@@ -61,6 +78,16 @@ static struct inode *walk_path(const char *pathname)
 	/* Skip leading slashes */
 	while (*pathname == '/')
 		pathname++;
+
+	/* Route /dev/<name> to devfs */
+	if (devfs_sb && is_dev_prefix(pathname)) {
+		const char *devname = pathname + 3;
+		while (*devname == '/')
+			devname++;
+		if (*devname == '\0')
+			return devfs_sb->s_root->d_inode; /* /dev/ itself */
+		return devfs_sb->s_op->dirlookup(devfs_sb->s_root->d_inode, devname);
+	}
 
 	/* Root inode must be created by the FS during mount */
 	if (!root_sb->s_root || !root_sb->s_root->d_inode)
@@ -202,6 +229,53 @@ int vfs_close(int fd)
 }
 
 /**
+ * vfs_chdir() - Validate a path for use as working directory
+ * @path: Target path — only "/" and devfs paths ("/dev") are allowed.
+ *
+ * FAT32 subdirectories (/bin, /sbin, etc.) are rejected.
+ * Return: 0 if allowed, -1 otherwise.
+ */
+int vfs_chdir(const char *path)
+{
+	const char *p = path;
+	while (*p == '/')
+		p++;
+
+	/* Root "/" is always valid */
+	if (*p == '\0')
+		return 0;
+
+	/* /dev itself is valid; /dev/<name> is not a directory */
+	if (devfs_sb && is_dev_prefix(p)) {
+		const char *sub = p + 3;
+		while (*sub == '/')
+			sub++;
+		return (*sub == '\0') ? 0 : -1;
+	}
+
+	return -1;
+}
+
+/**
+ * vfs_ioctl() - Device control via file descriptor
+ * @fd:  File descriptor (returned by vfs_open)
+ * @cmd: ioctl command (encoded with _IOC macros)
+ * @arg: Command argument (pointer or value)
+ *
+ * Dispatches to the driver's ioctl file_operation.
+ * Return: driver-defined value, -1 if not supported or bad fd.
+ */
+int vfs_ioctl(int fd, unsigned int cmd, unsigned long arg)
+{
+	if (fd < 0 || fd >= MAX_FDS || !fd_table[fd])
+		return -1;
+	struct file *f = fd_table[fd];
+	if (f->f_op && f->f_op->ioctl)
+		return f->f_op->ioctl(f, cmd, arg);
+	return -1;
+}
+
+/**
  * vfs_listdir() - List directory contents
  * @path: Path to the directory
  * @buf: Buffer to store file_entry array
@@ -211,6 +285,17 @@ int vfs_close(int fd)
  */
 int vfs_listdir(const char *path, struct file_entry *buf, int max)
 {
+	/* Skip leading slashes for prefix check */
+	const char *p = path;
+	while (*p == '/')
+		p++;
+
+	/* /dev/ listing goes to devfs */
+	if (devfs_sb && is_dev_prefix(p)) {
+		struct inode *dir = devfs_sb->s_root->d_inode;
+		return devfs_sb->s_op->readdir(dir, buf, max);
+	}
+
 	if (!root_sb || !root_sb->s_op || !root_sb->s_op->readdir)
 		return -1;
 
@@ -219,5 +304,17 @@ int vfs_listdir(const char *path, struct file_entry *buf, int max)
 		return -1;
 
 	int n = root_sb->s_op->readdir(dir, buf, max);
+
+	/* Inject synthetic "DEV/" entry when listing root and devfs is mounted */
+	if (devfs_sb && *p == '\0' && n >= 0 && n < max) {
+		buf[n].name[0] = 'D';
+		buf[n].name[1] = 'E';
+		buf[n].name[2] = 'V';
+		buf[n].name[3] = '/';
+		buf[n].name[4] = '\0';
+		buf[n].size = 0;
+		n++;
+	}
+
 	return n;
 }

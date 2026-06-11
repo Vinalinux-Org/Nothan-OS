@@ -255,7 +255,7 @@ static long sys_spawn(unsigned long a0, unsigned long a1, unsigned long a2)
 {
 	(void)a1; (void)a2;
 	const char *path = (const char *)a0;
-	unsigned long blob_size = 4096;
+	unsigned long blob_size = 16384; /* 4 pages — covers text+rodata+data up to 16KB */
 
 	int fd = vfs_open(path, 0);
 	if (fd < 0)
@@ -405,6 +405,107 @@ static long sys_uname(unsigned long a0, unsigned long a1, unsigned long a2)
 	return 0;
 }
 
+/**
+ * sys_ioctl - device control
+ * @a0: file descriptor
+ * @a1: ioctl command (encoded with _IOC macros)
+ * @a2: argument (pointer or integer value)
+ *
+ * Return: driver-defined value, or -1 on error.
+ */
+static long sys_ioctl(unsigned long a0, unsigned long a1, unsigned long a2)
+{
+	return vfs_ioctl((int)a0, (unsigned int)a1, a2);
+}
+
+/**
+ * sys_chdir - change the current working directory
+ * @a0: path string (must be "/" or a devfs path like "/dev")
+ *
+ * Only root and devfs paths are allowed. FAT32 subdirectories
+ * (/bin, /sbin) are rejected.
+ * Return: 0 on success, -1 on error or restricted path.
+ */
+static long sys_chdir(unsigned long a0, unsigned long a1, unsigned long a2)
+{
+	(void)a1; (void)a2;
+	const char *path = (const char *)a0;
+	if (!path)
+		return -1;
+
+	struct task_struct *tsk = runqueue.curr;
+
+	/* Resolve ".." relative to current cwd */
+	char resolved[64];
+	if (path[0] == '.' && path[1] == '.' && path[2] == '\0') {
+		/* Find last '/' in cwd, strip last component */
+		unsigned int len = 0;
+		while (tsk->cwd[len]) len++;
+
+		/* Strip trailing slash if any (except root) */
+		while (len > 1 && tsk->cwd[len - 1] == '/')
+			len--;
+
+		/* Walk back to previous '/' */
+		while (len > 1 && tsk->cwd[len - 1] != '/')
+			len--;
+
+		/* Keep at least "/" */
+		if (len == 0) len = 1;
+
+		unsigned int i = 0;
+		while (i < len && i < 63) {
+			resolved[i] = tsk->cwd[i];
+			i++;
+		}
+		/* Normalise: no trailing slash except root */
+		while (i > 1 && resolved[i - 1] == '/')
+			i--;
+		resolved[i] = '\0';
+		path = resolved;
+	}
+
+	if (vfs_chdir(path) != 0)
+		return -1;
+
+	/* Build normalised absolute cwd: ensure leading '/', no trailing '/' */
+	unsigned int i = 0;
+	if (path[0] != '/')
+		tsk->cwd[i++] = '/';
+	unsigned int j = 0;
+	while (i < 63 && path[j])
+		tsk->cwd[i++] = path[j++];
+	while (i > 1 && tsk->cwd[i - 1] == '/')
+		i--;
+	tsk->cwd[i] = '\0';
+	return 0;
+}
+
+/**
+ * sys_getcwd - get current working directory
+ * @a0: user buffer
+ * @a1: buffer size
+ *
+ * Return: 0 on success, -1 on error.
+ */
+static long sys_getcwd(unsigned long a0, unsigned long a1, unsigned long a2)
+{
+	(void)a2;
+	char *buf = (char *)a0;
+	unsigned long size = a1;
+	if (!buf || size == 0)
+		return -1;
+
+	const char *cwd = runqueue.curr->cwd;
+	unsigned int i = 0;
+	while (i < size - 1 && cwd[i]) {
+		buf[i] = cwd[i];
+		i++;
+	}
+	buf[i] = '\0';
+	return 0;
+}
+
 /*
  * Syscall dispatch table
  * Indexed by syscall number; must match __NR_xxx constants.
@@ -428,6 +529,9 @@ static const syscall_fn_t syscall_table[NR_SYSCALLS] = {
 	[__NR_kill]        = sys_kill,
 	[__NR_reboot]      = sys_reboot,
 	[__NR_uname]       = sys_uname,
+	[__NR_ioctl]       = sys_ioctl,
+	[__NR_chdir]       = sys_chdir,
+	[__NR_getcwd]      = sys_getcwd,
 };
 
 /**

@@ -22,8 +22,11 @@
 #define __NR_kill       13  /* terminate a task by PID           */
 #define __NR_reboot     14  /* reboot or halt the system         */
 #define __NR_uname      15  /* get OS/kernel name string         */
+#define __NR_ioctl      16  /* device control                    */
+#define __NR_chdir      17  /* change working directory          */
+#define __NR_getcwd     18  /* get current working directory     */
 
-#define NR_SYSCALLS     16
+#define NR_SYSCALLS     19
 
 /* reboot commands */
 #define REBOOT_WARM     0
