@@ -16,6 +16,7 @@
 
 extern void mmu_log_config(void);
 extern struct task_struct *user_task_create(const char *name);
+extern struct task_struct *kernel_spawn(const char *path);
 
 void kernel_main(void)
 {
@@ -36,9 +37,16 @@ void kernel_main(void)
 
 	timer_start();
 
-	struct task_struct *ut = user_task_create("shell");
-	if (ut)
+	struct task_struct *ut = kernel_spawn("/sbin/init");
+	if (ut) {
+		printk("[KERN] Spawning /sbin/init\n");
 		enqueue_task(&runqueue, ut);
+	} else {
+		printk("[KERN] /sbin/init not found, falling back to embedded shell\n");
+		ut = user_task_create("shell");
+		if (ut)
+			enqueue_task(&runqueue, ut);
+	}
 
 	printk("[KERN] NothanOS started\n");
 

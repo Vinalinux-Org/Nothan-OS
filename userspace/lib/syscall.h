@@ -14,8 +14,15 @@
 #define __NR_sysinfo    10
 #define __NR_listdir    11
 #define __NR_spawn      12
+#define __NR_kill       13
+#define __NR_reboot     14
+#define __NR_uname      15
+
+#define REBOOT_WARM     0
+#define REBOOT_HALT     1
 
 #define TASK_NAME_LEN 16
+#define UNAME_LEN     16
 #define FILE_NAME_LEN 32
 
 struct task_info {
@@ -125,6 +132,27 @@ static inline long listdir(const char *path, struct file_entry *buf, unsigned lo
 static inline long spawn(const char *path)
 {
 	return __syscall1(__NR_spawn, (long)path);
+}
+
+struct uname_info {
+	char sysname[UNAME_LEN];
+	char version[UNAME_LEN];
+	char machine[UNAME_LEN];
+};
+
+static inline long kill(int pid)
+{
+	return __syscall1(__NR_kill, (long)pid);
+}
+
+static inline long reboot(int cmd)
+{
+	return __syscall1(__NR_reboot, (long)cmd);
+}
+
+static inline long uname(struct uname_info *buf)
+{
+	return __syscall1(__NR_uname, (long)buf);
 }
 
 #endif

@@ -1,5 +1,5 @@
 /*
- * userspace/shell/start.S - User-space shell entry point
+ * lib/crt0.S - C runtime startup for user-space programs
  *
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */

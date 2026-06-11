@@ -12,6 +12,7 @@
 #include <nothan/fs.h>
 #include <nothan/uart.h>
 #include <nothan/mm.h>
+#include <nothan/mmio.h>
 
 extern struct task_struct *user_task_create_bin(const char *name,
 	char *blob_start, char *blob_end);
@@ -282,6 +283,128 @@ static long sys_spawn(unsigned long a0, unsigned long a1, unsigned long a2)
 	return (long)tsk->pid;
 }
 
+/**
+ * sys_kill - terminate a task by PID
+ * @a0: PID of the target task
+ *
+ * If a0 matches the current task, delegates to do_exit().
+ * Otherwise finds the task in the runqueue, dequeues it,
+ * and frees its resources.
+ *
+ * Return: 0 on success, -1 if PID not found.
+ */
+static long sys_kill(unsigned long a0, unsigned long a1, unsigned long a2)
+{
+	(void)a1; (void)a2;
+	int target_pid = (int)a0;
+
+	if (target_pid <= 1)
+		return -1;
+
+	if (runqueue.curr && runqueue.curr->pid == target_pid) {
+		do_exit(0);
+		/* NOTREACHED */
+		return 0;
+	}
+
+	struct rq *rq = &runqueue;
+	for (int prio = 0; prio < MAX_PRIO; prio++) {
+		struct sched_rt_entity *rt, *tmp;
+		list_for_each_entry_safe(rt, tmp, &rq->active.queue[prio],
+					 struct sched_rt_entity, run_list) {
+			struct task_struct *tsk = container_of(rt, struct task_struct, rt);
+			if (tsk->pid != target_pid)
+				continue;
+
+			dequeue_task(rq, tsk);
+			tsk->exit_state = EXIT_ZOMBIE;
+			tsk->__state = TASK_UNINTERRUPTIBLE;
+
+			if (tsk->mm) {
+				struct zone *zone = get_zone();
+				if (tsk->mm->l2)
+					kfree(tsk->mm->l2);
+				struct page *cp = pfn_to_page(zone,
+					(tsk->mm->code_pa - zone->base_pa) >> PAGE_SHIFT);
+				if (cp)
+					__free_pages(cp, 0);
+				struct page *sp = pfn_to_page(zone,
+					(tsk->mm->stack_pa - zone->base_pa) >> PAGE_SHIFT);
+				if (sp)
+					__free_pages(sp, 0);
+				kfree(tsk->mm);
+				tsk->mm = NULL;
+			}
+
+			printk("[KILL] task \"%s\" pid=%d killed\n", tsk->comm, tsk->pid);
+			return 0;
+		}
+	}
+	return -1;
+}
+
+/**
+ * sys_reboot - reboot or halt the system
+ * @a0: REBOOT_WARM (0) or REBOOT_HALT (1)
+ */
+static long sys_reboot(unsigned long a0, unsigned long a1, unsigned long a2)
+{
+	(void)a1; (void)a2;
+
+	if ((int)a0 == REBOOT_HALT) {
+		printk("[SYS] Halting...\n");
+		__asm__ __volatile__("cpsid i" : : : "memory");
+		while (1)
+			;
+	}
+
+	/* Warm reset via PRM_RSTCTRL bit 0 (RST_GLOBAL_WARM_SW)
+	 * PRM_DEVICE PA 0x44E00F00 → VA 0xF0E00F00 */
+	printk("[SYS] Rebooting...\n");
+	mmio_write32(0xF0E00F00, 1);
+
+	/* NOTREACHED — hardware resets before this runs */
+	while (1)
+		;
+	return 0;
+}
+
+#define UNAME_LEN 16
+
+struct uname_info {
+	char sysname[UNAME_LEN];
+	char version[UNAME_LEN];
+	char machine[UNAME_LEN];
+};
+
+/**
+ * sys_uname - return OS identification strings
+ * @a0: pointer to struct uname_info
+ */
+static long sys_uname(unsigned long a0, unsigned long a1, unsigned long a2)
+{
+	(void)a1; (void)a2;
+	struct uname_info *u = (struct uname_info *)a0;
+	const char *sysname = "NothanOS";
+	const char *version = "1.0";
+	const char *machine = "armv7";
+
+	unsigned int i;
+	for (i = 0; sysname[i] && i < UNAME_LEN - 1; i++)
+		u->sysname[i] = sysname[i];
+	u->sysname[i] = '\0';
+
+	for (i = 0; version[i] && i < UNAME_LEN - 1; i++)
+		u->version[i] = version[i];
+	u->version[i] = '\0';
+
+	for (i = 0; machine[i] && i < UNAME_LEN - 1; i++)
+		u->machine[i] = machine[i];
+	u->machine[i] = '\0';
+
+	return 0;
+}
+
 /*
  * Syscall dispatch table
  * Indexed by syscall number; must match __NR_xxx constants.
@@ -302,6 +425,9 @@ static const syscall_fn_t syscall_table[NR_SYSCALLS] = {
 	[__NR_sysinfo]     = sys_sysinfo,
 	[__NR_listdir]     = sys_listdir,
 	[__NR_spawn]       = sys_spawn,
+	[__NR_kill]        = sys_kill,
+	[__NR_reboot]      = sys_reboot,
+	[__NR_uname]       = sys_uname,
 };
 
 /**

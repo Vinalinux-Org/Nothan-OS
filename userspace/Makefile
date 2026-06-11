@@ -1,63 +1,80 @@
 CROSS_COMPILE ?= arm-none-eabi-
-CC = $(CROSS_COMPILE)gcc
-LD = $(CROSS_COMPILE)ld
+CC      = $(CROSS_COMPILE)gcc
+LD      = $(CROSS_COMPILE)ld
+AR      = $(CROSS_COMPILE)ar
 OBJCOPY = $(CROSS_COMPILE)objcopy
 OBJDUMP = $(CROSS_COMPILE)objdump
 
-BUILD_DIR := build
+BUILD   := build
 
-CFLAGS := -mcpu=cortex-a8 -marm -O2 -std=gnu11 -ffreestanding -nostdlib
-CFLAGS += -Wall -Wextra -Wno-unused-parameter -I lib
-AFLAGS := -mcpu=cortex-a8 -marm -D__ASSEMBLY__
+CFLAGS  := -mcpu=cortex-a8 -marm -O2 -std=gnu11 -ffreestanding -nostdlib
+CFLAGS  += -Wall -Wextra -Wno-unused-parameter -I lib
+AFLAGS  := -mcpu=cortex-a8 -marm -D__ASSEMBLY__
 
-.PHONY: all shell example clean size
+LDS     := lib/user.lds
+CRT0    := $(BUILD)/lib/crt0.o
 
-all: shell example
+BIN_PROGRAMS  := sh ps ls info uname reboot shutdown
+SBIN_PROGRAMS := init
+ALL_BINS      := $(foreach p,$(BIN_PROGRAMS),$(BUILD)/bin/$(p).bin) \
+                 $(foreach p,$(SBIN_PROGRAMS),$(BUILD)/sbin/$(p).bin)
 
-# === shell ===
-SHELL_DIR := shell
+.PHONY: all clean size
 
-$(BUILD_DIR)/shell/%.o: $(SHELL_DIR)/%.c | $(BUILD_DIR)/shell
-	$(CC) $(CFLAGS) -c -o $@ $<
+all: $(BUILD)/shell.bin $(BUILD)/example.bin $(ALL_BINS)
 
-$(BUILD_DIR)/shell/%.o: $(SHELL_DIR)/%.S | $(BUILD_DIR)/shell
+$(BUILD)/lib/crt0.o: lib/crt0.S | $(BUILD)/lib
 	$(CC) $(AFLAGS) -c -o $@ $<
 
-$(BUILD_DIR)/shell.elf: $(BUILD_DIR)/shell/start.o $(BUILD_DIR)/shell/main.o
-	$(CC) -nostdlib -T $(SHELL_DIR)/user.lds -o $@ $^ -lgcc
-	$(OBJDUMP) -d $@ > $(BUILD_DIR)/shell.dis
+define BIN_template
+$(BUILD)/bin/$(1)/main.o: bin/$(1)/main.c | $(BUILD)/bin/$(1)
+	$(CC) $(CFLAGS) -c -o $$@ $$<
 
-$(BUILD_DIR)/shell.bin: $(BUILD_DIR)/shell.elf
-	$(OBJCOPY) -O binary $< $@
+$(BUILD)/bin/$(1).elf: $(CRT0) $(BUILD)/bin/$(1)/main.o
+	$(CC) -nostdlib -T $(LDS) -o $$@ $$^ -lgcc
+	$(OBJDUMP) -d $$@ > $(BUILD)/bin/$(1).dis
 
-$(BUILD_DIR)/shell:
-	mkdir -p $@
+$(BUILD)/bin/$(1).bin: $(BUILD)/bin/$(1).elf
+	$(OBJCOPY) -O binary $$< $$@
+endef
 
-shell: $(BUILD_DIR)/shell.bin
+define SBIN_template
+$(BUILD)/sbin/$(1)/main.o: sbin/$(1)/main.c | $(BUILD)/sbin/$(1)
+	$(CC) $(CFLAGS) -c -o $$@ $$<
 
-# === example ===
-EXAMPLE_DIR := example
+$(BUILD)/sbin/$(1).elf: $(CRT0) $(BUILD)/sbin/$(1)/main.o
+	$(CC) -nostdlib -T $(LDS) -o $$@ $$^ -lgcc
+	$(OBJDUMP) -d $$@ > $(BUILD)/sbin/$(1).dis
 
-$(BUILD_DIR)/example/%.o: $(EXAMPLE_DIR)/%.c | $(BUILD_DIR)/example
+$(BUILD)/sbin/$(1).bin: $(BUILD)/sbin/$(1).elf
+	$(OBJCOPY) -O binary $$< $$@
+endef
+
+$(foreach p,$(BIN_PROGRAMS),$(eval $(call BIN_template,$(p))))
+$(foreach p,$(SBIN_PROGRAMS),$(eval $(call SBIN_template,$(p))))
+
+$(BUILD)/shell.bin: $(BUILD)/bin/sh.bin
+	cp $< $@
+
+$(BUILD)/example/main.o: example/main.c | $(BUILD)/example
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD_DIR)/example/%.o: $(EXAMPLE_DIR)/%.S | $(BUILD_DIR)/example
-	$(CC) $(AFLAGS) -c -o $@ $<
+$(BUILD)/example.elf: $(CRT0) $(BUILD)/example/main.o
+	$(CC) -nostdlib -T $(LDS) -o $@ $^
+	$(OBJDUMP) -d $@ > $(BUILD)/example.dis
 
-$(BUILD_DIR)/example.elf: $(BUILD_DIR)/example/start.o $(BUILD_DIR)/example/main.o
-	$(CC) -nostdlib -T $(EXAMPLE_DIR)/user.lds -o $@ $^
-	$(OBJDUMP) -d $@ > $(BUILD_DIR)/example.dis
-
-$(BUILD_DIR)/example.bin: $(BUILD_DIR)/example.elf
+$(BUILD)/example.bin: $(BUILD)/example.elf
 	$(OBJCOPY) -O binary $< $@
 
-$(BUILD_DIR)/example:
+DIRS := $(BUILD)/lib $(BUILD)/example \
+        $(foreach p,$(BIN_PROGRAMS),$(BUILD)/bin/$(p)) \
+        $(foreach p,$(SBIN_PROGRAMS),$(BUILD)/sbin/$(p))
+
+$(DIRS):
 	mkdir -p $@
 
-example: $(BUILD_DIR)/example.bin
-
-size: $(BUILD_DIR)/shell.bin $(BUILD_DIR)/example.bin
-	ls -la $(BUILD_DIR)/shell.bin $(BUILD_DIR)/example.bin
+size: all
+	ls -la $(ALL_BINS)
 
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -rf $(BUILD)

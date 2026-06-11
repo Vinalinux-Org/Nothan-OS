@@ -19,8 +19,15 @@
 #define __NR_sysinfo    10  /* get system info                   */
 #define __NR_listdir    11  /* list directory contents           */
 #define __NR_spawn      12  /* spawn a .bin file from VFS        */
+#define __NR_kill       13  /* terminate a task by PID           */
+#define __NR_reboot     14  /* reboot or halt the system         */
+#define __NR_uname      15  /* get OS/kernel name string         */
 
-#define NR_SYSCALLS     13
+#define NR_SYSCALLS     16
+
+/* reboot commands */
+#define REBOOT_WARM     0
+#define REBOOT_HALT     1
 
 /* Data structures for syscall arguments */
 #define TASK_NAME_LEN 16

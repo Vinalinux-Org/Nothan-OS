@@ -301,23 +301,35 @@ static int omap_hsmmc_probe(struct platform_device *pdev)
 		}
 	}
 	mmc_write(MMCHS_SYSCTL, mmc_read(MMCHS_SYSCTL) | SYSCTL_CEN);
+	mmc_delay(10000);
 
 	mmc_write(MMCHS_IE,  0xFFFFFFFF);
 	mmc_write(MMCHS_ISE, 0xFFFFFFFF);
 	mmc_write(MMCHS_STAT, 0xFFFFFFFF);
 
-	mmc_write(MMCHS_CON, mmc_read(MMCHS_CON) | CON_INIT);
-	mmc_write(MMCHS_CMD, 0);
-	mmc_delay(10000);
-	timeout = 1000000;
-	while (!(mmc_read(MMCHS_STAT) & STAT_CC)) {
-		if (--timeout == 0) {
-			printk("[MMC] INIT stream timeout\n");
-			return -1;
+	/* Retry INIT stream up to 3 times — bootloader state can affect timing */
+	int init_ok = 0;
+	for (int attempt = 0; attempt < 3 && !init_ok; attempt++) {
+		mmc_write(MMCHS_STAT, 0xFFFFFFFF);
+		mmc_write(MMCHS_CON, mmc_read(MMCHS_CON) | CON_INIT);
+		mmc_write(MMCHS_CMD, 0);
+		mmc_delay(100000);
+		timeout = 1000000;
+		while (!(mmc_read(MMCHS_STAT) & STAT_CC)) {
+			if (--timeout == 0)
+				break;
 		}
+		if (mmc_read(MMCHS_STAT) & STAT_CC)
+			init_ok = 1;
+		mmc_write(MMCHS_CON, mmc_read(MMCHS_CON) & ~CON_INIT);
+		mmc_write(MMCHS_STAT, 0xFFFFFFFF);
+		if (!init_ok)
+			mmc_delay(50000);
 	}
-	mmc_write(MMCHS_CON, mmc_read(MMCHS_CON) & ~CON_INIT);
-	mmc_write(MMCHS_STAT, 0xFFFFFFFF);
+	if (!init_ok) {
+		printk("[MMC] INIT stream timeout\n");
+		return -1;
+	}
 
 	mmc_send_cmd(0, 0, RSP_NONE);
 	mmc_delay(5000);
