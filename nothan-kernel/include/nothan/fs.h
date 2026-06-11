@@ -2,7 +2,7 @@
 #define _NOTHAN_FS_H
 
 #include <nothan/types.h>
-#include <nothan/block.h>
+#include <nothan/genhd.h>
 
 #define MAX_FILENAME 256
 #define O_RDONLY 0x0000
@@ -40,7 +40,7 @@ struct super_operations {
 };
 
 struct super_block {
-	struct block_device *s_bdev;
+	struct gendisk *s_bdev;   /* backing block device (gendisk) */
 	const struct super_operations *s_op;
 	struct dentry *s_root;
 	void *s_fs_info;

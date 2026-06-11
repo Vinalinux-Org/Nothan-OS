@@ -7,7 +7,7 @@
 #include <nothan/platform.h>
 #include <nothan/printk.h>
 #include <nothan/mmio.h>
-#include <nothan/block.h>
+#include <nothan/genhd.h>
 #include <nothan/init.h>
 
 /* Register offsets — mmc_base = module_base + 0x100 */
@@ -188,13 +188,15 @@ static int mmc_send_cmd(uint32_t cmd, uint32_t arg, uint32_t flags)
 	return 0;
 }
 
-static int omap_hsmmc_read_block(struct block_device *bdev, uint32_t block, void *buf)
+static int omap_hsmmc_read_block(struct gendisk *disk, u64 block, void *buf)
 {
 	int timeout;
 
+	(void)disk;
+
 	mmc_write(MMCHS_BLK, 512 | (1 << 16));
 
-	if (mmc_send_cmd(17, block, RSP_R1 | (1 << 21) | (1 << 4)) != 0) {
+	if (mmc_send_cmd(17, (uint32_t)block, RSP_R1 | (1 << 21) | (1 << 4)) != 0) {
 		printk("[MMC] Read block %u failed\n", (unsigned int)block);
 		return -1;
 	}
@@ -203,11 +205,11 @@ static int omap_hsmmc_read_block(struct block_device *bdev, uint32_t block, void
 	timeout = 10000000;
 	while (!(mmc_read(MMCHS_STAT) & STAT_BRR)) {
 		if (mmc_read(MMCHS_STAT) & STAT_ERRI) {
-			printk("[MMC] BRR error at block %u\n", (unsigned int)block);
+			printk("[MMC] BRR error at block %llu\n", (unsigned long long)block);
 			return -1;
 		}
 		if (--timeout == 0) {
-			printk("[MMC] BRR timeout at block %u\n", (unsigned int)block);
+			printk("[MMC] BRR timeout at block %llu\n", (unsigned long long)block);
 			return -1;
 		}
 	}
@@ -222,11 +224,11 @@ static int omap_hsmmc_read_block(struct block_device *bdev, uint32_t block, void
 	timeout = 10000000;
 	while (!(mmc_read(MMCHS_STAT) & STAT_TC)) {
 		if (mmc_read(MMCHS_STAT) & STAT_ERRI) {
-			printk("[MMC] TC error at block %u\n", (unsigned int)block);
+			printk("[MMC] TC error at block %llu\n", (unsigned long long)block);
 			return -1;
 		}
 		if (--timeout == 0) {
-			printk("[MMC] TC timeout at block %u\n", (unsigned int)block);
+			printk("[MMC] TC timeout at block %llu\n", (unsigned long long)block);
 			return -1;
 		}
 	}
@@ -235,17 +237,18 @@ static int omap_hsmmc_read_block(struct block_device *bdev, uint32_t block, void
 	return 0;
 }
 
-static struct block_device_operations omap_hsmmc_ops = {
-	.read_block = omap_hsmmc_read_block,
+static const struct block_device_operations omap_hsmmc_ops = {
+	.read_block  = omap_hsmmc_read_block,
 	.write_block = NULL,
 };
 
-static struct block_device omap_hsmmc_bdev = {
-	.name = "sd0",
-	.ops = &omap_hsmmc_ops,
+static struct gendisk omap_hsmmc_disk = {
+	.disk_name    = "sda",
+	.major        = 8,
+	.first_minor  = 0,
+	.fops         = &omap_hsmmc_ops,
 	.private_data = NULL,
-	.block_size = 512,
-	.total_blocks = 7744512, /* approx 4GB */
+	.capacity     = 7744512, /* approx 3.7 GB in 512-byte sectors */
 };
 
 static int omap_hsmmc_probe(struct platform_device *pdev)
@@ -363,8 +366,8 @@ static int omap_hsmmc_probe(struct platform_device *pdev)
 	if (mmc_send_cmd(16, 512, RSP_R1) != 0)
 		return -1;
 
-	register_block_device(&omap_hsmmc_bdev);
-	printk("[MMC] Registered block device 'sd0'\n");
+	add_disk(&omap_hsmmc_disk);
+	printk("[MMC] Registered disk 'sda'\n");
 	return 0;
 }
 

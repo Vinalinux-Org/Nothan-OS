@@ -52,11 +52,11 @@ static uint32_t mbr_find_fat32_partition(const u8 *mbr)
  */
 int fat32_mount(struct super_block *sb)
 {
-	struct block_device *bdev = sb->s_bdev;
+	struct gendisk *disk = sb->s_bdev;
 	u8 buf[512];
 	uint32_t part_lba = 0;
 
-	if (bdev->ops->read_block(bdev, 0, buf) != 0) {
+	if (disk->fops->read_block(disk, 0, buf) != 0) {
 		printk("[FAT] Failed to read sector 0\n");
 		return -1;
 	}
@@ -78,7 +78,7 @@ int fat32_mount(struct super_block *sb)
 			return -1;
 		}
 		printk("[FAT] MBR: FAT32 partition at LBA %u\n", (unsigned int)part_lba);
-		if (bdev->ops->read_block(bdev, part_lba, buf) != 0) {
+		if (disk->fops->read_block(disk, part_lba, buf) != 0) {
 			printk("[FAT] Failed to read BPB at LBA %u\n", (unsigned int)part_lba);
 			return -1;
 		}
@@ -161,7 +161,7 @@ int fat32_mount(struct super_block *sb)
 uint32_t fat32_get_next_cluster(struct super_block *sb, uint32_t current_cluster)
 {
 	struct fat32_fs_info *info = (struct fat32_fs_info *)sb->s_fs_info;
-	struct block_device *bdev = sb->s_bdev;
+	struct gendisk *disk = sb->s_bdev;
 	u8 buf[512];
 
 	/* Each FAT32 entry is 4 bytes wide. */
@@ -169,7 +169,7 @@ uint32_t fat32_get_next_cluster(struct super_block *sb, uint32_t current_cluster
 	uint32_t fat_sector = info->fat_start_lba + (fat_offset / info->bytes_per_sector);
 	uint32_t ent_offset = fat_offset % info->bytes_per_sector;
 
-	if (bdev->ops->read_block(bdev, fat_sector, buf) != 0) {
+	if (disk->fops->read_block(disk, fat_sector, buf) != 0) {
 		printk("[FAT] Failed to read FAT sector %u\n", (unsigned int)fat_sector);
 		return FAT32_EOC;
 	}

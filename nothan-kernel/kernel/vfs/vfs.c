@@ -5,6 +5,7 @@
  */
 #include <nothan/fs.h>
 #include <nothan/devfs.h>
+#include <nothan/genhd.h>
 #include <nothan/printk.h>
 #include <nothan/slab.h>
 
@@ -23,13 +24,13 @@ struct super_block *root_sb = NULL;
  */
 int vfs_mount(const char *dev_name, const char *fs_type)
 {
-	/* devfs has no block device — handle before get_block_device() */
+	/* devfs has no block device */
 	if (fs_type[0] == 'd' && fs_type[1] == 'e' && fs_type[2] == 'v')
 		return devfs_mount();
 
-	struct block_device *bdev = get_block_device(dev_name);
-	if (!bdev) {
-		printk("[VFS] Cannot find block device '%s'\n", dev_name);
+	struct gendisk *disk = gendisk_lookup_by_name(dev_name);
+	if (!disk) {
+		printk("[VFS] Cannot find disk '%s'\n", dev_name);
 		return -1;
 	}
 
@@ -39,7 +40,7 @@ int vfs_mount(const char *dev_name, const char *fs_type)
 	if (!sb)
 		return -1;
 
-	sb->s_bdev = bdev;
+	sb->s_bdev = disk;
 	sb->s_root = NULL;
 
 	if (fs_type[0] == 'f' && fs_type[1] == 'a' && fs_type[2] == 't') {

@@ -52,7 +52,7 @@ static void name_to_raw(const char *in, u8 raw[11])
 void fat32_list_dir(struct super_block *sb, uint32_t dir_cluster)
 {
 	struct fat32_fs_info *info = (struct fat32_fs_info *)sb->s_fs_info;
-	struct block_device *bdev = sb->s_bdev;
+	struct gendisk *disk = sb->s_bdev;
 	u8 buf[512];
 	uint32_t current_cluster = dir_cluster;
 
@@ -62,7 +62,7 @@ void fat32_list_dir(struct super_block *sb, uint32_t dir_cluster)
 	while (current_cluster < FAT32_EOC) {
 		uint32_t first_sector = fat32_cluster_to_sector(info, current_cluster);
 		for (uint32_t i = 0; i < info->sectors_per_cluster; i++) {
-			if (bdev->ops->read_block(bdev, first_sector + i, buf) != 0)
+			if (disk->fops->read_block(disk, first_sector + i, buf) != 0)
 				return;
 			struct fat32_dir_entry *ent = (struct fat32_dir_entry *)buf;
 			uint32_t n = info->bytes_per_sector / sizeof(struct fat32_dir_entry);
@@ -133,7 +133,7 @@ struct inode *fat32_lookup_root(struct super_block *sb, const char *name)
 struct inode *fat32_dirlookup(struct inode *dir, const char *name)
 {
 	struct fat32_fs_info *info = (struct fat32_fs_info *)dir->i_sb->s_fs_info;
-	struct block_device *bdev = dir->i_sb->s_bdev;
+	struct gendisk *disk = dir->i_sb->s_bdev;
 	u8 buf[512];
 	uint32_t cluster = dir->i_ino;
 	u8 query[11];
@@ -146,7 +146,7 @@ struct inode *fat32_dirlookup(struct inode *dir, const char *name)
 	while (cluster >= 2 && cluster < FAT32_EOC) {
 		uint32_t base = fat32_cluster_to_sector(info, cluster);
 		for (uint32_t s = 0; s < info->sectors_per_cluster; s++) {
-			if (bdev->ops->read_block(bdev, base + s, buf) != 0)
+			if (disk->fops->read_block(disk, base + s, buf) != 0)
 				return NULL;
 			struct fat32_dir_entry *ent = (struct fat32_dir_entry *)buf;
 			uint32_t n = info->bytes_per_sector / sizeof(struct fat32_dir_entry);
@@ -185,7 +185,7 @@ struct inode *fat32_dirlookup(struct inode *dir, const char *name)
 int fat32_readdir(struct inode *dir, struct file_entry *buf, int max)
 {
 	struct fat32_fs_info *info = (struct fat32_fs_info *)dir->i_sb->s_fs_info;
-	struct block_device *bdev = dir->i_sb->s_bdev;
+	struct gendisk *disk = dir->i_sb->s_bdev;
 	u8 buf512[512];
 	uint32_t cluster = dir->i_ino;
 	int count = 0;
@@ -196,7 +196,7 @@ int fat32_readdir(struct inode *dir, struct file_entry *buf, int max)
 	while (cluster >= 2 && cluster < FAT32_EOC && count < max) {
 		uint32_t base = fat32_cluster_to_sector(info, cluster);
 		for (uint32_t s = 0; s < info->sectors_per_cluster && count < max; s++) {
-			if (bdev->ops->read_block(bdev, base + s, buf512) != 0)
+			if (disk->fops->read_block(disk, base + s, buf512) != 0)
 				return count;
 			struct fat32_dir_entry *ent = (struct fat32_dir_entry *)buf512;
 			uint32_t n = info->bytes_per_sector / sizeof(struct fat32_dir_entry);

@@ -19,7 +19,7 @@ int fat32_file_read(struct file *f, char *buf, size_t count)
 	struct inode *inode = f->f_inode;
 	struct super_block *sb = inode->i_sb;
 	struct fat32_fs_info *info = (struct fat32_fs_info *)sb->s_fs_info;
-	struct block_device *bdev = sb->s_bdev;
+	struct gendisk *disk = sb->s_bdev;
 
 	if (f->f_pos >= inode->i_size)
 		return 0; /* EOF */
@@ -52,7 +52,7 @@ int fat32_file_read(struct file *f, char *buf, size_t count)
 		uint32_t offset_in_sector = offset_in_cluster % info->bytes_per_sector;
 
 		for (uint32_t s = sector_offset; s < info->sectors_per_cluster && bytes_read < count; s++) {
-			if (bdev->ops->read_block(bdev, first_sector + s, sec_buf) != 0) {
+			if (disk->fops->read_block(disk, first_sector + s, sec_buf) != 0) {
 				kfree(sec_buf);
 				return bytes_read > 0 ? (int)bytes_read : -1;
 			}

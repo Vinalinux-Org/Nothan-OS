@@ -11,7 +11,6 @@
 #include <nothan/sched.h>
 #include <nothan/timer.h>
 #include <nothan/init.h>
-#include <nothan/block.h>
 #include <nothan/fs.h>
 
 extern void mmu_log_config(void);
@@ -28,7 +27,7 @@ void kernel_main(void)
 
 	slab_init();
 
-	if (vfs_mount("sd0", "fat32") != 0)
+	if (vfs_mount("sda", "fat32") != 0)
 		printk("[VFS] SD card mount failed\n");
 
 	vfs_mount(NULL, "devfs");
