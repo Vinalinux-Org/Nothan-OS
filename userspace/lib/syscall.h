@@ -17,6 +17,9 @@
 #define __NR_kill       13
 #define __NR_reboot     14
 #define __NR_uname      15
+#define __NR_ioctl      16
+#define __NR_chdir      17
+#define __NR_getcwd     18
 
 #define REBOOT_WARM     0
 #define REBOOT_HALT     1
@@ -153,6 +156,21 @@ static inline long reboot(int cmd)
 static inline long uname(struct uname_info *buf)
 {
 	return __syscall1(__NR_uname, (long)buf);
+}
+
+static inline long ioctl(int fd, unsigned int cmd, unsigned long arg)
+{
+	return __syscall3(__NR_ioctl, (long)fd, (long)cmd, (long)arg);
+}
+
+static inline long chdir(const char *path)
+{
+	return __syscall1(__NR_chdir, (long)path);
+}
+
+static inline long getcwd(char *buf, unsigned long size)
+{
+	return __syscall2(__NR_getcwd, (long)buf, (long)size);
 }
 
 #endif
