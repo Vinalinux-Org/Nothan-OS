@@ -87,13 +87,3 @@ Yêu cầu từ user **trước khi phân tích**:
 Không đoán nguyên nhân khi chưa có UART log.
 
 ---
-
-## 5. References
-
-| Cần | File |
-|-----|------|
-| Driver development (quy trình, template, initcall levels) | [driver-development-guide.md](reference/driver-development-guide.md) |
-| Coding style (naming, file layout, logging) | [coding-style.md](reference/coding-style.md) |
-| Comment rules | [comment-style.md](reference/comment-style.md) |
-| Commit rules | [commit-style.md](reference/commit-style.md) |
-| Project context (components, status, WIP) | [project_context.md](reference/project_context.md) |
