@@ -7,11 +7,6 @@
 #include <nothan/printk.h>
 #include <nothan/slab.h>
 
-static inline u32 rd32(const u8 *p)
-{
-	return (u32)p[0] | ((u32)p[1] << 8) | ((u32)p[2] << 16) | ((u32)p[3] << 24);
-}
-
 static struct super_operations fat32_s_op = {
 	.alloc_inode   = NULL,
 	.destroy_inode = NULL,
@@ -21,9 +16,37 @@ static struct super_operations fat32_s_op = {
 	.readdir       = fat32_readdir,
 };
 
+static inline u32 rd32(const u8 *p)
+{
+	return (u32)p[0] | ((u32)p[1] << 8) | ((u32)p[2] << 16) | ((u32)p[3] << 24);
+}
+
+/*
+ * Scan the MBR partition table (offsets 446–509) for a FAT32 partition
+ * (type 0x0B or 0x0C). Returns the partition start LBA, or 0 if not found.
+ */
+static uint32_t mbr_find_fat32_partition(const u8 *mbr)
+{
+	for (int i = 0; i < 4; i++) {
+		const u8 *entry = mbr + 446 + i * 16;
+		u8 type = entry[4];
+		if (type == 0x0B || type == 0x0C) {
+			uint32_t lba = (u32)entry[8]  | ((u32)entry[9]  << 8) |
+				       ((u32)entry[10] << 16) | ((u32)entry[11] << 24);
+			if (lba > 0)
+				return lba;
+		}
+	}
+	return 0;
+}
+
 /**
  * fat32_mount() - Read BPB and initialize FAT32 in-memory structures
  * @sb: The super_block to initialize
+ *
+ * Handles both direct FAT32 volumes (mock disk, no MBR) and SD cards
+ * with an MBR partition table. In the MBR case, scans for a FAT32
+ * partition (type 0x0B/0x0C) and reads the BPB from its start LBA.
  *
  * Return: 0 on success, -1 on error.
  */
@@ -31,10 +54,34 @@ int fat32_mount(struct super_block *sb)
 {
 	struct block_device *bdev = sb->s_bdev;
 	u8 buf[512];
+	uint32_t part_lba = 0;
 
 	if (bdev->ops->read_block(bdev, 0, buf) != 0) {
 		printk("[FAT] Failed to read sector 0\n");
 		return -1;
+	}
+
+	if (buf[510] != 0x55 || buf[511] != 0xAA) {
+		printk("[FAT] Invalid signature at sector 0\n");
+		return -1;
+	}
+
+	/*
+	 * Distinguish MBR from a direct BPB: a valid BPB has bytes_per_sector
+	 * at offset 11 equal to 512/1024/2048/4096. An MBR has 0 there.
+	 */
+	u16 bps = (u16)buf[11] | ((u16)buf[12] << 8);
+	if (bps != 512 && bps != 1024 && bps != 2048 && bps != 4096) {
+		part_lba = mbr_find_fat32_partition(buf);
+		if (part_lba == 0) {
+			printk("[FAT] MBR found but no FAT32 partition\n");
+			return -1;
+		}
+		printk("[FAT] MBR: FAT32 partition at LBA %u\n", (unsigned int)part_lba);
+		if (bdev->ops->read_block(bdev, part_lba, buf) != 0) {
+			printk("[FAT] Failed to read BPB at LBA %u\n", (unsigned int)part_lba);
+			return -1;
+		}
 	}
 
 	struct fat32_bpb *bpb = (struct fat32_bpb *)buf;
@@ -66,10 +113,11 @@ int fat32_mount(struct super_block *sb)
 	if (!info)
 		return -1;
 
+	info->part_lba            = part_lba;
 	info->bytes_per_sector    = bpb->bytes_per_sector;
 	info->sectors_per_cluster = bpb->sectors_per_cluster;
 	info->bytes_per_cluster   = bpb->bytes_per_sector * bpb->sectors_per_cluster;
-	info->fat_start_lba       = bpb->reserved_sector_count;
+	info->fat_start_lba       = part_lba + bpb->reserved_sector_count;
 	info->cluster_start_lba   = info->fat_start_lba + (bpb->num_fats * bpb->fat_size_32);
 	info->root_cluster        = bpb->root_cluster;
 

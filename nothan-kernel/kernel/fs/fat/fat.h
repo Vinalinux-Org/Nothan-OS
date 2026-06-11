@@ -42,6 +42,7 @@ struct fat32_bpb {
 } __attribute__((packed));
 
 struct fat32_fs_info {
+	uint32_t part_lba;
 	uint32_t fat_start_lba;
 	uint32_t cluster_start_lba;
 	uint32_t root_cluster;

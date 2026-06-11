@@ -10,7 +10,7 @@
 #include <nothan/block.h>
 #include <nothan/init.h>
 
-/* Register offsets */
+/* Register offsets — mmc_base = module_base + 0x100 */
 #define MMCHS_SYSCONFIG  0x010
 #define MMCHS_SYSSTATUS  0x014
 #define MMCHS_CON        0x02C
@@ -24,7 +24,8 @@
 #define MMCHS_SYSCTL     0x12C
 #define MMCHS_STAT       0x130
 #define MMCHS_IE         0x134
-#define MMCHS_CAPA       0x240
+#define MMCHS_ISE        0x138
+#define MMCHS_CAPA       0x140
 
 /* STAT bits */
 #define STAT_CC          (1 << 0)
@@ -53,15 +54,26 @@
 /* CAPA bits */
 #define CAPA_VS30        (1 << 24)
 
-/* PRCM: CM_PER_MMC0_CLKCTRL at L4_WKUP VA 0xF0E00000 + offset 0x3C */
+/* CMD register response type and flag bits */
+#define RSP_NONE         (0 << 16)
+#define RSP_48           (2 << 16)
+#define RSP_48_BUSY      (3 << 16)
+#define RSP_136          (1 << 16)
+#define CMD_CCCE         (1 << 19)
+#define CMD_CICE         (1 << 20)
+
+#define RSP_R1           (RSP_48     | CMD_CCCE | CMD_CICE)
+#define RSP_R1B          (RSP_48_BUSY | CMD_CCCE | CMD_CICE)
+#define RSP_R2           (RSP_136   | CMD_CCCE)
+#define RSP_R3           (RSP_48)
+#define RSP_R6           (RSP_48     | CMD_CCCE | CMD_CICE)
+#define RSP_R7           (RSP_48     | CMD_CCCE | CMD_CICE)
+
 #define CM_PER_MMC0_CLKCTRL    0xF0E0003C
-#define CM_PER_L3PER_CLKSTCTRL 0xF0E00014
 #define MODULEMODE_ENABLE      2
 #define IDLEST_MASK            (3 << 16)
 #define IDLEST_FUNCTIONAL      0
-#define CLKTRCTRL_SW_WKUP     2
 
-/* Pinmux: MMC0 pins via CONTROL_MODULE (VA: PA 0x44E10000 → 0xF0E10000) */
 #define CONF_MMC0_DAT3   (0xF0E10000 + 0x8F0)
 #define CONF_MMC0_DAT2   (0xF0E10000 + 0x8F4)
 #define CONF_MMC0_DAT1   (0xF0E10000 + 0x8F8)
@@ -69,11 +81,17 @@
 #define CONF_MMC0_CLK    (0xF0E10000 + 0x900)
 #define CONF_MMC0_CMD    (0xF0E10000 + 0x904)
 #define PIN_MODE_0        0
-#define PIN_INPUT_EN      (1 << 5)
-#define PIN_PULLUP_EN     (1 << 3)
+#define PIN_INPUT_EN     (1 << 5)
+#define PIN_PULLUP_EN    (1 << 3)
 
 static uint32_t mmc_base;
 static uint32_t card_rca;
+
+static void mmc_delay(volatile uint32_t count)
+{
+	while (count--)
+		;
+}
 
 static inline void mmc_write(uint32_t reg, uint32_t val)
 {
@@ -106,23 +124,12 @@ static int mmc_enable_clocks(void)
 	int timeout;
 	uint32_t val;
 
-	/* Step 1: Wake L3_PER clock domain */
-	val = mmio_read32(CM_PER_L3PER_CLKSTCTRL);
-	if ((val & 0x3) != CLKTRCTRL_SW_WKUP) {
-		mmio_write32(CM_PER_L3PER_CLKSTCTRL, CLKTRCTRL_SW_WKUP);
-		timeout = 10000;
-		while (((mmio_read32(CM_PER_L3PER_CLKSTCTRL) & 0x3) != CLKTRCTRL_SW_WKUP) && --timeout)
-			;
-	}
-
-	/* Step 2: Enable MMC0 module clock */
 	val = mmio_read32(CM_PER_MMC0_CLKCTRL);
 	val = (val & ~3) | MODULEMODE_ENABLE;
 	mmio_write32(CM_PER_MMC0_CLKCTRL, val);
 
 	timeout = 100000;
-	while ((mmio_read32(CM_PER_MMC0_CLKCTRL) & IDLEST_MASK) !=
-	       (IDLEST_FUNCTIONAL << 16)) {
+	while ((mmio_read32(CM_PER_MMC0_CLKCTRL) & IDLEST_MASK) != IDLEST_FUNCTIONAL) {
 		if (--timeout == 0) {
 			printk("[MMC] PRCM clock enable timeout\n");
 			return -1;
@@ -144,7 +151,7 @@ static void mmc_config_pins(void)
 	mmio_write32(CONF_MMC0_CMD,  PIN_MODE_0 | PIN_INPUT_EN | PIN_PULLUP_EN);
 }
 
-static int mmc_send_cmd(uint32_t cmd, uint32_t arg)
+static int mmc_send_cmd(uint32_t cmd, uint32_t arg, uint32_t flags)
 {
 	int timeout;
 
@@ -160,7 +167,7 @@ static int mmc_send_cmd(uint32_t cmd, uint32_t arg)
 	}
 
 	mmc_write(MMCHS_ARG, arg);
-	mmc_write(MMCHS_CMD, cmd);
+	mmc_write(MMCHS_CMD, (cmd << 24) | flags);
 
 	/* Wait for command complete or error */
 	timeout = 10000000;
@@ -168,14 +175,12 @@ static int mmc_send_cmd(uint32_t cmd, uint32_t arg)
 		uint32_t stat = mmc_read(MMCHS_STAT);
 		if (stat & STAT_ERRI) {
 			mmc_reset_cmd_line();
-			printk("[MMC] Command error, STAT=0x%x\n", (unsigned int)stat);
 			return -1;
 		}
 		if (stat & STAT_CC)
 			break;
 		if (--timeout == 0) {
 			mmc_reset_cmd_line();
-			printk("[MMC] CMD timeout\n");
 			return -1;
 		}
 	}
@@ -189,8 +194,7 @@ static int omap_hsmmc_read_block(struct block_device *bdev, uint32_t block, void
 
 	mmc_write(MMCHS_BLK, 512 | (1 << 16));
 
-	uint32_t cmd17 = (17 << 24) | (1 << 21) | (2 << 16);
-	if (mmc_send_cmd(cmd17, block) != 0) {
+	if (mmc_send_cmd(17, block, RSP_R1 | (1 << 21) | (1 << 4)) != 0) {
 		printk("[MMC] Read block %u failed\n", (unsigned int)block);
 		return -1;
 	}
@@ -248,17 +252,14 @@ static int omap_hsmmc_probe(struct platform_device *pdev)
 {
 	int timeout;
 
-	mmc_base = phys_to_mmio(pdev->base);
+	mmc_base = phys_to_mmio(pdev->base) + 0x100;
 	printk("[MMC] Probing OMAP HSMMC at 0x%x\n", (unsigned int)mmc_base);
 
-	/* Enable PRCM clock for MMC0 */
 	if (mmc_enable_clocks() != 0)
 		return -1;
 
-	/* Configure MMC0 pins */
 	mmc_config_pins();
 
-	/* Soft reset */
 	mmc_write(MMCHS_SYSCONFIG, 0x2);
 	timeout = 1000000;
 	while (!(mmc_read(MMCHS_SYSSTATUS) & 0x1)) {
@@ -268,10 +269,18 @@ static int omap_hsmmc_probe(struct platform_device *pdev)
 		}
 	}
 
-	/* Set CAPA voltage support bit (VS30 = 3.0V) */
-	mmc_write(MMCHS_CAPA, mmc_read(MMCHS_CAPA) | CAPA_VS30);
+	mmc_write(MMCHS_SYSCONFIG, 0x00000308);
+	mmc_write(MMCHS_CON, 0x00000000);
+	mmc_write(MMCHS_SYSCTL, mmc_read(MMCHS_SYSCTL) | SYSCTL_SRC | SYSCTL_SRD);
+	timeout = 10000000;
+	while (mmc_read(MMCHS_SYSCTL) & (SYSCTL_SRC | SYSCTL_SRD)) {
+		if (--timeout == 0) {
+			printk("[MMC] CMD/DAT reset timeout\n");
+			return -1;
+		}
+	}
 
-	/* Set voltage 3.0V + power on */
+	mmc_write(MMCHS_CAPA, mmc_read(MMCHS_CAPA) | CAPA_VS30);
 	mmc_write(MMCHS_HCTL, HCTL_SDVS_3_3V);
 	mmc_write(MMCHS_HCTL, mmc_read(MMCHS_HCTL) | HCTL_SDBP);
 	timeout = 100000;
@@ -282,8 +291,8 @@ static int omap_hsmmc_probe(struct platform_device *pdev)
 		}
 	}
 
-	/* Enable internal clock, wait for stable */
-	mmc_write(MMCHS_SYSCTL, SYSCTL_ICE);
+	mmc_write(MMCHS_SYSCTL, 0x000E3C01);
+	mmc_delay(1000);
 	timeout = 1000000;
 	while (!(mmc_read(MMCHS_SYSCTL) & SYSCTL_ICS)) {
 		if (--timeout == 0) {
@@ -291,13 +300,15 @@ static int omap_hsmmc_probe(struct platform_device *pdev)
 			return -1;
 		}
 	}
-
-	/* Enable clock to card */
 	mmc_write(MMCHS_SYSCTL, mmc_read(MMCHS_SYSCTL) | SYSCTL_CEN);
 
-	/* Send INIT stream (80 clocks) */
-	mmc_write(MMCHS_CON, CON_INIT);
+	mmc_write(MMCHS_IE,  0xFFFFFFFF);
+	mmc_write(MMCHS_ISE, 0xFFFFFFFF);
+	mmc_write(MMCHS_STAT, 0xFFFFFFFF);
+
+	mmc_write(MMCHS_CON, mmc_read(MMCHS_CON) | CON_INIT);
 	mmc_write(MMCHS_CMD, 0);
+	mmc_delay(10000);
 	timeout = 1000000;
 	while (!(mmc_read(MMCHS_STAT) & STAT_CC)) {
 		if (--timeout == 0) {
@@ -305,43 +316,40 @@ static int omap_hsmmc_probe(struct platform_device *pdev)
 			return -1;
 		}
 	}
-	mmc_write(MMCHS_STAT, STAT_CC);
 	mmc_write(MMCHS_CON, mmc_read(MMCHS_CON) & ~CON_INIT);
+	mmc_write(MMCHS_STAT, 0xFFFFFFFF);
 
-	/* Card initialization sequence */
-	if (mmc_send_cmd((0 << 24), 0) != 0)
-		return -1; /* CMD0 */
-	if (mmc_send_cmd((8 << 24) | (2 << 16), 0x1AA) != 0) {   /* CMD8 */
-		printk("[MMC] Card does not support CMD8 (not SDv2?)\n");
-		return -1;
-	}
+	mmc_send_cmd(0, 0, RSP_NONE);
+	mmc_delay(5000);
 
-	/* ACMD41 loop */
-	timeout = 2000000;
+	mmc_send_cmd(8, 0x1AA, RSP_R7);
+
+	timeout = 2000;
 	while (1) {
-		if (mmc_send_cmd((55 << 24) | (2 << 16), 0) != 0)   /* CMD55 */
-			continue;
-		if (mmc_send_cmd((41 << 24) | (2 << 16), 0x40300000) != 0) /* ACMD41 */
-			continue;
-		if (mmc_read(MMCHS_RSP10) & (1 << 31))
-			break; /* Card ready */
+		mmc_send_cmd(55, 0, RSP_R1);
+		if (mmc_send_cmd(41, 0x40300000, RSP_R3) == 0) {
+			uint32_t ocr = mmc_read(MMCHS_RSP10);
+			if (ocr & (1 << 31))
+				break;
+		}
+		mmc_delay(10000);
 		if (--timeout == 0) {
-			printk("[MMC] ACMD41 timeout (no card?)\n");
+			printk("[MMC] ACMD41 timeout\n");
 			return -1;
 		}
 	}
 
-	if (mmc_send_cmd((2 << 24) | (1 << 16), 0) != 0)
-		return -1; /* CMD2 */
-	if (mmc_send_cmd((3 << 24) | (2 << 16), 0) != 0)
-		return -1; /* CMD3 */
+	if (mmc_send_cmd(2, 0, RSP_R2) != 0)
+		return -1;
+	if (mmc_send_cmd(3, 0, RSP_R6) != 0)
+		return -1;
 	card_rca = mmc_read(MMCHS_RSP10) >> 16;
 	printk("[MMC] Card detected, RCA=0x%04x\n", (unsigned int)card_rca);
 
-	if (mmc_send_cmd((7 << 24) | (2 << 16), card_rca << 16) != 0)
-		return -1; /* CMD7 */
-	if (mmc_send_cmd((16 << 24) | (2 << 16), 512) != 0)
-		return -1; /* CMD16 */
+	if (mmc_send_cmd(7, card_rca << 16, RSP_R1B) != 0)
+		return -1;
+	if (mmc_send_cmd(16, 512, RSP_R1) != 0)
+		return -1;
 
 	register_block_device(&omap_hsmmc_bdev);
 	printk("[MMC] Registered block device 'sd0'\n");

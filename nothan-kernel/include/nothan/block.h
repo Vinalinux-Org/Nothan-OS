@@ -21,6 +21,4 @@ struct block_device {
 void register_block_device(struct block_device *bdev);
 struct block_device *get_block_device(const char *name);
 
-void mock_bdev_init(void);
-
 #endif /* _NOTHAN_BLOCK_H */

@@ -76,7 +76,7 @@ static void cmd_help(void)
 	puts("  info\t\tShow system info\n");
 	puts("  ls\t\tList files\n");
 	puts("  clear\t\tClear screen\n");
-	puts("  ./<file>\tSpawn a .bin file\n");
+	puts("  run <name>\tRun a user program\n");
 	putchar('\n');
 }
 
@@ -181,36 +181,55 @@ static void execute(char *line)
 	else if (compare(cmd, "info") == 0)	cmd_info();
 	else if (compare(cmd, "ls") == 0)	cmd_ls();
 	else if (compare(cmd, "clear") == 0) { putnchar('\n', 200); puts("\033[H"); }
-	else if (cmd[0] == '.' && cmd[1] == '/') {
-		long pid = spawn(cmd + 2);
-		if (pid < 0) {
-			puts("spawn failed: ");
-			puts(cmd);
-			putchar('\n');
+	else if (compare(cmd, "run") == 0) {
+		if (argc < 2) {
+			puts("usage: run <name>\n");
 		} else {
-			puts("pid=");
-			putint(pid, 0);
-			putchar('\n');
-			
-			/* Chờ tiến trình con chạy xong mới in prompt tiếp theo */
+			long pid = spawn(argv[1]);
+			if (pid < 0) {
+				puts("not found: ");
+				puts(argv[1]);
+				putchar('\n');
+			} else {
+				while (1) {
+					struct task_info tasks[16];
+					long count = gettasklist(tasks, 16);
+					int found = 0;
+					for (long i = 0; i < count; i++) {
+						if (tasks[i].pid == pid) { found = 1; break; }
+					}
+					if (!found) break;
+					yield();
+				}
+			}
+		}
+	} else {
+		/* System binary lookup: /bin/<cmd> */
+		char path[32];
+		int i = 0;
+		const char *prefix = "/bin/";
+		while (*prefix) path[i++] = *prefix++;
+		const char *p = cmd;
+		while (*p && i < 30) path[i++] = *p++;
+		path[i] = '\0';
+
+		long pid = spawn(path);
+		if (pid < 0) {
+			puts("Unknown: '");
+			puts(cmd);
+			puts("'. Type 'help' for available commands.\n");
+		} else {
 			while (1) {
 				struct task_info tasks[16];
 				long count = gettasklist(tasks, 16);
 				int found = 0;
 				for (long i = 0; i < count; i++) {
-					if (tasks[i].pid == pid) {
-						found = 1;
-						break;
-					}
+					if (tasks[i].pid == pid) { found = 1; break; }
 				}
 				if (!found) break;
 				yield();
 			}
 		}
-	} else {
-		puts("Unknown: '");
-		puts(cmd);
-		puts("'. Type 'help' for available commands.\n");
 	}
 }
 
