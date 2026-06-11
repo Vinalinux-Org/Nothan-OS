@@ -50,6 +50,8 @@ OBJS += $(BUILD_DIR)/kernel/fs/fat/file.o
 OBJS += $(BUILD_DIR)/drivers/base/bus.o
 OBJS += $(BUILD_DIR)/drivers/base/platform.o
 OBJS += $(BUILD_DIR)/drivers/base/init.o
+OBJS += $(BUILD_DIR)/drivers/base/cdev.o
+OBJS += $(BUILD_DIR)/kernel/fs/devfs/devfs.o
 OBJS += $(BUILD_DIR)/drivers/mmc/omap-hsmmc.o
 OBJS += $(BUILD_DIR)/arch/arm/mach-omap2/board-bbb.o
 
