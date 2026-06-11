@@ -31,6 +31,8 @@ void kernel_main(void)
 	if (vfs_mount("sd0", "fat32") != 0)
 		printk("[VFS] SD card mount failed\n");
 
+	vfs_mount(NULL, "devfs");
+
 	mmu_log_config();
 
 	sched_init();
