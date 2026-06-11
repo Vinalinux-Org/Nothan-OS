@@ -47,15 +47,15 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 	 */
 	sp = (unsigned long *)((char *)sp + PAGE_SIZE);
 
-	*--sp = (unsigned long)task_entry;	/* lr → PC */
-	*--sp = 0;				/* r11 */
-	*--sp = 0;				/* r10 */
-	*--sp = 0;				/* r9 */
-	*--sp = 0;				/* r8 */
-	*--sp = 0;				/* r7 */
-	*--sp = 0;				/* r6 */
-	*--sp = (unsigned long)task_exit;	/* r5 */
-	*--sp = (unsigned long)fn;		/* r4 */
+	*--sp = (unsigned long)task_entry;	/* lr → pc on context restore */
+	*--sp = 0;
+	*--sp = 0;
+	*--sp = 0;
+	*--sp = 0;
+	*--sp = 0;
+	*--sp = 0;
+	*--sp = (unsigned long)task_exit;	/* r5: return address for fn */
+	*--sp = (unsigned long)fn;		/* r4: first argument to task_entry */
 
 	p->stack      = sp;
 	p->user_sp    = 0;
@@ -69,6 +69,8 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 	p->rt.on_rq   = 0;
 	p->exit_code  = 0;
 	p->mm         = NULL;
+	p->cwd[0]     = '/';
+	p->cwd[1]     = '\0';
 
 	/* Parent = current task, or self if called before the scheduler starts. */
 	if (runqueue.curr) {
@@ -192,15 +194,15 @@ struct task_struct *user_task_create_bin(const char *name,
 	 *   pc = user_task_trampoline
 	 */
 	unsigned long *sp = (unsigned long *)((char *)ksp + PAGE_SIZE);
-	*--sp = (unsigned long)user_task_trampoline;	/* pc */
-	*--sp = 0;					/* r11 */
-	*--sp = 0;					/* r10 */
-	*--sp = 0;					/* r9 */
-	*--sp = 0;					/* r8 */
-	*--sp = 0;					/* r7 */
-	*--sp = 0;					/* r6 */
-	*--sp = mm->entry_va;				/* r5 = user entry VA */
-	*--sp = mm->sp_top;				/* r4 = user stack top */
+	*--sp = (unsigned long)user_task_trampoline;
+	*--sp = 0;
+	*--sp = 0;
+	*--sp = 0;
+	*--sp = 0;
+	*--sp = 0;
+	*--sp = 0;
+	*--sp = mm->entry_va;	/* r5: user entry VA, becomes pc in user mode */
+	*--sp = mm->sp_top;	/* r4: user stack top, becomes sp_usr */
 
 	p->stack      = sp;
 	p->user_sp    = mm->sp_top;
@@ -214,10 +216,19 @@ struct task_struct *user_task_create_bin(const char *name,
 	p->rt.on_rq   = 0;
 	p->mm         = mm;
 	p->exit_code  = 0;
+	p->cwd[0]     = '/';
+	p->cwd[1]     = '\0';
 
 	if (runqueue.curr) {
 		p->real_parent = runqueue.curr;
 		p->parent      = runqueue.curr;
+		/* Inherit cwd from parent */
+		unsigned int ci = 0;
+		while (ci < 63 && runqueue.curr->cwd[ci]) {
+			p->cwd[ci] = runqueue.curr->cwd[ci];
+			ci++;
+		}
+		p->cwd[ci] = '\0';
 	} else {
 		p->real_parent = p;
 		p->parent      = p;

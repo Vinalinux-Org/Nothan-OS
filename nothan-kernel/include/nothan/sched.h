@@ -77,6 +77,8 @@ struct task_struct {
 	struct task_struct		*real_parent;
 	struct task_struct		*parent;
 	int				exit_code;
+
+	char				cwd[64];  /* current working directory */
 };
 
 /**
