@@ -76,7 +76,6 @@ int bus_add_driver(struct bus_type *bus, struct driver *drv)
 				drv->probe(bus->devices[i]);
 			printk("[BUS] driver '%s' bound to '%s'\n",
 			       drv->name, bus->devices[i]->name);
-			break;
 		}
 	}
 

@@ -17,6 +17,12 @@
 #define UART0_BASE		(L4_WKUP_BASE + 0x9000)		/* 0x44E09000 */
 #define MMC0_BASE		(L4_PER_BASE + 0x60000)		/* 0x48060000 */
 
+/* GPIO banks — AM335x TRM §2.1 Memory Map */
+#define GPIO0_BASE		(L4_WKUP_BASE + 0x7000)		/* 0x44E07000 */
+#define GPIO1_BASE		(L4_PER_BASE  + 0x4C000)	/* 0x4804C000 */
+#define GPIO2_BASE		0x481AC000
+#define GPIO3_BASE		0x481AE000
+
 static struct platform_device bbb_devices[] = {
 	{
 		.name = "omap_intc",
@@ -38,6 +44,10 @@ static struct platform_device bbb_devices[] = {
 		.base = MMC0_BASE,
 		.irq  = 64,		/* MMC0 IRQ */
 	},
+	{ .name = "omap_gpio", .base = GPIO0_BASE, .irq = 0 },
+	{ .name = "omap_gpio", .base = GPIO1_BASE, .irq = 0 },
+	{ .name = "omap_gpio", .base = GPIO2_BASE, .irq = 0 },
+	{ .name = "omap_gpio", .base = GPIO3_BASE, .irq = 0 },
 };
 
 static int __init bbb_board_init(void)
