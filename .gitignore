@@ -2,6 +2,7 @@
 /build/
 /bootloader/build/
 /nothan-kernel/build/
+/nothan-kernel/kernel.lds
 /userspace/build/
 /compiler/toolchain/build/
 /compiler/toolchain/dist/
@@ -42,7 +43,7 @@ MLO
 *.code-workspace
 .kiro/
 .kilo
-.claude
+.claude/
 
 # OS generated
 .DS_Store
@@ -81,6 +82,8 @@ tags
 TAGS
 .gdb_history
 
-# Roo Code AI agent config (personal)
+# AI agent configs (personal)
 .roo*
+.agents/
+.codex/
 nothan_os_old/
