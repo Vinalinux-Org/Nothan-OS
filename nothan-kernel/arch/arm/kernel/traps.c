@@ -7,6 +7,28 @@
 #include <nothan/types.h>
 #include <nothan/irq.h>
 #include <nothan/printk.h>
+#include <nothan/sched.h>
+
+#define SPSR_MODE_MASK	0x1F
+#define MODE_USER	0x10	/* ARM user mode */
+
+/*
+ * If the exception originated in user mode, kill the faulting task and
+ * reschedule. Only halt if the fault came from kernel mode — kernel
+ * exceptions are unrecoverable.
+ */
+static void handle_user_or_panic(unsigned int spsr, const char *tag)
+{
+	if ((spsr & SPSR_MODE_MASK) == MODE_USER) {
+		printk("  [%s] killing user task \"%s\" pid=%d\n",
+		       tag, runqueue.curr->comm, runqueue.curr->pid);
+		do_exit(-1);
+		/* NOTREACHED */
+	}
+	printk("  [%s] kernel-mode fault — halting\n", tag);
+	while (1)
+		;
+}
 
 /**
  * und_handler - handle undefined instruction exception
@@ -14,10 +36,9 @@
  */
 void und_handler(unsigned int spsr)
 {
-	(void)spsr;
 	printk("\nException: Undefined Instruction!\n");
-	while (1)
-		;
+	printk("  SPSR=0x%08x\n", spsr);
+	handle_user_or_panic(spsr, "UND");
 }
 
 /**
@@ -53,9 +74,7 @@ void pabt_handler(unsigned int spsr)
 	default: reason = "Unknown"; break;
 	}
 	printk("  Reason: %s\n", reason);
-
-	while (1)
-		;
+	handle_user_or_panic(spsr, "PABT");
 }
 
 /**
@@ -89,9 +108,7 @@ void dabt_handler(unsigned int spsr)
 	default: reason = "Unknown"; break;
 	}
 	printk("  Reason: %s\n", reason);
-
-	while (1)
-		;
+	handle_user_or_panic(spsr, "DABT");
 }
 
 /**
