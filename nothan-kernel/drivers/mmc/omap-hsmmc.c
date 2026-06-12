@@ -5,6 +5,7 @@
  */
 
 #include <nothan/platform.h>
+#include <nothan/pinctrl.h>
 #include <nothan/printk.h>
 #include <nothan/mmio.h>
 #include <nothan/genhd.h>
@@ -74,15 +75,6 @@
 #define IDLEST_MASK            (3 << 16)
 #define IDLEST_FUNCTIONAL      0
 
-#define CONF_MMC0_DAT3   (0xF0E10000 + 0x8F0)
-#define CONF_MMC0_DAT2   (0xF0E10000 + 0x8F4)
-#define CONF_MMC0_DAT1   (0xF0E10000 + 0x8F8)
-#define CONF_MMC0_DAT0   (0xF0E10000 + 0x8FC)
-#define CONF_MMC0_CLK    (0xF0E10000 + 0x900)
-#define CONF_MMC0_CMD    (0xF0E10000 + 0x904)
-#define PIN_MODE_0        0
-#define PIN_INPUT_EN     (1 << 5)
-#define PIN_PULLUP_EN    (1 << 3)
 
 static uint32_t mmc_base;
 static uint32_t card_rca;
@@ -138,18 +130,6 @@ static int mmc_enable_clocks(void)
 	return 0;
 }
 
-/*
- * mmc_config_pins - Configure pinmux for MMC0
- */
-static void mmc_config_pins(void)
-{
-	mmio_write32(CONF_MMC0_DAT3, PIN_MODE_0 | PIN_INPUT_EN | PIN_PULLUP_EN);
-	mmio_write32(CONF_MMC0_DAT2, PIN_MODE_0 | PIN_INPUT_EN | PIN_PULLUP_EN);
-	mmio_write32(CONF_MMC0_DAT1, PIN_MODE_0 | PIN_INPUT_EN | PIN_PULLUP_EN);
-	mmio_write32(CONF_MMC0_DAT0, PIN_MODE_0 | PIN_INPUT_EN | PIN_PULLUP_EN);
-	mmio_write32(CONF_MMC0_CLK,  PIN_MODE_0 | PIN_INPUT_EN | PIN_PULLUP_EN);
-	mmio_write32(CONF_MMC0_CMD,  PIN_MODE_0 | PIN_INPUT_EN | PIN_PULLUP_EN);
-}
 
 static int mmc_send_cmd(uint32_t cmd, uint32_t arg, uint32_t flags)
 {
@@ -261,7 +241,7 @@ static int omap_hsmmc_probe(struct platform_device *pdev)
 	if (mmc_enable_clocks() != 0)
 		return -1;
 
-	mmc_config_pins();
+	pinctrl_select("mmc0");
 
 	mmc_write(MMCHS_SYSCONFIG, 0x2);
 	timeout = 1000000;
