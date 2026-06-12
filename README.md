@@ -1,6 +1,6 @@
 # NothanOS
 
-**NothanOS là hệ điều hành viết từ đầu, hiện đang chạy trên AM335x (ARMv7-A).**
+**NothanOS là hệ điều hành mã nguồn mở viết từ đầu, hiện đang chạy trên AM335x (ARMv7-A).**
 
 Phát triển bởi **Vinalinux**. Toàn bộ stack — bootloader, kernel, libc, userspace, compiler — đều do nhóm tự viết. Không fork Linux, không port BSD, không nhúng upstream code. Mỗi dòng trong repo đều được tự tay gõ, hiểu rõ và chịu trách nhiệm.
 
