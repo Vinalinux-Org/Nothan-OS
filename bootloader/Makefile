@@ -82,7 +82,7 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
 # Link
 $(ELF): $(OBJS)
 	@echo "LD  $@"
-	@$(LD) $(LDFLAGS) $(OBJS) -o $@
+	@$(LD) $(LDFLAGS) $(OBJS) -lgcc -L $(shell $(CC) -print-libgcc-file-name | xargs dirname) -o $@
 	@$(OBJDUMP) -D $@ > $(BUILD_DIR)/$(TARGET).dis
 	@echo ""
 	@$(SIZE) $@
