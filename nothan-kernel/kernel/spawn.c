@@ -95,6 +95,8 @@ extern void mmu_map_user(struct mm_struct *mm);
 /* Embedded user-space binaries (linked in by userspace_blobs.S). */
 extern char _binary_user_shell_start[];
 extern char _binary_user_shell_end[];
+extern char _binary_user_gui_start[];
+extern char _binary_user_gui_end[];
 
 /**
  * user_task_create_bin() - Create a user-mode task from a binary blob
@@ -255,6 +257,17 @@ struct task_struct *user_task_create(const char *name)
 {
 	return user_task_create_bin(name, _binary_user_shell_start,
 				    _binary_user_shell_end);
+}
+
+/**
+ * user_task_create_gui() - Create the GUI task from the embedded binary
+ *
+ * Return: Pointer to the task_struct, or NULL on failure.
+ */
+struct task_struct *user_task_create_gui(void)
+{
+	return user_task_create_bin("gui", _binary_user_gui_start,
+				    _binary_user_gui_end);
 }
 
 /**

@@ -1,9 +1,9 @@
 /*
  * drivers/input/input.c - Input character device (/dev/input0)
  *
- * Exposes keyboard/touch input to userspace via read().
- * Currently bridges UART RX for keyboard input.
- * A real touchscreen or keyboard driver registers via input_register_ops().
+ * Exposes touch/keyboard input to userspace via read().
+ * Returns no data until a real input driver registers via input_register_ops().
+ * This avoids competing with the UART console (/dev/ttyS0) for RX bytes.
  *
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
@@ -14,7 +14,6 @@
 #include <nothan/input.h>
 #include <nothan/printk.h>
 #include <nothan/init.h>
-#include <nothan/uart.h>
 
 static struct input_ops *registered_ops;
 
@@ -29,13 +28,11 @@ static int input0_read(struct file *file, char *buf, size_t count)
 	(void)file;
 	size_t i = 0;
 
-	while (i < count) {
-		int c;
-		if (registered_ops && registered_ops->read_key)
-			c = registered_ops->read_key();
-		else
-			c = uart_getchar();
+	if (!registered_ops || !registered_ops->read_key)
+		return -1;
 
+	while (i < count) {
+		int c = registered_ops->read_key();
 		if (c < 0)
 			break;
 		buf[i++] = (char)c;

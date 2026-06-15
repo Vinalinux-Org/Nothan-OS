@@ -15,6 +15,7 @@
 
 extern void mmu_log_config(void);
 extern struct task_struct *user_task_create(const char *name);
+extern struct task_struct *user_task_create_gui(void);
 extern struct task_struct *kernel_spawn(const char *path);
 
 void kernel_main(void)
@@ -47,6 +48,12 @@ void kernel_main(void)
 		ut = user_task_create("shell");
 		if (ut)
 			enqueue_task(&runqueue, ut);
+	}
+
+	struct task_struct *gui = user_task_create_gui();
+	if (gui) {
+		printk("[KERN] Spawning embedded GUI\n");
+		enqueue_task(&runqueue, gui);
 	}
 
 	printk("[KERN] NothanOS started\n");

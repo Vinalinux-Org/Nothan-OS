@@ -15,3 +15,9 @@ _binary_user_shell_end:
 _binary_user_example_start:
 	.incbin	"build/example.usr"
 _binary_user_example_end:
+
+	.globl	_binary_user_gui_start
+	.globl	_binary_user_gui_end
+_binary_user_gui_start:
+	.incbin	"build/gui.usr"
+_binary_user_gui_end:

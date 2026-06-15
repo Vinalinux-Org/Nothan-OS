@@ -6,6 +6,12 @@
 #define DISP_HOR_RES    360
 #define DISP_VER_RES    640
 
+/* Physical framebuffer: 1280×720 — LVGL 360×640 centred */
+#define PHYS_W          1280
+#define PHYS_H          720
+#define LB_X            ((PHYS_W - DISP_HOR_RES) / 2)  /* 460 */
+#define LB_Y            ((PHYS_H - DISP_VER_RES) / 2)  /* 40  */
+
 /* Draw buffers: 10 lines each (partial render mode) */
 static lv_color_t draw_buf_1[DISP_HOR_RES * 10];
 static lv_color_t draw_buf_2[DISP_HOR_RES * 10];
@@ -16,15 +22,19 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
 	if (fb_fd >= 0) {
 		struct fb_flush f = {
-			.x1   = area->x1,
-			.y1   = area->y1,
-			.x2   = area->x2,
-			.y2   = area->y2,
+			.x1   = area->x1 + LB_X,
+			.y1   = area->y1 + LB_Y,
+			.x2   = area->x2 + LB_X,
+			.y2   = area->y2 + LB_Y,
 			.data = (unsigned long)px_map,
 			.len  = (unsigned int)((area->x2 - area->x1 + 1) *
 					       (area->y2 - area->y1 + 1) * 2),
 		};
 		ioctl(fb_fd, FB_FLUSH, (unsigned long)&f);
+
+		/* Last partial update for this frame — flip to display it */
+		if (lv_display_flush_is_last(disp))
+			ioctl(fb_fd, FB_FLIP, 0);
 	}
 	lv_display_flush_ready(disp);
 }
