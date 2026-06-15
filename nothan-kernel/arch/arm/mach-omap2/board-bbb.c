@@ -6,6 +6,7 @@
 
 #include <nothan/platform.h>
 #include <nothan/pinctrl.h>
+#include <nothan/i2c.h>
 #include <nothan/init.h>
 
 /* L4_PER peripherals */
@@ -47,11 +48,34 @@ static const struct pin_desc i2c0_pins[] = {
 	{ CM_REG(0x98C), PIN_INPUT_PULLUP | PIN_MUXMODE(0) },	/* i2c0_scl */
 };
 
-static const struct pin_desc spi0_pins[] = {
-	{ CM_REG(0x950), PIN_INPUT_PULLUP | PIN_MUXMODE(0) },	/* spi0_sclk */
-	{ CM_REG(0x954), PIN_INPUT_PULLUP | PIN_MUXMODE(0) },	/* spi0_d0   */
-	{ CM_REG(0x958), PIN_INPUT_PULLUP | PIN_MUXMODE(0) },	/* spi0_d1   */
-	{ CM_REG(0x95C), PIN_INPUT_PULLUP | PIN_MUXMODE(0) },	/* spi0_cs0  */
+/* SPI0_SCLK/SPI0_D0 repurposed as I2C2 (mode 2) for HDMI framer SiI9022A */
+static const struct pin_desc i2c2_pins[] = {
+	{ CM_REG(0x950), PIN_INPUT_PULLUP | PIN_MUXMODE(2) },	/* i2c2_sda */
+	{ CM_REG(0x954), PIN_INPUT_PULLUP | PIN_MUXMODE(2) },	/* i2c2_scl */
+};
+
+/* LCDC pins — LCD_DATA0-15, VSYNC, HSYNC, PCLK, AC_BIAS_EN (all mode 0) */
+static const struct pin_desc lcdc_pins[] = {
+	{ CM_REG(0x8A0), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data0  */
+	{ CM_REG(0x8A4), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data1  */
+	{ CM_REG(0x8A8), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data2  */
+	{ CM_REG(0x8AC), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data3  */
+	{ CM_REG(0x8B0), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data4  */
+	{ CM_REG(0x8B4), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data5  */
+	{ CM_REG(0x8B8), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data6  */
+	{ CM_REG(0x8BC), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data7  */
+	{ CM_REG(0x8C0), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data8  */
+	{ CM_REG(0x8C4), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data9  */
+	{ CM_REG(0x8C8), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data10 */
+	{ CM_REG(0x8CC), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data11 */
+	{ CM_REG(0x8D0), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data12 */
+	{ CM_REG(0x8D4), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data13 */
+	{ CM_REG(0x8D8), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data14 */
+	{ CM_REG(0x8DC), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data15 */
+	{ CM_REG(0x8E0), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_vsync  */
+	{ CM_REG(0x8E4), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_hsync  */
+	{ CM_REG(0x8E8), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_pclk   */
+	{ CM_REG(0x8EC), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_ac_bias_en */
 };
 
 #define ARRAY_SIZE(a)	(sizeof(a) / sizeof((a)[0]))
@@ -60,7 +84,8 @@ static const struct pin_group bbb_pin_groups[] = {
 	{ "uart0", uart0_pins, ARRAY_SIZE(uart0_pins) },
 	{ "mmc0",  mmc0_pins,  ARRAY_SIZE(mmc0_pins)  },
 	{ "i2c0",  i2c0_pins,  ARRAY_SIZE(i2c0_pins)  },
-	{ "spi0",  spi0_pins,  ARRAY_SIZE(spi0_pins)  },
+	{ "i2c2",  i2c2_pins,  ARRAY_SIZE(i2c2_pins)  },
+	{ "lcdc",  lcdc_pins,  ARRAY_SIZE(lcdc_pins)  },
 };
 
 static struct platform_device bbb_devices[] = {
@@ -74,9 +99,15 @@ static struct platform_device bbb_devices[] = {
 	{ .name = "omap_gpio",  .base = GPIO3_BASE,   .irq = 0  },
 };
 
+static const struct i2c_board_info i2c2_devices[] = {
+	{ "sii9022a", 0x39 },   /* HDMI framer */
+};
+
 static int __init bbb_board_init(void)
 {
 	pinctrl_register(bbb_pin_groups, ARRAY_SIZE(bbb_pin_groups));
+
+	i2c_register_board_info(2, i2c2_devices, ARRAY_SIZE(i2c2_devices));
 
 	for (unsigned int i = 0; i < ARRAY_SIZE(bbb_devices); i++)
 		platform_device_register(&bbb_devices[i]);

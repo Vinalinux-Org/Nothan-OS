@@ -46,6 +46,10 @@ static int fb0_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 					      (const void *)f->data, f->len);
 		return 0;
 	}
+	case FB_FLIP:
+		if (registered_ops && registered_ops->flip)
+			registered_ops->flip();
+		return 0;
 	default:
 		return -1;
 	}

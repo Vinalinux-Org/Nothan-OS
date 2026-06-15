@@ -58,7 +58,11 @@ OBJS += $(BUILD_DIR)/kernel/fs/devfs/devfs.o
 OBJS += $(BUILD_DIR)/drivers/mmc/omap-hsmmc.o
 OBJS += $(BUILD_DIR)/arch/arm/mach-omap2/board-bbb.o
 OBJS += $(BUILD_DIR)/drivers/video/fb.o
+OBJS += $(BUILD_DIR)/drivers/video/lcdc.o
+OBJS += $(BUILD_DIR)/drivers/video/sii9022a.o
 OBJS += $(BUILD_DIR)/drivers/input/input.o
+OBJS += $(BUILD_DIR)/drivers/i2c/i2c-core.o
+OBJS += $(BUILD_DIR)/drivers/i2c/i2c-omap.o
 
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 KERNEL_BIN := $(BUILD_DIR)/kernel.bin
@@ -68,8 +72,9 @@ KERNEL_BIN := $(BUILD_DIR)/kernel.bin
 all: $(KERNEL_BIN)
 
 # User-space binary blobs (embedded into kernel image)
-USER_SHELL_BIN := $(BUILD_DIR)/shell.usr
+USER_SHELL_BIN   := $(BUILD_DIR)/shell.usr
 USER_EXAMPLE_BIN := $(BUILD_DIR)/example.usr
+USER_GUI_BIN     := $(BUILD_DIR)/gui.usr
 
 .PHONY: userspace
 userspace:
@@ -81,7 +86,11 @@ $(USER_SHELL_BIN): userspace | $(BUILD_DIR)
 $(USER_EXAMPLE_BIN): userspace | $(BUILD_DIR)
 	cp ../userspace/build/example.bin $@
 
-$(BUILD_DIR)/kernel/userspace_blobs.o: kernel/userspace_blobs.S $(USER_SHELL_BIN) $(USER_EXAMPLE_BIN) | $(BUILD_DIR)
+$(USER_GUI_BIN): userspace | $(BUILD_DIR)
+	cp ../userspace/build/gui.bin $@
+
+$(BUILD_DIR)/kernel/userspace_blobs.o: kernel/userspace_blobs.S \
+	$(USER_SHELL_BIN) $(USER_EXAMPLE_BIN) $(USER_GUI_BIN) | $(BUILD_DIR)
 	@mkdir -p $(dir $@)
 	$(CC) $(KBUILD_AFLAGS) -c -o $@ $<
 
