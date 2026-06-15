@@ -57,6 +57,8 @@ OBJS += $(BUILD_DIR)/drivers/pinctrl/pinctrl-am335x.o
 OBJS += $(BUILD_DIR)/kernel/fs/devfs/devfs.o
 OBJS += $(BUILD_DIR)/drivers/mmc/omap-hsmmc.o
 OBJS += $(BUILD_DIR)/arch/arm/mach-omap2/board-bbb.o
+OBJS += $(BUILD_DIR)/drivers/video/fb.o
+OBJS += $(BUILD_DIR)/drivers/input/input.o
 
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 KERNEL_BIN := $(BUILD_DIR)/kernel.bin

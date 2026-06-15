@@ -13,6 +13,7 @@
 #include <nothan/uart.h>
 #include <nothan/mm.h>
 #include <nothan/mmio.h>
+#include <nothan/time.h>
 
 extern struct task_struct *user_task_create_bin(const char *name,
 	char *blob_start, char *blob_end);
@@ -506,6 +507,17 @@ static long sys_getcwd(unsigned long a0, unsigned long a1, unsigned long a2)
 	return 0;
 }
 
+/**
+ * sys_getticks - get system tick count in milliseconds
+ *
+ * Return: elapsed milliseconds since boot.
+ */
+static long sys_getticks(unsigned long a0, unsigned long a1, unsigned long a2)
+{
+	(void)a0; (void)a1; (void)a2;
+	return (long)(get_jiffies() * (1000 / HZ));
+}
+
 /*
  * Syscall dispatch table
  * Indexed by syscall number; must match __NR_xxx constants.
@@ -532,6 +544,7 @@ static const syscall_fn_t syscall_table[NR_SYSCALLS] = {
 	[__NR_ioctl]       = sys_ioctl,
 	[__NR_chdir]       = sys_chdir,
 	[__NR_getcwd]      = sys_getcwd,
+	[__NR_getticks]    = sys_getticks,
 };
 
 /**
