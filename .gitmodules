@@ -1,0 +1,5 @@
+[submodule "userspace/lib/lvgl"]
+	path = userspace/lib/lvgl
+	url = https://github.com/lvgl/lvgl.git
+	branch = v9.2.2
+	shallow = true

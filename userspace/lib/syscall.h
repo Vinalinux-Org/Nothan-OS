@@ -20,6 +20,7 @@
 #define __NR_ioctl      16
 #define __NR_chdir      17
 #define __NR_getcwd     18
+#define __NR_getticks   19
 
 #define REBOOT_WARM     0
 #define REBOOT_HALT     1
@@ -171,6 +172,11 @@ static inline long chdir(const char *path)
 static inline long getcwd(char *buf, unsigned long size)
 {
 	return __syscall2(__NR_getcwd, (long)buf, (long)size);
+}
+
+static inline unsigned long getticks(void)
+{
+	return (unsigned long)__syscall0(__NR_getticks);
 }
 
 #endif

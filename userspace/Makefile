@@ -19,9 +19,17 @@ SBIN_PROGRAMS := init
 ALL_BINS      := $(foreach p,$(BIN_PROGRAMS),$(BUILD)/bin/$(p).bin) \
                  $(foreach p,$(SBIN_PROGRAMS),$(BUILD)/sbin/$(p).bin)
 
+# LVGL static library
+LVGL_DIR  := lib/lvgl
+LVGL_SRCS := $(shell find $(LVGL_DIR)/src -name '*.c')
+LVGL_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(LVGL_SRCS))
+LVGL_LIB  := $(BUILD)/liblvgl.a
+LVGL_CFLAGS := $(CFLAGS) -I lib/lvgl -DLV_CONF_INCLUDE_SIMPLE \
+               -Wno-unused-variable -Wno-type-limits -Wno-sign-compare
+
 .PHONY: all clean size
 
-all: $(BUILD)/shell.bin $(BUILD)/example.bin $(ALL_BINS)
+all: $(BUILD)/shell.bin $(BUILD)/example.bin $(ALL_BINS) $(BUILD)/gui.bin
 
 $(BUILD)/lib/crt0.o: lib/crt0.S | $(BUILD)/lib
 	$(CC) $(AFLAGS) -c -o $@ $<
@@ -66,7 +74,33 @@ $(BUILD)/example.elf: $(CRT0) $(BUILD)/example/main.o
 $(BUILD)/example.bin: $(BUILD)/example.elf
 	$(OBJCOPY) -O binary $< $@
 
-DIRS := $(BUILD)/lib $(BUILD)/example \
+# LVGL build rules
+$(BUILD)/$(LVGL_DIR)/%.o: $(LVGL_DIR)/%.c | $(LVGL_LIB_DIRS)
+	mkdir -p $(dir $@)
+	$(CC) $(LVGL_CFLAGS) -c -o $@ $<
+
+$(LVGL_LIB): $(LVGL_OBJS)
+	$(AR) rcs $@ $^
+
+# GUI app
+GUI_SRCS := gui/main.c gui/port/lv_port_disp.c gui/port/lv_port_indev.c
+GUI_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(GUI_SRCS))
+GUI_CFLAGS := $(CFLAGS) -I lib/lvgl -I gui -DLV_CONF_INCLUDE_SIMPLE
+
+$(BUILD)/gui/%.o: gui/%.c | $(BUILD)/gui/port
+	mkdir -p $(dir $@)
+	$(CC) $(GUI_CFLAGS) -c -o $@ $<
+
+$(BUILD)/gui.elf: $(CRT0) $(GUI_OBJS) $(LVGL_LIB)
+	$(CC) -nostdlib -T $(LDS) -o $@ $(CRT0) $(GUI_OBJS) $(LVGL_LIB) -lgcc -lc
+	$(OBJDUMP) -d $@ > $(BUILD)/gui.dis
+
+$(BUILD)/gui.bin: $(BUILD)/gui.elf
+	$(OBJCOPY) -O binary $< $@
+
+LVGL_LIB_DIRS := $(sort $(dir $(LVGL_OBJS)))
+
+DIRS := $(BUILD)/lib $(BUILD)/example $(BUILD)/gui/port \
         $(foreach p,$(BIN_PROGRAMS),$(BUILD)/bin/$(p)) \
         $(foreach p,$(SBIN_PROGRAMS),$(BUILD)/sbin/$(p))
 
@@ -74,7 +108,7 @@ $(DIRS):
 	mkdir -p $@
 
 size: all
-	ls -la $(ALL_BINS)
+	ls -la $(ALL_BINS) $(BUILD)/gui.bin
 
 clean:
 	rm -rf $(BUILD)
