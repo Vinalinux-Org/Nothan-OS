@@ -25,7 +25,7 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 
 	if (fb_fd >= 0) {
 		if (first_flush) {
-			write("GUI: first flush\n");
+			write("[GUI] first flush\n");
 			first_flush = 0;
 		}
 
@@ -43,7 +43,7 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 		/* Last partial update for this frame — flip to display it */
 		if (lv_display_flush_is_last(disp)) {
 			if (first_flip) {
-				write("GUI: first flip\n");
+				write("[GUI] first flip\n");
 				first_flip = 0;
 			}
 			ioctl(fb_fd, FB_FLIP, 0);
