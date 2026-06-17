@@ -19,6 +19,7 @@ void main(void)
 	lv_port_indev_init();
 
 	build_ui();
+	write("GUI: ready\n");
 
 	unsigned long last_tick = getticks();
 

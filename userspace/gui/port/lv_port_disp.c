@@ -20,7 +20,15 @@ static int fb_fd = -1;
 
 static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
+	static int first_flush = 1;
+	static int first_flip  = 1;
+
 	if (fb_fd >= 0) {
+		if (first_flush) {
+			write("GUI: first flush\n");
+			first_flush = 0;
+		}
+
 		struct fb_flush f = {
 			.x1   = area->x1 + LB_X,
 			.y1   = area->y1 + LB_Y,
@@ -33,8 +41,13 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 		ioctl(fb_fd, FB_FLUSH, (unsigned long)&f);
 
 		/* Last partial update for this frame — flip to display it */
-		if (lv_display_flush_is_last(disp))
+		if (lv_display_flush_is_last(disp)) {
+			if (first_flip) {
+				write("GUI: first flip\n");
+				first_flip = 0;
+			}
 			ioctl(fb_fd, FB_FLIP, 0);
+		}
 	}
 	lv_display_flush_ready(disp);
 }
