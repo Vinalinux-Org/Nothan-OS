@@ -30,16 +30,17 @@ typedef unsigned int gfp_t;
  * updated by mmu_map_user() at task creation time.
  */
 struct mm_struct {
-	u32  *l2;               /* L2 page table (1 KB, 256 entries × 4 B) */
-	u32   l1_idx;           /* L1 index used (VA >> 20) */
-	unsigned long code_pa;  /* physical address of user code page  */
-	unsigned long bss_pa;   /* physical address of BSS pages (0 if none) */
-	unsigned long stack_pa; /* physical address of user stack page */
-	unsigned long entry_va; /* user-space entry point VA */
-	unsigned long sp_top;   /* user stack top VA (initial sp) */
-	unsigned int  code_pages; /* number of 4KB code pages */
-	unsigned int  bss_pages;  /* number of 4KB BSS pages */
-	unsigned long l2_pa;      /* physical address of L2 table */
+	u32  *l2;                /* L2 page table (1 KB, 256 entries × 4 B) */
+	u32   l1_idx;            /* L1 index used (VA >> 20) */
+	unsigned long code_pa;   /* physical address of user code pages   */
+	unsigned long bss_pa;    /* physical address of BSS pages (0 if none) */
+	unsigned long stack_pa;  /* physical address of user stack pages */
+	unsigned long entry_va;  /* user-space entry point VA */
+	unsigned long sp_top;    /* user stack top VA (initial sp) */
+	unsigned int  code_pages;  /* number of 4KB code pages  */
+	unsigned int  bss_pages;   /* number of 4KB BSS pages   */
+	unsigned int  stack_pages; /* number of 4KB stack pages */
+	unsigned long l2_pa;       /* physical address of L2 table */
 };
 
 /**

@@ -214,7 +214,13 @@ struct task_struct *user_task_create_bin(const char *name,
 	mm->bss_pa    = bss_pa;
 	mm->bss_pages = bss_pages;
 
-	struct page *stack_pg = alloc_pages(GFP_USER, 0);
+	/*
+	 * User stack: 32 KB (8 pages). 4 KB was not enough for LVGL — deep
+	 * widget/draw call chains overflow into unmapped VA and fault.
+	 */
+#define USER_STACK_ORDER  3
+#define USER_STACK_PAGES  (1u << USER_STACK_ORDER)
+	struct page *stack_pg = alloc_pages(GFP_USER, USER_STACK_ORDER);
 	if (!stack_pg) {
 		printk("[SPAWN] %s: alloc_pages(stack) failed\n", name);
 		if (bss_pg)
@@ -231,7 +237,7 @@ struct task_struct *user_task_create_bin(const char *name,
 	 */
 	u32 *l2 = (u32 *)kmalloc(1024, GFP_KERNEL);
 	if (!l2) {
-		__free_pages(stack_pg, 0);
+		__free_pages(stack_pg, USER_STACK_ORDER);
 		if (bss_pg)
 			__free_pages(bss_pg, bss_order);
 		__free_pages(code_pg, order);
@@ -239,12 +245,13 @@ struct task_struct *user_task_create_bin(const char *name,
 		return NULL;
 	}
 
-	mm->l2       = l2;
-	mm->l1_idx   = 0;		/* L1[0] covers VA 0x00000000–0x000FFFFF */
-	mm->code_pa  = code_pa;
-	mm->stack_pa = stack_pa;
-	mm->entry_va = USER_BIN_ENTRY;	/* _start, after 16-byte binary header */
-	mm->sp_top   = 0x00100000;	/* user stack grows down from here */
+	mm->l2          = l2;
+	mm->l1_idx      = 0;		/* L1[0] covers VA 0x00000000–0x000FFFFF */
+	mm->code_pa     = code_pa;
+	mm->stack_pa    = stack_pa;
+	mm->stack_pages = USER_STACK_PAGES;
+	mm->entry_va    = USER_BIN_ENTRY;	/* _start, after 16-byte binary header */
+	mm->sp_top      = 0x00100000;		/* user stack grows down from here */
 
 	mmu_map_user(mm);
 

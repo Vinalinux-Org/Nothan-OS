@@ -151,11 +151,18 @@ void mmu_map_user(struct mm_struct *mm)
 			  | L2_ATTR_MEM | L2_USER_RW;
 	}
 
-	/* Stack page: RW from user, XN */
-	unsigned int stack_l2_idx = ((mm->sp_top - 1) & 0x000FF000) >> 12;
-	l2[stack_l2_idx] = (mm->stack_pa & 0xFFFFF000)
-			   | PTE_TYPE_SMALL | PTE_SMALL_XN
-			   | L2_ATTR_MEM | L2_USER_RW;
+	/*
+	 * Stack pages: RW + XN, mapped right below sp_top.
+	 * stack_pa is the lowest stack page (highest VA index = sp_top - 1).
+	 */
+	unsigned int stack_top_idx = ((mm->sp_top - 1) & 0x000FF000) >> 12;
+	for (unsigned int i = 0; i < mm->stack_pages; i++) {
+		unsigned long pa = mm->stack_pa + (i << 12);
+		l2[stack_top_idx - (mm->stack_pages - 1) + i] =
+			(pa & 0xFFFFF000)
+			| PTE_TYPE_SMALL | PTE_SMALL_XN
+			| L2_ATTR_MEM | L2_USER_RW;
+	}
 
 	/* Save L2 physical address for context-switch by schedule() */
 	mm->l2_pa = (u32)(unsigned long)l2 - (PAGE_OFFSET - PHYS_OFFSET);

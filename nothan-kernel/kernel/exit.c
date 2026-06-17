@@ -37,17 +37,33 @@ void do_exit(int code)
 		if (tsk->mm->l2)
 			kfree(tsk->mm->l2);
 
-		/* free code page */
+		/* Compute orders matching how spawn allocated. */
+		unsigned int code_order = 0;
+		while ((1u << code_order) < tsk->mm->code_pages)
+			code_order++;
+
 		struct page *cp = pfn_to_page(zone,
 			(tsk->mm->code_pa - zone->base_pa) >> PAGE_SHIFT);
 		if (cp)
-			__free_pages(cp, 0);
+			__free_pages(cp, code_order);
 
-		/* free stack page */
+		if (tsk->mm->bss_pa) {
+			unsigned int bss_order = 0;
+			while ((1u << bss_order) < tsk->mm->bss_pages)
+				bss_order++;
+			struct page *bp = pfn_to_page(zone,
+				(tsk->mm->bss_pa - zone->base_pa) >> PAGE_SHIFT);
+			if (bp)
+				__free_pages(bp, bss_order);
+		}
+
+		unsigned int stack_order = 0;
+		while ((1u << stack_order) < tsk->mm->stack_pages)
+			stack_order++;
 		struct page *sp = pfn_to_page(zone,
 			(tsk->mm->stack_pa - zone->base_pa) >> PAGE_SHIFT);
 		if (sp)
-			__free_pages(sp, 0);
+			__free_pages(sp, stack_order);
 
 		kfree(tsk->mm);
 		tsk->mm = NULL;
