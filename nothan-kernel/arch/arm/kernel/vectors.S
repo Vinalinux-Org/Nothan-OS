@@ -60,6 +60,11 @@ vector_svc:
 	mrs	r0, spsr
 	push	{r0}			@ save SPSR (4 bytes)
 
+	@ Re-enable IRQs — hardware sets I-bit on SVC entry. Without this,
+	@ long syscalls that wait on jiffies (FB_FLIP → wait_eof) hang because
+	@ the timer tick never reaches scheduler_tick().
+	cpsie	i
+
 	@ --- Read syscall number from r7 (stack offset +32) ---
 	ldr	r4, [sp, #32]		@ r4 = r7 = syscall number
 
