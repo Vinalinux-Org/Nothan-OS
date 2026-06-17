@@ -5,7 +5,7 @@
 #include <nothan/wait.h>
 
 struct completion {
-	unsigned int		done;
+	volatile unsigned int	done;
 	struct wait_queue_head	wait;
 };
 

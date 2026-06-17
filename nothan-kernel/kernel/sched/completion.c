@@ -22,7 +22,7 @@ void wait_for_completion(struct completion *c)
 	 */
 	if (!sched_running) {
 		while (!c->done)
-			;
+			__asm__ __volatile__ ("" : : : "memory");
 		c->done--;
 		return;
 	}

@@ -25,6 +25,7 @@
 #include <nothan/time.h>
 #include <nothan/printk.h>
 #include <nothan/init.h>
+#include <nothan/pinctrl.h>
 #include <asm/barrier.h>
 
 /* VA mapping: L4_PER VA 0xF0000000 → PA 0x48000000 */
@@ -47,6 +48,7 @@
 
 /* LCDC_CTRL bits */
 #define CTRL_RASTER_MODE    (1 << 0)
+#define CTRL_AUTO_UFLOW     (1 << 1)   /* auto-restart after FIFO underflow */
 #define CTRL_CLKDIV(x)      ((x) << 8)
 
 /* LCDC_CLKC_ENABLE bits */
@@ -59,12 +61,16 @@
 #define RASTER_TFT_MODE     (1 << 7)
 #define RASTER_DATA_ONLY    (0x02 << 20)
 
-/* LCDC_TIMING2 bits */
-#define TIMING2_HSVS_RISE   (1 << 24)
-#define TIMING2_HSVS_CTRL   (1 << 25)
+/* LCDC_RASTER_TIMING_2 bits (TRM 13.5.1.13) */
+#define TIMING2_HSYNC_INV   (1 << 21)   /* ihs: 1=active low */
+#define TIMING2_PCLK_INV    (1 << 22)   /* ipc: drive data on falling PCLK */
+#define TIMING2_PHSVS_FALL  (1 << 24)   /* 0=rising, 1=falling edge */
+#define TIMING2_PHSVS_ON    (1 << 25)   /* drive HS/VS per bit 24 */
+#define TIMING2_ACB_DEFAULT 0x0000FF00U /* AC bias frequency */
 
 /* DMA + interrupts */
 #define DMA_BURST_16        (4 << 4)
+#define DMA_TH_FIFO_512     (6 << 8)   /* 512-word refill threshold */
 #define IRQBIT_EOF0         (1 << 1)
 
 /* CM_PER / DPLL_DISP clock registers */
@@ -103,8 +109,11 @@
  */
 #define TIMING1_VAL     0x140512CFU
 
-/* RASTER_TIMING_2: positive HSYNC/VSYNC on rising edge of pixel clock */
-#define TIMING2_VAL     (TIMING2_HSVS_RISE | TIMING2_HSVS_CTRL)
+/* RASTER_TIMING_2: data driven on falling PCLK edge, TDA19988 samples on rising.
+ * IHS active low, AC bias 0xFF, PHSVS controlled by bit 24. */
+#define TIMING2_VAL     (TIMING2_PHSVS_ON | TIMING2_PHSVS_FALL | \
+			 TIMING2_PCLK_INV | TIMING2_HSYNC_INV | \
+			 TIMING2_ACB_DEFAULT)
 
 /* Double buffer state */
 static u32  fb_pa[2];
@@ -216,6 +225,8 @@ static int __init lcdc_init(void)
 	u8          *p;
 	u32          rctrl;
 
+	pinctrl_select("lcdc");
+
 	mmio_write32(CM_PER_LCDC_CLKCTRL, 0x02);
 	while ((mmio_read32(CM_PER_LCDC_CLKCTRL) & 0x30000) != 0)
 		;
@@ -223,7 +234,8 @@ static int __init lcdc_init(void)
 	dpll_disp_configure();
 
 	mmio_write32(LCDC_BASE + LCDC_CLKC_ENABLE, CLKC_CORE | CLKC_LIDD | CLKC_DMA);
-	mmio_write32(LCDC_BASE + LCDC_CTRL, CTRL_CLKDIV(LCDC_CLKDIV) | CTRL_RASTER_MODE);
+	mmio_write32(LCDC_BASE + LCDC_CTRL,
+		     CTRL_CLKDIV(LCDC_CLKDIV) | CTRL_AUTO_UFLOW | CTRL_RASTER_MODE);
 
 	/* Allocate two 2 MB framebuffers (order 9 = 512 pages each) */
 	zone = get_zone();
@@ -250,7 +262,7 @@ static int __init lcdc_init(void)
 	front_idx = 0;
 	back_idx  = 1;
 
-	mmio_write32(LCDC_BASE + LCDC_DMA_CTRL,    DMA_BURST_16);
+	mmio_write32(LCDC_BASE + LCDC_DMA_CTRL,    DMA_BURST_16 | DMA_TH_FIFO_512);
 	mmio_write32(LCDC_BASE + LCDC_FB0_BASE,    fb_pa[front_idx]);
 	mmio_write32(LCDC_BASE + LCDC_FB0_CEILING, fb_pa[front_idx] + FB_SZ - 4);
 	mmio_write32(LCDC_BASE + LCDC_TIMING0,     TIMING0_VAL);

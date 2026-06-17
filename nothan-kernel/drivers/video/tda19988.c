@@ -158,10 +158,10 @@
  */
 #define PLL_NOSC    1
 
-/* Default VIP channel swap (straight RGB wiring, Linux defaults) */
-#define VIP_CNTRL_0_VAL  0x23   /* SWAP_A(2)|SWAP_B(3) */
-#define VIP_CNTRL_1_VAL  0x45   /* SWAP_C(4)|SWAP_D(5) */
-#define VIP_CNTRL_2_VAL  0x01   /* SWAP_E(0)|SWAP_F(1) */
+/* VIP channel swap for BBB LCDC→TDA19988 wiring (from working old-OS) */
+#define VIP_CNTRL_0_VAL  0x23   /* SWAP_A=2, SWAP_B=3 */
+#define VIP_CNTRL_1_VAL  0x01   /* SWAP_C=0, SWAP_D=1 */
+#define VIP_CNTRL_2_VAL  0x45   /* SWAP_E=4, SWAP_F=5 */
 
 /* Tracks current HDMI page to avoid redundant page-select writes */
 static u8 s_page = 0xFF;
