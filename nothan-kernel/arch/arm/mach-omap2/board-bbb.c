@@ -48,12 +48,6 @@ static const struct pin_desc i2c0_pins[] = {
 	{ CM_REG(0x98C), PIN_INPUT_PULLUP | PIN_MUXMODE(0) },	/* i2c0_scl */
 };
 
-/* SPI0_SCLK/SPI0_D0 repurposed as I2C2 (mode 2) for HDMI framer SiI9022A */
-static const struct pin_desc i2c2_pins[] = {
-	{ CM_REG(0x950), PIN_INPUT_PULLUP | PIN_MUXMODE(2) },	/* i2c2_sda */
-	{ CM_REG(0x954), PIN_INPUT_PULLUP | PIN_MUXMODE(2) },	/* i2c2_scl */
-};
-
 /* LCDC pins — LCD_DATA0-15, VSYNC, HSYNC, PCLK, AC_BIAS_EN (all mode 0) */
 static const struct pin_desc lcdc_pins[] = {
 	{ CM_REG(0x8A0), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data0  */
@@ -84,7 +78,6 @@ static const struct pin_group bbb_pin_groups[] = {
 	{ "uart0", uart0_pins, ARRAY_SIZE(uart0_pins) },
 	{ "mmc0",  mmc0_pins,  ARRAY_SIZE(mmc0_pins)  },
 	{ "i2c0",  i2c0_pins,  ARRAY_SIZE(i2c0_pins)  },
-	{ "i2c2",  i2c2_pins,  ARRAY_SIZE(i2c2_pins)  },
 	{ "lcdc",  lcdc_pins,  ARRAY_SIZE(lcdc_pins)  },
 };
 
@@ -99,15 +92,15 @@ static struct platform_device bbb_devices[] = {
 	{ .name = "omap_gpio",  .base = GPIO3_BASE,   .irq = 0  },
 };
 
-static const struct i2c_board_info i2c2_devices[] = {
-	{ "sii9022a", 0x39 },   /* HDMI framer */
+static const struct i2c_board_info i2c0_devices[] = {
+	{ "tda19988", 0x70 },   /* NXP TDA19988 HDMI framer */
 };
 
 static int __init bbb_board_init(void)
 {
 	pinctrl_register(bbb_pin_groups, ARRAY_SIZE(bbb_pin_groups));
 
-	i2c_register_board_info(2, i2c2_devices, ARRAY_SIZE(i2c2_devices));
+	i2c_register_board_info(0, i2c0_devices, ARRAY_SIZE(i2c0_devices));
 
 	for (unsigned int i = 0; i < ARRAY_SIZE(bbb_devices); i++)
 		platform_device_register(&bbb_devices[i]);
