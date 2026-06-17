@@ -112,8 +112,11 @@ int i2c_register_board_info(int bus, const struct i2c_board_info *info,
 	if (board_info_n[bus] + n > MAX_BOARD_INFO)
 		n = MAX_BOARD_INFO - board_info_n[bus];
 
-	for (int i = 0; i < n; i++)
-		board_info[bus][board_info_n[bus] + i] = info[i];
+	for (int i = 0; i < n; i++) {
+		struct i2c_board_info *dst = &board_info[bus][board_info_n[bus] + i];
+		copy_name(dst->name, info[i].name);
+		dst->addr = info[i].addr;
+	}
 
 	board_info_n[bus] += n;
 	return 0;
