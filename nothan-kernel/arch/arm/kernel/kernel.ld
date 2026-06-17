@@ -42,6 +42,7 @@ SECTIONS
 	. = ALIGN(4);
 	__initcall_start = .;
 	.initcall : {
+		*(.initcall.early)
 		*(.initcall.0)
 		*(.initcall.1)
 		*(.initcall.2)

@@ -22,6 +22,7 @@ typedef int (*initcall_t)(void);
 #define __initcall_fn(fn, lvl) \
 	static initcall_t __initcall_##fn __attribute__((__section__(".initcall." #lvl), __used__)) = fn
 
+#define early_initcall(fn)   __initcall_fn(fn, early)
 #define arch_initcall(fn)    __initcall_fn(fn, 0)
 #define subsys_initcall(fn)  __initcall_fn(fn, 1)
 #define fs_initcall(fn)      __initcall_fn(fn, 2)

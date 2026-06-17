@@ -11,6 +11,7 @@
 
 struct rq runqueue;
 int need_resched;
+bool sched_running = false;
 
 extern void __switch_to(struct task_struct *prev, struct task_struct *next);
 
@@ -85,6 +86,14 @@ void sched_init(void)
 
 	idle_task_init();
 
+	/*
+	 * Bootstrap: set curr to idle_tsk so that any code running between
+	 * sched_init() and the first schedule() sees a valid current task.
+	 * Without this, timer ISR → scheduler_tick() → runqueue.curr->field
+	 * dereferences NULL and causes a data abort.
+	 */
+	rq->curr = &idle_tsk;
+
 	printk("[SCHED] %d prio levels, RR timeslice=%d tick(s), idle at %d\n",
 	       MAX_PRIO, RR_TIMESLICE, IDLE_PRIO);
 }
@@ -129,6 +138,8 @@ void schedule(void)
 		__asm__ __volatile__ ("cpsie i" : : : "memory");
 		return;
 	}
+
+	sched_running = true;
 
 	if (prev) {
 		/* Set up user mapping BEFORE context switch — __switch_to to a

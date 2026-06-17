@@ -15,6 +15,19 @@
  */
 void wait_for_completion(struct completion *c)
 {
+	/*
+	 * Boot context: scheduler initialized (sched_init done) but no real
+	 * context switch has happened yet (sched_running=false).  We cannot
+	 * block — spin until ISR calls complete().  IRQs must be enabled.
+	 */
+	if (!sched_running) {
+		while (!c->done)
+			;
+		c->done--;
+		return;
+	}
+
+	/* Normal task context — yield while waiting. */
 	for (;;) {
 		set_current_state(TASK_UNINTERRUPTIBLE);
 
@@ -38,10 +51,6 @@ void wait_for_completion(struct completion *c)
 
 		schedule();
 
-		/*
-		 * Woken up by complete() → loop back to re-check c->done.
-		 * The outer loop handles spurious wakeups correctly.
-		 */
 		set_current_state(TASK_RUNNING);
 	}
 }

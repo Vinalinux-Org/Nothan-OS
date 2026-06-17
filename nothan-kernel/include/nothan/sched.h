@@ -155,6 +155,7 @@ void scheduler_tick(void);
 
 extern struct rq runqueue;
 extern int need_resched;
+extern bool sched_running;  /* true after first real context switch */
 
 void do_exit(int code);
 
