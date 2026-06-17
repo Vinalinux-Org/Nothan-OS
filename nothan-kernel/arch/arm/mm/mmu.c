@@ -131,12 +131,24 @@ void mmu_map_user(struct mm_struct *mm)
 #define L2_ATTR_MEM     (PTE_SMALL_C | PTE_SMALL_B)
 #define L2_USER_RW      (PTE_SMALL_AP_BOTH | PTE_SMALL_NG)
 
-	/* Code page: RO from user, executable */
+	/*
+	 * Code pages start at VA 0x10000 (L2 index 0x10). entry_va is 0x10010
+	 * (after the binary header), so mask off the low 12 bits.
+	 */
 	unsigned int code_l2_idx = (mm->entry_va & 0x000FF000) >> 12;
 	for (unsigned int i = 0; i < mm->code_pages; i++) {
 		unsigned long pa = mm->code_pa + (i << 12);
 		l2[code_l2_idx + i] = (pa & 0xFFFFF000)
 			  | PTE_TYPE_SMALL | L2_ATTR_MEM | L2_USER_RW;
+	}
+
+	/* BSS pages: RW + XN, placed right after the code pages */
+	unsigned int bss_l2_idx = code_l2_idx + mm->code_pages;
+	for (unsigned int i = 0; i < mm->bss_pages; i++) {
+		unsigned long pa = mm->bss_pa + (i << 12);
+		l2[bss_l2_idx + i] = (pa & 0xFFFFF000)
+			  | PTE_TYPE_SMALL | PTE_SMALL_XN
+			  | L2_ATTR_MEM | L2_USER_RW;
 	}
 
 	/* Stack page: RW from user, XN */

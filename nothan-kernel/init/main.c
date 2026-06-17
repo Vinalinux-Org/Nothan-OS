@@ -64,6 +64,13 @@ void kernel_main(void)
 	printk("[BOOT] timer_start\n");
 	timer_start();
 
+	/*
+	 * Mask IRQs while spawning all initial tasks. Timer IRQ is already
+	 * running (10ms tick), and would otherwise preempt kernel_main into
+	 * the first enqueued task before later tasks (GUI) get created.
+	 */
+	__asm__ __volatile__ ("cpsid i" : : : "memory");
+
 	struct task_struct *ut = kernel_spawn("/sbin/init");
 	if (ut) {
 		printk("[KERN] Spawning /sbin/init\n");
@@ -83,7 +90,7 @@ void kernel_main(void)
 
 	printk("[KERN] NothanOS started\n");
 
-	__asm__ __volatile__ ("cpsie i" : : : "memory");  /* re-enable for scheduler */
+	__asm__ __volatile__ ("cpsie i" : : : "memory");
 
 	schedule();
 

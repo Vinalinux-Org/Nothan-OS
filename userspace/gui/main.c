@@ -14,6 +14,8 @@ static void build_ui(void)
 
 void main(void)
 {
+	write("GUI: main start\n");
+
 	lv_init();
 	lv_port_disp_init();
 	lv_port_indev_init();

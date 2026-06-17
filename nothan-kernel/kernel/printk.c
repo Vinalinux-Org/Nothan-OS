@@ -179,8 +179,15 @@ int printk(const char *fmt, ...)
 	ret = vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
 
-	/* IRQ-off ensures the UART output is not interleaved by preemption. */
-	__asm__ __volatile__ ("cpsid i" : : : "memory");
+	/*
+	 * IRQ-off ensures the UART output is not interleaved by preemption.
+	 * Save the prior I-bit so callers that masked IRQs (e.g. kernel_main
+	 * before schedule(), task spawn loop) stay masked across printk.
+	 */
+	unsigned long cpsr_save;
+	__asm__ __volatile__ ("mrs %0, cpsr\n"
+			      "cpsid i"
+			      : "=r" (cpsr_save) : : "memory");
 
 	for (char *p = buf; *p; p++) {
 		if (*p == '\n')
@@ -188,7 +195,9 @@ int printk(const char *fmt, ...)
 		uart_putchar(*p);
 	}
 
-	__asm__ __volatile__ ("cpsie i" : : : "memory");
+	/* Restore only if IRQs were enabled before. */
+	if (!(cpsr_save & (1u << 7)))
+		__asm__ __volatile__ ("cpsie i" : : : "memory");
 
 	return ret;
 }

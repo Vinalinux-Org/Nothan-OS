@@ -75,6 +75,7 @@ extern void intc_enable_irq(unsigned int irq);
 #define I2C_STAT_ARDY   (1 << 2)
 #define I2C_STAT_RRDY   (1 << 3)
 #define I2C_STAT_XRDY   (1 << 4)
+#define I2C_STAT_XUDF   (1 << 10)  /* TX underflow — clear and abort */
 #define I2C_STAT_BB     (1 << 12)
 
 /* CON bits */
@@ -149,6 +150,13 @@ static void omap_i2c_isr(unsigned int irq)
 		return;
 
 	reg_w(base, I2C_IRQSTATUS, stat & ~(I2C_STAT_XRDY | I2C_STAT_RRDY));
+
+	if (stat & I2C_STAT_XUDF) {
+		reg_w(base, I2C_CON, I2C_CON_EN | I2C_CON_MST | I2C_CON_STP);
+		dev->err = -1;
+		complete(&dev->done);
+		return;
+	}
 
 	if (stat & (I2C_STAT_NACK | I2C_STAT_AL)) {
 		if (stat & I2C_STAT_NACK)

@@ -98,6 +98,20 @@ extern char _binary_user_shell_end[];
 extern char _binary_user_gui_start[];
 extern char _binary_user_gui_end[];
 
+/*
+ * NothanOS user binary header — see userspace/lib/user.lds.
+ * First 16 bytes of every .bin: kernel reads bss_size to allocate
+ * zeroed pages, then jumps to _start at offset 0x10.
+ */
+#define USER_BIN_MAGIC   0x4E4F5348      /* 'NOSH' */
+#define USER_BIN_ENTRY   0x00010010      /* _start (after 16-byte header) */
+
+struct user_bin_header {
+	u32 magic;
+	u32 bss_size;
+	u32 reserved[2];
+};
+
 /**
  * user_task_create_bin() - Create a user-mode task from a binary blob
  * @name: Task name for debugging
@@ -133,6 +147,21 @@ struct task_struct *user_task_create_bin(const char *name,
 
 	unsigned long blob_size = (unsigned long)(blob_end - blob_start);
 
+	/* Parse binary header. Reject if magic mismatches or blob too small. */
+	if (blob_size < sizeof(struct user_bin_header)) {
+		printk("[SPAWN] %s: blob too small (%lu B)\n", name, blob_size);
+		kfree(mm); kfree(ksp); kfree(p);
+		return NULL;
+	}
+	struct user_bin_header *hdr = (struct user_bin_header *)blob_start;
+	if (hdr->magic != USER_BIN_MAGIC) {
+		printk("[SPAWN] %s: bad magic 0x%x (expected 0x%x)\n",
+		       name, (unsigned)hdr->magic, (unsigned)USER_BIN_MAGIC);
+		kfree(mm); kfree(ksp); kfree(p);
+		return NULL;
+	}
+	unsigned long bss_size = hdr->bss_size;
+
 	unsigned int code_pages = (blob_size + PAGE_SIZE - 1) / PAGE_SIZE;
 	unsigned int order = 0;
 	while ((1u << order) < code_pages)
@@ -140,9 +169,7 @@ struct task_struct *user_task_create_bin(const char *name,
 
 	struct page *code_pg = alloc_pages(GFP_USER, order);
 	if (!code_pg) {
-		kfree(mm);
-		kfree(ksp);
-		kfree(p);
+		kfree(mm); kfree(ksp); kfree(p);
 		return NULL;
 	}
 
@@ -154,27 +181,56 @@ struct task_struct *user_task_create_bin(const char *name,
 	for (unsigned long i = 0; i < blob_size; i++)
 		code_kva[i] = blob_start[i];
 
+	/*
+	 * Allocate and zero BSS pages. Linker pads .data to a 4 KB boundary
+	 * so BSS starts on a fresh page right after the code pages.
+	 */
+	unsigned long bss_pa = 0;
+	unsigned int bss_pages = 0;
+	unsigned int bss_order = 0;
+	struct page *bss_pg = NULL;
+
+	if (bss_size > 0) {
+		bss_pages = (bss_size + PAGE_SIZE - 1) / PAGE_SIZE;
+		while ((1u << bss_order) < bss_pages)
+			bss_order++;
+
+		bss_pg = alloc_pages(GFP_USER, bss_order);
+		if (!bss_pg) {
+			__free_pages(code_pg, order);
+			kfree(mm); kfree(ksp); kfree(p);
+			return NULL;
+		}
+		bss_pa = page_to_phys(zone, bss_pg);
+
+		u8 *bss_kva = (u8 *)phys_to_kva(bss_pa);
+		for (unsigned long i = 0; i < (unsigned long)bss_pages * PAGE_SIZE; i++)
+			bss_kva[i] = 0;
+	}
+	mm->bss_pa    = bss_pa;
+	mm->bss_pages = bss_pages;
+
 	struct page *stack_pg = alloc_pages(GFP_USER, 0);
 	if (!stack_pg) {
+		if (bss_pg)
+			__free_pages(bss_pg, bss_order);
 		__free_pages(code_pg, order);
-		kfree(mm);
-		kfree(ksp);
-		kfree(p);
+		kfree(mm); kfree(ksp); kfree(p);
 		return NULL;
 	}
 	unsigned long stack_pa = page_to_phys(zone, stack_pg);
 
 	/*
-	 * L2 page table must be 1KB-aligned.  slab classes ≥ 1024 bytes are
+	 * L2 page table must be 1KB-aligned. slab classes ≥ 1024 bytes are
 	 * power-of-2 aligned, so kmalloc(1024) satisfies the constraint.
 	 */
 	u32 *l2 = (u32 *)kmalloc(1024, GFP_KERNEL);
 	if (!l2) {
 		__free_pages(stack_pg, 0);
+		if (bss_pg)
+			__free_pages(bss_pg, bss_order);
 		__free_pages(code_pg, order);
-		kfree(mm);
-		kfree(ksp);
-		kfree(p);
+		kfree(mm); kfree(ksp); kfree(p);
 		return NULL;
 	}
 
@@ -182,7 +238,7 @@ struct task_struct *user_task_create_bin(const char *name,
 	mm->l1_idx   = 0;		/* L1[0] covers VA 0x00000000–0x000FFFFF */
 	mm->code_pa  = code_pa;
 	mm->stack_pa = stack_pa;
-	mm->entry_va = 0x00010000;	/* user code starts here */
+	mm->entry_va = USER_BIN_ENTRY;	/* _start, after 16-byte binary header */
 	mm->sp_top   = 0x00100000;	/* user stack grows down from here */
 
 	mmu_map_user(mm);

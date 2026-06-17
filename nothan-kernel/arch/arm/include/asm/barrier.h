@@ -35,4 +35,23 @@
 	"mov r0, #0\n" \
 	"mcr p15, 0, r0, c7, c5, 0" : : : "r0", "memory")
 
+/*
+ * clean_dcache_range(start, end) — clean dirty D-cache lines to DRAM so
+ * DMA can see CPU writes. Uses clean-by-MVA-to-PoC (c7, c10, 1).
+ * Cortex-A8 cache line = 64 bytes.
+ */
+#define DCACHE_LINE_SIZE	64U
+static inline void clean_dcache_range(unsigned long start, unsigned long end)
+{
+	unsigned long addr = start & ~(DCACHE_LINE_SIZE - 1UL);
+
+	while (addr < end) {
+		__asm__ __volatile__ (
+			"mcr p15, 0, %0, c7, c10, 1"
+			: : "r" (addr) : "memory");
+		addr += DCACHE_LINE_SIZE;
+	}
+	dsb();
+}
+
 #endif /* _NOTHAN_BARRIER_H */

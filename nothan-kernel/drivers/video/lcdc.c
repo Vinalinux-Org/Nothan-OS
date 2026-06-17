@@ -196,8 +196,9 @@ static void lcdc_flip(void)
 	int new_front = back_idx;
 	int new_back  = front_idx;
 
-	/* Ensure all CPU writes to back_buf are visible to DMA */
-	dsb();
+	/* Clean D-cache so LCDC DMA reads the CPU's writes from DRAM */
+	clean_dcache_range((unsigned long)fb_va[new_front],
+			   (unsigned long)fb_va[new_front] + FB_SZ);
 
 	/* Wait for current frame scan to finish */
 	wait_eof();
@@ -251,12 +252,15 @@ static int __init lcdc_init(void)
 	fb_va[0] = phys_to_kva(fb_pa[0]);
 	fb_va[1] = phys_to_kva(fb_pa[1]);
 
-	/* Zero both buffers; palette entry 0 = 0x4000 (16bpp indicator) */
+	/* Zero both buffers; palette entry 0 = 0x4000 (16bpp indicator).
+	 * Clean D-cache so LCDC DMA sees zeroed DRAM from the first frame. */
 	for (int b = 0; b < 2; b++) {
 		p = (u8 *)fb_va[b];
 		for (unsigned int i = 0; i < FB_SZ; i++)
 			p[i] = 0;
 		*(u16 *)fb_va[b] = 0x4000;
+		clean_dcache_range((unsigned long)fb_va[b],
+				   (unsigned long)fb_va[b] + FB_SZ);
 	}
 
 	front_idx = 0;
