@@ -161,6 +161,7 @@ struct task_struct *user_task_create_bin(const char *name,
 		return NULL;
 	}
 	unsigned long bss_size = hdr->bss_size;
+	printk("[SPAWN] %s: blob=%lu B, bss=%lu B\n", name, blob_size, bss_size);
 
 	unsigned int code_pages = (blob_size + PAGE_SIZE - 1) / PAGE_SIZE;
 	unsigned int order = 0;
@@ -169,6 +170,7 @@ struct task_struct *user_task_create_bin(const char *name,
 
 	struct page *code_pg = alloc_pages(GFP_USER, order);
 	if (!code_pg) {
+		printk("[SPAWN] %s: alloc_pages(code, order=%u) failed\n", name, order);
 		kfree(mm); kfree(ksp); kfree(p);
 		return NULL;
 	}
@@ -197,6 +199,8 @@ struct task_struct *user_task_create_bin(const char *name,
 
 		bss_pg = alloc_pages(GFP_USER, bss_order);
 		if (!bss_pg) {
+			printk("[SPAWN] %s: alloc_pages(bss, order=%u) failed\n",
+			       name, bss_order);
 			__free_pages(code_pg, order);
 			kfree(mm); kfree(ksp); kfree(p);
 			return NULL;
@@ -212,6 +216,7 @@ struct task_struct *user_task_create_bin(const char *name,
 
 	struct page *stack_pg = alloc_pages(GFP_USER, 0);
 	if (!stack_pg) {
+		printk("[SPAWN] %s: alloc_pages(stack) failed\n", name);
 		if (bss_pg)
 			__free_pages(bss_pg, bss_order);
 		__free_pages(code_pg, order);
