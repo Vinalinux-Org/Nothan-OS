@@ -136,12 +136,20 @@ void bootloader_main(void)
 		uart_puts(" DDR="); uart_print_dec(freq_mhz); uart_puts("MHz\r\n");
 	}
 
-	ddr_init();
-
-	if (ddr_test() == 0)
-		uart_puts("[DDR]  512MB @ 0x80000000 OK\r\n");
-	else
-		panic("DDR memory test FAILED!");
+	/*
+	 * Kernel uses RST_GLOBAL_COLD_SW so EMIF is always reset on reboot.
+	 * EMIF_SDRAM_CONFIG != 0 only on true power-on where ROM left it
+	 * configured; skip re-init and just verify in that case.
+	 */
+	if (readl(EMIF_SDRAM_CONFIG) != 0 && ddr_test() == 0) {
+		uart_puts("[DDR]  512MB @ 0x80000000 OK (warm)\r\n");
+	} else {
+		ddr_init();
+		if (ddr_test() == 0)
+			uart_puts("[DDR]  512MB @ 0x80000000 OK\r\n");
+		else
+			panic("DDR memory test FAILED!");
+	}
 
 	if (mmc_init() != 0)
 		panic("MMC initialization FAILED!");

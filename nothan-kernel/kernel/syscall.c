@@ -348,6 +348,8 @@ static long sys_kill(unsigned long a0, unsigned long a1, unsigned long a2)
  * sys_reboot - reboot or halt the system
  * @a0: REBOOT_WARM (0) or REBOOT_HALT (1)
  */
+extern void lcdc_shutdown(void);
+
 static long sys_reboot(unsigned long a0, unsigned long a1, unsigned long a2)
 {
 	(void)a1; (void)a2;
@@ -359,10 +361,17 @@ static long sys_reboot(unsigned long a0, unsigned long a1, unsigned long a2)
 			;
 	}
 
-	/* Warm reset via PRM_RSTCTRL bit 0 (RST_GLOBAL_WARM_SW)
-	 * PRM_DEVICE PA 0x44E00F00 → VA 0xF0E00F00 */
+	/* Stop LCDC DMA first — a warm reset doesn't reset every peripheral
+	 * cleanly, and an in-flight LCDC burst would conflict with the
+	 * bootloader's DDR test on the next boot. */
+	lcdc_shutdown();
 	printk("[SYS] Rebooting...\n");
-	mmio_write32(0xF0E00F00, 1);
+
+	/* RST_GLOBAL_COLD_SW (bit 1): pulses DDR3 RESET# so bootloader PHY
+	 * leveling starts from a clean state. Warm reset (bit 0) skips RESET#
+	 * and causes ddr_init() to fail on the live chip.
+	 * PRM_DEVICE PA 0x44E00F00 → VA 0xF0E00F00 */
+	mmio_write32(0xF0E00F00, 2);
 
 	/* NOTREACHED — hardware resets before this runs */
 	while (1)
