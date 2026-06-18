@@ -83,7 +83,10 @@ $(LVGL_LIB): $(LVGL_OBJS)
 	$(AR) rcs $@ $^
 
 # GUI app
-GUI_SRCS := gui/main.c gui/port/lv_port_disp.c gui/port/lv_port_indev.c
+GUI_SRCS := gui/main.c \
+            gui/port/lv_port_disp.c gui/port/lv_port_indev.c \
+            gui/widgets/status_bar.c gui/widgets/app_tile.c \
+            gui/screens/home.c gui/screens/messages.c
 GUI_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(GUI_SRCS))
 GUI_CFLAGS := $(CFLAGS) -I lib/lvgl -I gui -DLV_CONF_INCLUDE_SIMPLE
 
@@ -100,7 +103,8 @@ $(BUILD)/gui.bin: $(BUILD)/gui.elf
 
 LVGL_LIB_DIRS := $(sort $(dir $(LVGL_OBJS)))
 
-DIRS := $(BUILD)/lib $(BUILD)/example $(BUILD)/gui/port \
+DIRS := $(BUILD)/lib $(BUILD)/example \
+        $(BUILD)/gui/port $(BUILD)/gui/widgets $(BUILD)/gui/screens \
         $(foreach p,$(BIN_PROGRAMS),$(BUILD)/bin/$(p)) \
         $(foreach p,$(SBIN_PROGRAMS),$(BUILD)/sbin/$(p))
 

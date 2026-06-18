@@ -121,7 +121,7 @@
 #define LV_FONT_MONTSERRAT_12   1
 #define LV_FONT_MONTSERRAT_14   1
 #define LV_FONT_MONTSERRAT_16   1
-#define LV_FONT_MONTSERRAT_18   0
+#define LV_FONT_MONTSERRAT_18   1
 #define LV_FONT_MONTSERRAT_20   1
 #define LV_FONT_MONTSERRAT_22   0
 #define LV_FONT_MONTSERRAT_24   1
@@ -207,7 +207,7 @@
  * LAYOUTS
  *=========================*/
 #define LV_USE_FLEX     1
-#define LV_USE_GRID     0
+#define LV_USE_GRID     1
 
 /*=========================
  * DISABLE UNUSED EXTRAS
