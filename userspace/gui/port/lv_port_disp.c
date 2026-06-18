@@ -22,12 +22,6 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
 	static int first_flush = 1;
 	static int first_flip  = 1;
-	static unsigned flush_count = 0;
-
-	flush_count++;
-	if (flush_count == 1 || flush_count == 50 || flush_count == 100 ||
-	    flush_count % 200 == 0)
-		write("[GUI] flush tick\n");
 
 	if (fb_fd >= 0) {
 		if (first_flush) {

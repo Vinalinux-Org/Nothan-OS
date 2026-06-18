@@ -127,33 +127,54 @@ static struct inode *walk_path(const char *pathname)
  *
  * Return: File descriptor (fd >= 0) on success, -1 on error.
  */
+/* Placeholder marking a slot as "reserved while we build the file". Any
+ * non-NULL value works — vfs_ioctl/read/write/close re-read fd_table[]
+ * and would only follow it as a real pointer; the race is purely about
+ * preventing two concurrent vfs_open calls from picking the same fd. */
+#define FD_RESERVED  ((struct file *)(uintptr_t)0x1)
+
 int vfs_open(const char *pathname, int flags)
 {
+	/*
+	 * Atomically reserve a free fd slot before doing the slow work
+	 * (walk_path, kmalloc, fops->open) so a preempting vfs_open in
+	 * another task cannot pick the same fd.
+	 */
+	unsigned long cpsr;
 	int fd = -1;
+	__asm__ __volatile__ ("mrs %0, cpsr\n\tcpsid i" : "=r"(cpsr) : : "memory");
 	for (int i = 0; i < MAX_FDS; i++) {
 		if (!fd_table[i]) {
+			fd_table[i] = FD_RESERVED;
 			fd = i;
 			break;
 		}
 	}
+	if (!(cpsr & (1u << 7)))
+		__asm__ __volatile__ ("cpsie i" : : : "memory");
+
 	if (fd < 0) {
 		printk("[VFS] Out of file descriptors\n");
 		return -1;
 	}
 
 	struct inode *inode = walk_path(pathname);
-	if (!inode)
+	if (!inode) {
+		fd_table[fd] = NULL;
 		return -1;
+	}
 
 	/* Directories cannot be opened as files */
 	if (inode->i_mode & S_IFDIR) {
 		kfree(inode);
+		fd_table[fd] = NULL;
 		return -1;
 	}
 
 	struct file *f = (struct file *)kmalloc(sizeof(*f), GFP_KERNEL);
 	if (!f) {
 		kfree(inode);
+		fd_table[fd] = NULL;
 		return -1;
 	}
 
@@ -167,6 +188,7 @@ int vfs_open(const char *pathname, int flags)
 		if (f->f_op->open(inode, f) != 0) {
 			kfree(f);
 			kfree(inode);
+			fd_table[fd] = NULL;
 			return -1;
 		}
 	}

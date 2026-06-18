@@ -31,31 +31,27 @@ static lv_obj_t       *msg_tile = NULL;   /* "Messages" tile in home grid */
 static void enter_messages(void)
 {
 	lv_obj_t *scr = lv_screen_active();
-	write("[GUI] enter: before clean\n");
 	lv_obj_clean(scr);
-	write("[GUI] enter: after clean\n");
-
-	/* Minimal: just change bg to green. If screen turns green we know
-	 * clean + invalidate path works; the issue is messages_create. */
-	lv_obj_set_style_bg_color(scr, lv_color_hex(0x00FF00), 0);
-	lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
+	messages_create(scr);
 	lv_obj_invalidate(scr);
-	write("[GUI] enter: green set\n");
 }
 
 static void demo_tick(unsigned long now)
 {
 	switch (phase) {
 	case PHASE_HOME:
-		if (now - phase_t >= 3000) {
-			write("[GUI] enter Messages\n");
-			enter_messages();
-			phase = PHASE_MESSAGES;
+		if (now - phase_t >= 2500) {
+			app_tile_glow(msg_tile);
+			phase = PHASE_GLOW;
 			phase_t = now;
 		}
 		break;
 	case PHASE_GLOW:
-		phase = PHASE_DONE;
+		if (now - phase_t >= 1400) {
+			enter_messages();
+			phase = PHASE_MESSAGES;
+			phase_t = now;
+		}
 		break;
 	case PHASE_MESSAGES:
 		phase = PHASE_DONE;
