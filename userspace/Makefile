@@ -85,15 +85,16 @@ $(LVGL_LIB): $(LVGL_OBJS)
 # GUI app
 GUI_SRCS := gui/main.c \
             gui/port/lv_port_disp.c gui/port/lv_port_indev.c \
-            gui/core/nav.c gui/core/log.c gui/core/keyboard.c \
+            gui/core/nav.c gui/core/log.c gui/core/keyboard.c gui/core/call_ui.c \
             gui/services/contacts.c gui/services/messages.c gui/services/telephony.c \
+            gui/services/storage.c \
             gui/widgets/status_bar.c gui/widgets/app_tile.c gui/widgets/nav_bar.c \
             gui/widgets/app_header.c gui/widgets/avatar.c \
             gui/screens/boot.c gui/screens/home.c \
             gui/screens/contacts_list.c gui/screens/contact_detail.c \
             gui/screens/contacts_add.c \
             gui/screens/sms_list.c gui/screens/sms_chat.c \
-            gui/screens/dialer.c gui/screens/active_call.c gui/screens/incoming_call.c
+            gui/screens/dialer.c gui/screens/call_log.c
 GUI_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(GUI_SRCS))
 GUI_CFLAGS := $(CFLAGS) -I lib/lvgl -I gui -DLV_CONF_INCLUDE_SIMPLE
 

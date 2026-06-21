@@ -25,6 +25,12 @@
 #define REBOOT_WARM     0
 #define REBOOT_HALT     1
 
+/* open() flags — must match kernel include/nothan/fs.h */
+#define O_RDONLY 0x0000
+#define O_WRONLY 0x0001
+#define O_RDWR   0x0002
+#define O_CREAT  0x0040
+
 #define TASK_NAME_LEN 16
 #define UNAME_LEN     16
 #define FILE_NAME_LEN 32
