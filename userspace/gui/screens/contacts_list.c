@@ -10,6 +10,7 @@
 #include "../theme/theme.h"
 #include "../core/nav.h"
 #include "../core/log.h"
+#include "../core/keyboard.h"
 #include "../widgets/app_header.h"
 #include "../widgets/nav_bar.h"
 #include "../widgets/avatar.h"
@@ -100,6 +101,7 @@ static void build_search(lv_obj_t *parent)
 	lv_obj_set_style_text_font(search, &lv_font_montserrat_14, 0);
 	lv_obj_set_style_text_color(search, theme_color(THEME_SUBTEXT),
 				    LV_PART_TEXTAREA_PLACEHOLDER);
+	gui_keyboard_attach(search, LV_KEYBOARD_MODE_TEXT_LOWER);
 }
 
 void contacts_list_create(lv_obj_t *screen, void *arg)

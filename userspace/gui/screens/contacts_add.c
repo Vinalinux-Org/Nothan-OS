@@ -12,6 +12,7 @@
 #include "../theme/theme.h"
 #include "../core/nav.h"
 #include "../core/log.h"
+#include "../core/keyboard.h"
 #include "../widgets/app_header.h"
 #include "../widgets/nav_bar.h"
 #include "../services/contacts.h"
@@ -71,10 +72,12 @@ void contacts_add_create(lv_obj_t *screen, void *arg)
 	int y = APP_HEADER_HEIGHT + 24;
 	field_label(screen, "Name", y);
 	name_field = text_field(screen, y + 22, NULL);
+	gui_keyboard_attach(name_field, LV_KEYBOARD_MODE_TEXT_LOWER);
 
 	y += 22 + 44 + 20;
 	field_label(screen, "Phone", y);
 	phone_field = text_field(screen, y + 22, "0123456789 +");
+	gui_keyboard_attach(phone_field, LV_KEYBOARD_MODE_NUMBER);
 
 	lv_obj_t *save = lv_button_create(screen);
 	lv_obj_remove_style_all(save);
