@@ -5,7 +5,6 @@
  */
 
 #include "dialer.h"
-#include "active_call.h"
 #include "../theme/theme.h"
 #include "../core/nav.h"
 #include "../core/log.h"
@@ -23,7 +22,6 @@ static int32_t kp_row_dsc[] = { LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1),
 
 static char        num_buf[24];
 static lv_obj_t   *num_label;
-static struct call_info dialer_call;
 
 static const struct { const char *digit; const char *letters; } keys[] = {
 	{ "1", "" },    { "2", "ABC" },  { "3", "DEF" },
@@ -66,11 +64,13 @@ static void on_backspace(lv_event_t *e)
 static void on_call(lv_event_t *e)
 {
 	(void)e;
+	if (!num_buf[0])
+		return;
 	gui_logf("event: dial call %s\n", num_buf);
 	telephony_dial(num_buf);
-	dialer_call.name   = NULL;
-	dialer_call.number = num_buf;
-	nav_push(active_call_create, &dialer_call);
+	/* The call overlay (lv_layer_top) takes over from here; drop back to
+	 * Recents so we land there when the call ends. */
+	nav_pop();
 }
 
 static void keypad_btn(lv_obj_t *grid, const char *digit, const char *letters,

@@ -11,7 +11,7 @@
 #include "../widgets/status_bar.h"
 #include "../widgets/app_tile.h"
 #include "../widgets/nav_bar.h"
-#include "dialer.h"
+#include "call_log.h"
 #include "sms_list.h"
 #include "contacts_list.h"
 
@@ -32,7 +32,7 @@ struct app_def {
 };
 
 static const struct app_def apps[] = {
-	{ LV_SYMBOL_CALL,      "Phone",    0x7C3AED, dialer_create },
+	{ LV_SYMBOL_CALL,      "Phone",    0x7C3AED, call_log_create },
 	{ LV_SYMBOL_ENVELOPE,  "Messages", 0x3B82F6, sms_list_create },
 	{ LV_SYMBOL_LIST,      "Contacts", 0xEC4899, contacts_list_create },
 	{ LV_SYMBOL_GPS,       "Maps",     0xF59E0B },
@@ -60,7 +60,7 @@ static const struct app_def apps[] = {
 #define APP_COUNT  (int)(sizeof(apps) / sizeof(apps[0]))
 
 static const struct app_def dock_apps[4] = {
-	{ LV_SYMBOL_CALL,     NULL, 0x22C55E, dialer_create },
+	{ LV_SYMBOL_CALL,     NULL, 0x22C55E, call_log_create },
 	{ LV_SYMBOL_ENVELOPE, NULL, 0x3B82F6, sms_list_create },
 	{ LV_SYMBOL_LIST,     NULL, 0xEC4899, contacts_list_create },
 	{ LV_SYMBOL_IMAGE,    NULL, 0x64748B },
