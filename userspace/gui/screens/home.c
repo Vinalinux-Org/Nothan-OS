@@ -171,7 +171,7 @@ void home_create(lv_obj_t *parent, void *arg)
 	 * 4 fixed-width tiles per row, matching the dock. */
 	lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
 	lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_SPACE_EVENLY,
-			      LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+			      LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
 
 	for (int i = 0; i < APP_COUNT; i++) {
 		lv_obj_t *t = app_tile_create(grid, apps[i].symbol,

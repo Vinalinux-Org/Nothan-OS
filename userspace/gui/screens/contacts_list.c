@@ -72,6 +72,7 @@ static void add_row(lv_obj_t *list, const struct contact *c)
 	lv_obj_set_flex_align(col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START,
 			      LV_FLEX_ALIGN_START);
 	lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_clear_flag(col, LV_OBJ_FLAG_CLICKABLE);
 
 	lv_obj_t *name = lv_label_create(col);
 	lv_label_set_text(name, c->name);

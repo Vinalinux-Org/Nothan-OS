@@ -59,6 +59,7 @@ static void add_row(lv_obj_t *list, const struct sms_conversation *c)
 			      LV_FLEX_ALIGN_START);
 	lv_obj_set_style_pad_row(col, 4, 0);
 	lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_clear_flag(col, LV_OBJ_FLAG_CLICKABLE);
 
 	lv_obj_t *top = lv_obj_create(col);
 	lv_obj_remove_style_all(top);
@@ -68,6 +69,7 @@ static void add_row(lv_obj_t *list, const struct sms_conversation *c)
 	lv_obj_set_flex_align(top, LV_FLEX_ALIGN_SPACE_BETWEEN,
 			      LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_clear_flag(top, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_clear_flag(top, LV_OBJ_FLAG_CLICKABLE);
 
 	lv_obj_t *peer = lv_label_create(top);
 	lv_label_set_text(peer, c->peer);

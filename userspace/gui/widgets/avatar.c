@@ -19,6 +19,7 @@ lv_obj_t *avatar_create(lv_obj_t *parent, char initial, int size,
 	lv_obj_set_style_bg_grad_dir(av, LV_GRAD_DIR_VER, 0);
 	lv_obj_set_style_bg_opa(av, LV_OPA_COVER, 0);
 	lv_obj_clear_flag(av, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_clear_flag(av, LV_OBJ_FLAG_CLICKABLE);
 
 	char s[2] = { initial, '\0' };
 	lv_obj_t *lbl = lv_label_create(av);
