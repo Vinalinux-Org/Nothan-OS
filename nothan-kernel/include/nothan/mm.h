@@ -23,15 +23,32 @@ typedef unsigned int gfp_t;
 #define phys_to_kva(pa)		((void *)((unsigned long)(pa) + (PAGE_OFFSET - PHYS_OFFSET)))
 
 /*
- * struct mm_struct - per-process memory descriptor (Phase 10b)
+ * Max L2 (coarse) page tables a process may own. Each covers a 1 MB VA
+ * window; code+bss usually need 1-2, the high stack 1, leaving slack for
+ * growth. Bump if a process maps more than ~16 MB of distinct windows.
+ */
+#define MM_MAX_L2  16
+
+struct mm_l2 {
+	u32         *l2;       /* kernel VA of the 1 KB L2 table */
+	unsigned int l1_idx;   /* L1 slot it is installed at (VA >> 20) */
+};
+
+/*
+ * struct mm_struct - per-process memory descriptor
  *
- * Tracks the L2 page table and user-space pages for a single
- * user task.  The global L1 table entry pointing to this L2 is
- * updated by mmu_map_user() at task creation time.
+ * Each user task owns a private 16 KB L1 page table (@pgd). The kernel
+ * half (VA >= 0xC0000000) is copied from the master swapper table at
+ * pgd_alloc() time; the user half is filled by mmu_map_user() with L2
+ * tables for code, bss and the high stack. A context switch loads
+ * @pgd_pa into TTBR0 (see mmu_switch_mm).
  */
 struct mm_struct {
-	u32  *l2;                /* L2 page table (1 KB, 256 entries × 4 B) */
-	u32   l1_idx;            /* L1 index used (VA >> 20) */
+	u32          *pgd;        /* private L1 table (16 KB, 4096 entries) */
+	unsigned long pgd_pa;     /* physical address of @pgd → TTBR0 base */
+	struct mm_l2  l2s[MM_MAX_L2];  /* owned L2 tables (for teardown) */
+	unsigned int  nr_l2;      /* number of L2 tables in use */
+
 	unsigned long code_pa;   /* physical address of user code pages   */
 	unsigned long bss_pa;    /* physical address of BSS pages (0 if none) */
 	unsigned long stack_pa;  /* physical address of user stack pages */
@@ -40,7 +57,6 @@ struct mm_struct {
 	unsigned int  code_pages;  /* number of 4KB code pages  */
 	unsigned int  bss_pages;   /* number of 4KB BSS pages   */
 	unsigned int  stack_pages; /* number of 4KB stack pages */
-	unsigned long l2_pa;       /* physical address of L2 table */
 };
 
 /**
@@ -217,5 +233,10 @@ void page_alloc_init(void);
 struct page *alloc_pages(gfp_t gfp, unsigned int order);
 void mmu_switch_mm(struct mm_struct *mm);
 void __free_pages(struct page *page, unsigned int order);
+
+/* Per-process page tables (arch/arm/mm/mmu.c) */
+int  pgd_alloc(struct mm_struct *mm);
+void pgd_free(struct mm_struct *mm);
+int  mmu_map_user(struct mm_struct *mm);
 
 #endif /* _MM_H */

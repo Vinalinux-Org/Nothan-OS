@@ -30,12 +30,12 @@ void do_exit(int code)
 	if (tsk->mm) {
 		struct zone *zone = get_zone();
 
-		/* Clear L1[0] before freeing L2 */
+		/* Switch off this task's address space (TTBR0 → swapper) before
+		 * freeing its page tables, since they are the active TTBR0. */
 		mmu_switch_mm(NULL);
 
-		/* free L2 page table */
-		if (tsk->mm->l2)
-			kfree(tsk->mm->l2);
+		/* Free the private L1 + its L2 tables. */
+		pgd_free(tsk->mm);
 
 		/* Compute orders matching how spawn allocated. */
 		unsigned int code_order = 0;

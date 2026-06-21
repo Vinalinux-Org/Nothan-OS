@@ -323,17 +323,40 @@ static long sys_kill(unsigned long a0, unsigned long a1, unsigned long a2)
 
 			if (tsk->mm) {
 				struct zone *zone = get_zone();
-				if (tsk->mm->l2)
-					kfree(tsk->mm->l2);
+				struct mm_struct *mm = tsk->mm;
+
+				/* Free the private page tables (L2s + 16 KB L1). The
+				 * killed task is not current, so its TTBR0 is not
+				 * active — safe to tear down directly. */
+				pgd_free(mm);
+
+				unsigned int code_order = 0;
+				while ((1u << code_order) < mm->code_pages)
+					code_order++;
 				struct page *cp = pfn_to_page(zone,
-					(tsk->mm->code_pa - zone->base_pa) >> PAGE_SHIFT);
+					(mm->code_pa - zone->base_pa) >> PAGE_SHIFT);
 				if (cp)
-					__free_pages(cp, 0);
+					__free_pages(cp, code_order);
+
+				if (mm->bss_pa) {
+					unsigned int bss_order = 0;
+					while ((1u << bss_order) < mm->bss_pages)
+						bss_order++;
+					struct page *bp = pfn_to_page(zone,
+						(mm->bss_pa - zone->base_pa) >> PAGE_SHIFT);
+					if (bp)
+						__free_pages(bp, bss_order);
+				}
+
+				unsigned int stack_order = 0;
+				while ((1u << stack_order) < mm->stack_pages)
+					stack_order++;
 				struct page *sp = pfn_to_page(zone,
-					(tsk->mm->stack_pa - zone->base_pa) >> PAGE_SHIFT);
+					(mm->stack_pa - zone->base_pa) >> PAGE_SHIFT);
 				if (sp)
-					__free_pages(sp, 0);
-				kfree(tsk->mm);
+					__free_pages(sp, stack_order);
+
+				kfree(mm);
 				tsk->mm = NULL;
 			}
 

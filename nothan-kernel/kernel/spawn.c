@@ -90,7 +90,13 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 }
 
 extern void user_task_trampoline(void);
-extern void mmu_map_user(struct mm_struct *mm);
+
+/*
+ * User stack top VA. Lives high (near TASK_SIZE, like Linux) so it stays
+ * far from the low code+bss region — bss/heap can grow without ever
+ * reaching the stack. The stack itself occupies the pages just below.
+ */
+#define USER_STACK_TOP  0xBF000000UL
 
 /* Embedded user-space binaries (linked in by userspace_blobs.S). */
 extern char _binary_user_shell_start[];
@@ -231,12 +237,19 @@ struct task_struct *user_task_create_bin(const char *name,
 	}
 	unsigned long stack_pa = page_to_phys(zone, stack_pg);
 
+	mm->code_pa     = code_pa;
+	mm->stack_pa    = stack_pa;
+	mm->stack_pages = USER_STACK_PAGES;
+	mm->entry_va    = USER_BIN_ENTRY;	/* _start, after 16-byte binary header */
+	mm->sp_top      = USER_STACK_TOP;	/* high VA; stack grows down from here */
+
 	/*
-	 * L2 page table must be 1KB-aligned. slab classes ≥ 1024 bytes are
-	 * power-of-2 aligned, so kmalloc(1024) satisfies the constraint.
+	 * Private page tables: a 16 KB L1 (kernel half shared with swapper),
+	 * then L2 tables for code (low), bss (after code) and the high stack.
+	 * The stack lives near TASK_SIZE so a large bss can never reach it.
 	 */
-	u32 *l2 = (u32 *)kmalloc(1024, GFP_KERNEL);
-	if (!l2) {
+	if (pgd_alloc(mm) || mmu_map_user(mm)) {
+		pgd_free(mm);
 		__free_pages(stack_pg, USER_STACK_ORDER);
 		if (bss_pg)
 			__free_pages(bss_pg, bss_order);
@@ -244,16 +257,6 @@ struct task_struct *user_task_create_bin(const char *name,
 		kfree(mm); kfree(ksp); kfree(p);
 		return NULL;
 	}
-
-	mm->l2          = l2;
-	mm->l1_idx      = 0;		/* L1[0] covers VA 0x00000000–0x000FFFFF */
-	mm->code_pa     = code_pa;
-	mm->stack_pa    = stack_pa;
-	mm->stack_pages = USER_STACK_PAGES;
-	mm->entry_va    = USER_BIN_ENTRY;	/* _start, after 16-byte binary header */
-	mm->sp_top      = 0x00100000;		/* user stack grows down from here */
-
-	mmu_map_user(mm);
 
 	/*
 	 * Pre-build the __switch_to kernel stack frame:
@@ -311,6 +314,8 @@ struct task_struct *user_task_create_bin(const char *name,
 
 	printk("[SPAWN] user task \"%s\" pid=%d, code_pa=0x%lx, stack_pa=0x%lx\n",
 	       p->comm, p->pid, code_pa, stack_pa);
+	printk("[SPAWN]   pgd_pa=0x%lx nr_l2=%u sp_top=0x%lx (stack high VA)\n",
+	       mm->pgd_pa, mm->nr_l2, mm->sp_top);
 
 	return p;
 }

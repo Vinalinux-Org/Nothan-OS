@@ -7,6 +7,7 @@
 #include <nothan/types.h>
 #include <nothan/printk.h>
 #include <nothan/mm.h>
+#include <nothan/slab.h>
 #include <asm/memory.h>
 #include <asm/pgtable.h>
 #include <asm/barrier.h>
@@ -91,10 +92,11 @@ void mmu_log_config(void)
 }
 
 /*
- * pgd_kva() - return kernel VA of the global L1 page table
+ * pgd_kva() - return kernel VA of the global L1 page table (swapper)
  *
  * After MMU is on, the PGD physical address is biased by MMU_OFFSET.
- * We access it through the kernel direct-map.
+ * We access it through the kernel direct-map. This master table holds
+ * the kernel-half entries every process page table shares.
  */
 static inline u32 *pgd_kva(void)
 {
@@ -102,103 +104,197 @@ static inline u32 *pgd_kva(void)
 	return (u32 *)((unsigned long)pgd_phys + (PAGE_OFFSET - PHYS_OFFSET));
 }
 
-/**
- * mmu_map_user() - install a user-space L2 mapping into the global L1 table
- * @mm: mm_struct with l2, l1_idx, code_pa, stack_pa, entry_va, sp_top set.
+/* ===================================================================
+ * Per-process page tables
  *
- * Builds L2 entries:
- *   code page : user RO + executable, Normal WB/WA, nG
- *   stack page: user RW + XN,         Normal WB/WA, nG
- *
- * Then patches the global L1 table at l1_idx to point to the L2 table
- * and flushes the TLB.
- *
- * VA layout (both pages in same 1MB window, L1[l1_idx]):
- *   code  VA = l1_idx << 20 | 0x10000  → L2[0x10]
- *   stack VA = l1_idx << 20 | 0xFF000  → L2[0xFF], grows down from +0x1000
- */
-void mmu_map_user(struct mm_struct *mm)
+ * Each user task owns a private 16 KB L1 (@mm->pgd). The kernel half
+ * (L1 indices >= 0xC00, i.e. VA >= 0xC0000000) is copied from the
+ * swapper table so kernel/MMIO mappings stay valid while the task's
+ * TTBR0 is active. The user half is built from 1 KB L2 tables, one per
+ * touched 1 MB window. A context switch loads @mm->pgd_pa into TTBR0.
+ * =================================================================== */
+
+#define USER_L1_END	0xC00		/* first kernel L1 index (VA 0xC0000000) */
+#define USER_CODE_VA	0x00010000UL	/* user image base (matches user.lds) */
+#define TTBR0_FLAGS	0x4A		/* walk attributes — same as boot TTBR0 */
+
+#define L2_ATTR_MEM	(PTE_SMALL_C | PTE_SMALL_B)
+#define L2_USER_RW	(PTE_SMALL_AP_BOTH | PTE_SMALL_NG)
+#define PTE_USER_CODE	(L2_ATTR_MEM | L2_USER_RW)			/* RW + exec */
+#define PTE_USER_DATA	(PTE_SMALL_XN | L2_ATTR_MEM | L2_USER_RW)	/* RW + XN  */
+
+static inline unsigned long kva_to_phys(void *kva)
 {
-	u32 *l2  = mm->l2;
-	/* Zero L2 table (256 entries = 1 KB). */
+	return (unsigned long)kva - MMU_OFFSET;
+}
+
+/* Clean a page-table region to PoC so the MMU table walker sees writes. */
+static inline void pt_clean(void *addr, unsigned int size)
+{
+	clean_dcache_range((unsigned long)addr, (unsigned long)addr + size);
+}
+
+/**
+ * pgd_alloc() - allocate a private L1 table for @mm
+ *
+ * 16 KB, naturally 16 KB-aligned (buddy order 2) as TTBR0 requires.
+ * User half is zeroed; kernel half is copied from the swapper table.
+ */
+int pgd_alloc(struct mm_struct *mm)
+{
+	struct zone *zone = get_zone();
+	struct page *pg = alloc_pages(GFP_KERNEL, 2);	/* 4 pages = 16 KB */
+	if (!pg) {
+		printk("[MMU] pgd_alloc: out of memory\n");
+		return -1;
+	}
+
+	unsigned long pa = page_to_phys(zone, pg);
+	u32 *pgd = (u32 *)phys_to_kva(pa);
+	u32 *swapper = pgd_kva();
+
+	if (pa & 0x3FFF)
+		printk("[MMU] WARNING pgd_pa 0x%lx not 16KB-aligned\n", pa);
+
+	for (unsigned int i = 0; i < USER_L1_END; i++)
+		pgd[i] = 0;				/* user half: empty */
+	for (unsigned int i = USER_L1_END; i < 4096; i++)
+		pgd[i] = swapper[i];			/* kernel half: shared */
+
+	pt_clean(pgd, 16384);
+
+	mm->pgd    = pgd;
+	mm->pgd_pa = pa;
+	mm->nr_l2  = 0;
+	return 0;
+}
+
+/* Find the L2 table for @l1_idx in @mm, creating + installing one if needed. */
+static u32 *l2_for(struct mm_struct *mm, unsigned int l1_idx)
+{
+	for (unsigned int i = 0; i < mm->nr_l2; i++)
+		if (mm->l2s[i].l1_idx == l1_idx)
+			return mm->l2s[i].l2;
+
+	if (mm->nr_l2 >= MM_MAX_L2) {
+		printk("[MMU] l2_for: out of L2 slots (l1_idx=0x%x)\n", l1_idx);
+		return NULL;
+	}
+
+	/* 1 KB slab class is 1 KB-aligned, which L2 coarse tables require. */
+	u32 *l2 = (u32 *)kmalloc(1024, GFP_KERNEL);
+	if (!l2) {
+		printk("[MMU] l2_for: kmalloc failed\n");
+		return NULL;
+	}
 	for (unsigned int i = 0; i < 256; i++)
 		l2[i] = 0;
 
-	/*
-	 * L2 attribute flags (extended format, TRE=0 → C,B only for memory type):
-	 *   AP1|nG = user RO,  AP1|AP0|nG = user RW
-	 */
-#define L2_ATTR_MEM     (PTE_SMALL_C | PTE_SMALL_B)
-#define L2_USER_RW      (PTE_SMALL_AP_BOTH | PTE_SMALL_NG)
+	unsigned long l2_pa = kva_to_phys(l2);
+	mm->pgd[l1_idx] = (l2_pa & 0xFFFFFC00)
+			| PMD_SECT_DOMAIN(DOMAIN_USER) | PMD_TYPE_TABLE;
+	pt_clean(&mm->pgd[l1_idx], 4);
 
-	/*
-	 * Code pages start at VA 0x10000 (L2 index 0x10). entry_va is 0x10010
-	 * (after the binary header), so mask off the low 12 bits.
-	 */
-	unsigned int code_l2_idx = (mm->entry_va & 0x000FF000) >> 12;
-	for (unsigned int i = 0; i < mm->code_pages; i++) {
-		unsigned long pa = mm->code_pa + (i << 12);
-		l2[code_l2_idx + i] = (pa & 0xFFFFF000)
-			  | PTE_TYPE_SMALL | L2_ATTR_MEM | L2_USER_RW;
-	}
-
-	/* BSS pages: RW + XN, placed right after the code pages */
-	unsigned int bss_l2_idx = code_l2_idx + mm->code_pages;
-	for (unsigned int i = 0; i < mm->bss_pages; i++) {
-		unsigned long pa = mm->bss_pa + (i << 12);
-		l2[bss_l2_idx + i] = (pa & 0xFFFFF000)
-			  | PTE_TYPE_SMALL | PTE_SMALL_XN
-			  | L2_ATTR_MEM | L2_USER_RW;
-	}
-
-	/*
-	 * Stack pages: RW + XN, mapped right below sp_top.
-	 * stack_pa is the lowest stack page (highest VA index = sp_top - 1).
-	 */
-	unsigned int stack_top_idx = ((mm->sp_top - 1) & 0x000FF000) >> 12;
-	for (unsigned int i = 0; i < mm->stack_pages; i++) {
-		unsigned long pa = mm->stack_pa + (i << 12);
-		l2[stack_top_idx - (mm->stack_pages - 1) + i] =
-			(pa & 0xFFFFF000)
-			| PTE_TYPE_SMALL | PTE_SMALL_XN
-			| L2_ATTR_MEM | L2_USER_RW;
-	}
-
-	/* Save L2 physical address for context-switch by schedule() */
-	mm->l2_pa = (u32)(unsigned long)l2 - (PAGE_OFFSET - PHYS_OFFSET);
-
-	/* Cache maintenance: clean L2 table to PoC */
-	for (unsigned int i = 0; i < 1024; i += 64)
-		__asm__ __volatile__(
-			"mcr p15, 0, %0, c7, c10, 1\n"
-			: : "r" ((char *)l2 + i) : "memory");
-	dsb();
+	mm->l2s[mm->nr_l2].l2     = l2;
+	mm->l2s[mm->nr_l2].l1_idx = l1_idx;
+	mm->nr_l2++;
+	return l2;
 }
 
-/*
- * mmu_switch_mm() - switch L1[0] to a task's L2 table
- * @mm: the new task's mm_struct (NULL clears user mapping)
+/* Map @npages of [@pa..] at user VA [@va..] with @pte_flags. */
+static int map_user_range(struct mm_struct *mm, unsigned long va,
+			  unsigned long pa, unsigned int npages, u32 pte_flags)
+{
+	for (unsigned int i = 0; i < npages; i++) {
+		u32 *l2 = l2_for(mm, va >> 20);
+		if (!l2)
+			return -1;
+		l2[(va >> 12) & 0xFF] = (pa & 0xFFFFF000) | PTE_TYPE_SMALL | pte_flags;
+		va += PAGE_SIZE;
+		pa += PAGE_SIZE;
+	}
+	return 0;
+}
+
+/**
+ * mmu_map_user() - build a task's user mappings into its private L1
+ * @mm: mm with pgd allocated and code/bss/stack pages + sizes + sp_top set.
  *
- * Called during schedule() after __switch_to.  Writes L1[0] in the
- * global PGD to point to @mm->l2_pa so the new task's user pages
- * are visible.  Flushes the TLB after the change.
+ * Code (RW+exec) at USER_CODE_VA, bss (RW+XN) immediately after it, and
+ * the stack (RW+XN) just below sp_top — the stack lives high (near
+ * TASK_SIZE) so it can never collide with a growing bss/heap.
+ */
+int mmu_map_user(struct mm_struct *mm)
+{
+	unsigned long code_va  = USER_CODE_VA;
+	unsigned long bss_va   = USER_CODE_VA +
+				 (unsigned long)mm->code_pages * PAGE_SIZE;
+	unsigned long stack_va = mm->sp_top -
+				 (unsigned long)mm->stack_pages * PAGE_SIZE;
+
+	if (map_user_range(mm, code_va, mm->code_pa, mm->code_pages, PTE_USER_CODE))
+		return -1;
+	if (mm->bss_pages &&
+	    map_user_range(mm, bss_va, mm->bss_pa, mm->bss_pages, PTE_USER_DATA))
+		return -1;
+	if (map_user_range(mm, stack_va, mm->stack_pa, mm->stack_pages, PTE_USER_DATA))
+		return -1;
+
+	/* Clean every L2 table to PoC for the walker. */
+	for (unsigned int i = 0; i < mm->nr_l2; i++)
+		pt_clean(mm->l2s[i].l2, 1024);
+	return 0;
+}
+
+/**
+ * mmu_switch_mm() - install a task's address space into TTBR0
+ * @mm: the next task's mm (NULL for a kernel thread → swapper table)
+ *
+ * Loads the per-process L1 into TTBR0 and flushes the whole TLB (no
+ * ASIDs yet) plus the branch predictor (Cortex-A8 erratum 430973), so
+ * no stale user translations survive the switch. The kernel half is
+ * identical in every table, so kernel code keeps running across it.
  */
 void mmu_switch_mm(struct mm_struct *mm)
 {
-	u32 *pgd = pgd_kva();
+	unsigned long pgd_pa = (mm && mm->pgd_pa)
+			     ? mm->pgd_pa
+			     : ((unsigned long)&__pgd_start - MMU_OFFSET);
+	unsigned long ttbr0 = (pgd_pa & 0xFFFFC000) | TTBR0_FLAGS;
 
-	if (mm && mm->l2_pa) {
-		u32 l1_entry = (mm->l2_pa & 0xFFFFFC00)
-			     | PMD_SECT_DOMAIN(DOMAIN_USER)
-			     | PMD_TYPE_TABLE;
-		pgd[0] = l1_entry;
-	} else {
-		pgd[0] = PMD_TYPE_FAULT;
+	__asm__ __volatile__(
+		"mov	r0, #0\n"
+		"mcr	p15, 0, r0, c13, c0, 1\n"	/* CONTEXTIDR = 0 (no ASID) */
+		"isb\n"
+		"mcr	p15, 0, %0, c2, c0, 0\n"	/* TTBR0 = pgd | flags */
+		"isb\n"
+		"mcr	p15, 0, r0, c8, c7, 0\n"	/* TLBIALL  — flush all TLB */
+		"mcr	p15, 0, r0, c7, c5, 6\n"	/* BPIALL   — flush branch pred */
+		"dsb\n"
+		"isb\n"
+		: : "r" (ttbr0) : "r0", "memory");
+}
+
+/**
+ * pgd_free() - release a task's private page tables
+ *
+ * Frees the owned L2 tables and the 16 KB L1. The user code/bss/stack
+ * physical pages are freed separately by the caller (do_exit).
+ */
+void pgd_free(struct mm_struct *mm)
+{
+	struct zone *zone = get_zone();
+
+	for (unsigned int i = 0; i < mm->nr_l2; i++)
+		kfree(mm->l2s[i].l2);
+	mm->nr_l2 = 0;
+
+	if (mm->pgd_pa) {
+		struct page *pg = pfn_to_page(zone,
+			(mm->pgd_pa - zone->base_pa) >> PAGE_SHIFT);
+		if (pg)
+			__free_pages(pg, 2);
+		mm->pgd_pa = 0;
+		mm->pgd = NULL;
 	}
-	dsb();
-
-	/* Clean PGD entry + flush TLB */
-	__asm__ __volatile__("mcr p15, 0, %0, c7, c10, 1\n" : : "r" (&pgd[0]) : "memory");
-	dsb();
-	__asm__ __volatile__("mcr p15, 0, %0, c8, c7, 0\n" "dsb\n" "isb\n" : : "r"(0) : "memory");
 }
