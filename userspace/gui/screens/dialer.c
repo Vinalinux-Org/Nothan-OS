@@ -21,9 +21,7 @@ static int32_t kp_col_dsc[] = { LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1),
 static int32_t kp_row_dsc[] = { LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1),
 				LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST };
 
-/* Pre-filled sample so the dialer reads as populated without an input
- * device; the keypad still edits it for when touch/keypad lands. */
-static char        num_buf[24] = "0912 345 678";
+static char        num_buf[24];
 static lv_obj_t   *num_label;
 static struct call_info dialer_call;
 
@@ -127,7 +125,20 @@ static lv_obj_t *round_button(lv_obj_t *parent, const char *symbol, uint32_t col
 
 void dialer_create(lv_obj_t *screen, void *arg)
 {
-	(void)arg;
+	/* Start empty; copy the pre-fill from the caller (phone number string)
+	 * when opened from a contact — argv is always a string literal from the
+	 * contacts store so it is valid for the lifetime of the screen. */
+	const char *prefill = arg;
+	num_buf[0] = '\0';
+	if (prefill) {
+		int i = 0;
+		while (prefill[i] && i < (int)sizeof(num_buf) - 1) {
+			num_buf[i] = prefill[i];
+			i++;
+		}
+		num_buf[i] = '\0';
+	}
+
 	gui_log("screen: dialer\n");
 
 	app_header_create(screen, "Phone", NULL);
@@ -136,13 +147,13 @@ void dialer_create(lv_obj_t *screen, void *arg)
 	lv_label_set_text(num_label, num_buf);
 	lv_obj_set_style_text_color(num_label, theme_color(THEME_TEXT), 0);
 	lv_obj_set_style_text_font(num_label, &lv_font_montserrat_24, 0);
-	lv_obj_align(num_label, LV_ALIGN_TOP_MID, 0, APP_HEADER_HEIGHT + 20);
+	lv_obj_align(num_label, LV_ALIGN_TOP_MID, 0, APP_HEADER_HEIGHT + 36);
 
-	/* Even 4-row × 3-column dial grid. */
+	/* Even 4-row × 3-column dial grid, shifted lower for iPhone-style layout. */
 	lv_obj_t *grid = lv_obj_create(screen);
 	lv_obj_remove_style_all(grid);
 	lv_obj_set_size(grid, lv_pct(84), 4 * KEY_SZ + 36);
-	lv_obj_align(grid, LV_ALIGN_TOP_MID, 0, APP_HEADER_HEIGHT + 56);
+	lv_obj_align(grid, LV_ALIGN_TOP_MID, 0, APP_HEADER_HEIGHT + 120);
 	lv_obj_set_grid_dsc_array(grid, kp_col_dsc, kp_row_dsc);
 	lv_obj_clear_flag(grid, LV_OBJ_FLAG_SCROLLABLE);
 
