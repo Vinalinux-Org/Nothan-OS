@@ -7,9 +7,13 @@
 #include "home.h"
 #include "../theme/theme.h"
 #include "../core/log.h"
+#include "../core/nav.h"
 #include "../widgets/status_bar.h"
 #include "../widgets/app_tile.h"
 #include "../widgets/nav_bar.h"
+#include "dialer.h"
+#include "sms_list.h"
+#include "contacts_list.h"
 
 #define STATUS_H   28
 #define SEARCH_H   40
@@ -21,15 +25,16 @@
 static lv_obj_t *home_grid;
 
 struct app_def {
-	const char *symbol;
-	const char *label;
-	uint32_t    color;
+	const char    *symbol;
+	const char    *label;
+	uint32_t       color;
+	nav_builder_fn builder;   /* NULL = stub app (no screen yet) */
 };
 
 static const struct app_def apps[] = {
-	{ LV_SYMBOL_CALL,      "Phone",    0x7C3AED },
-	{ LV_SYMBOL_ENVELOPE,  "Messages", 0x3B82F6 },
-	{ LV_SYMBOL_LIST,      "Contacts", 0xEC4899 },
+	{ LV_SYMBOL_CALL,      "Phone",    0x7C3AED, dialer_create },
+	{ LV_SYMBOL_ENVELOPE,  "Messages", 0x3B82F6, sms_list_create },
+	{ LV_SYMBOL_LIST,      "Contacts", 0xEC4899, contacts_list_create },
 	{ LV_SYMBOL_GPS,       "Maps",     0xF59E0B },
 	{ LV_SYMBOL_EDIT,      "Notes",    0xEAB308 },
 	{ LV_SYMBOL_SETTINGS,  "Settings", 0x64748B },
@@ -55,11 +60,18 @@ static const struct app_def apps[] = {
 #define APP_COUNT  (int)(sizeof(apps) / sizeof(apps[0]))
 
 static const struct app_def dock_apps[4] = {
-	{ LV_SYMBOL_CALL,     NULL, 0x22C55E },
-	{ LV_SYMBOL_ENVELOPE, NULL, 0x3B82F6 },
-	{ LV_SYMBOL_LIST,     NULL, 0xEC4899 },
+	{ LV_SYMBOL_CALL,     NULL, 0x22C55E, dialer_create },
+	{ LV_SYMBOL_ENVELOPE, NULL, 0x3B82F6, sms_list_create },
+	{ LV_SYMBOL_LIST,     NULL, 0xEC4899, contacts_list_create },
 	{ LV_SYMBOL_IMAGE,    NULL, 0x64748B },
 };
+
+/* Generic tile click handler — user_data carries the nav_builder_fn. */
+static void on_app_tile(lv_event_t *e)
+{
+	uintptr_t u = (uintptr_t)lv_event_get_user_data(e);
+	nav_push((nav_builder_fn)u, NULL);
+}
 
 static void build_search_bar(lv_obj_t *parent)
 {
@@ -107,9 +119,16 @@ static void build_dock(lv_obj_t *parent)
 	lv_obj_set_flex_align(dock, LV_FLEX_ALIGN_SPACE_EVENLY,
 			      LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-	for (int i = 0; i < 4; i++)
-		app_tile_create(dock, dock_apps[i].symbol, dock_apps[i].label,
-				dock_apps[i].color);
+	for (int i = 0; i < 4; i++) {
+		lv_obj_t *t = app_tile_create(dock, dock_apps[i].symbol,
+					      dock_apps[i].label,
+					      dock_apps[i].color);
+		if (dock_apps[i].builder) {
+			lv_obj_t *badge = lv_obj_get_child(t, 0);
+			lv_obj_add_event_cb(badge, on_app_tile, LV_EVENT_CLICKED,
+					    (void *)(uintptr_t)dock_apps[i].builder);
+		}
+	}
 }
 
 void home_create(lv_obj_t *parent, void *arg)
@@ -154,9 +173,15 @@ void home_create(lv_obj_t *parent, void *arg)
 	lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_SPACE_EVENLY,
 			      LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-	for (int i = 0; i < APP_COUNT; i++)
-		app_tile_create(grid, apps[i].symbol, apps[i].label,
-				apps[i].color);
+	for (int i = 0; i < APP_COUNT; i++) {
+		lv_obj_t *t = app_tile_create(grid, apps[i].symbol,
+					      apps[i].label, apps[i].color);
+		if (apps[i].builder) {
+			lv_obj_t *badge = lv_obj_get_child(t, 0);
+			lv_obj_add_event_cb(badge, on_app_tile, LV_EVENT_CLICKED,
+					    (void *)(uintptr_t)apps[i].builder);
+		}
+	}
 
 	build_dock(parent);
 
