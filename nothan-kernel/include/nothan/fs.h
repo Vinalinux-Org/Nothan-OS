@@ -8,6 +8,7 @@
 #define O_RDONLY 0x0000
 #define O_WRONLY 0x0001
 #define O_RDWR   0x0002
+#define O_CREAT  0x0040
 
 #define S_IFMT   0xF000
 #define S_IFDIR  0x4000
@@ -36,6 +37,8 @@ struct super_operations {
 	int (*read_inode)(struct inode *inode);
 	struct inode *(*lookup_root)(struct super_block *sb, const char *name);
 	struct inode *(*dirlookup)(struct inode *dir, const char *name);
+	struct inode *(*create)(struct super_block *sb, struct inode *dir,
+				const char *name);
 	int (*readdir)(struct inode *dir, struct file_entry *buf, int max);
 };
 

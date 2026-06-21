@@ -217,9 +217,62 @@ static int omap_hsmmc_read_block(struct gendisk *disk, u64 block, void *buf)
 	return 0;
 }
 
+static int omap_hsmmc_write_block(struct gendisk *disk, u64 block, const void *buf)
+{
+	int timeout;
+
+	(void)disk;
+
+	mmc_write(MMCHS_BLK, 512 | (1 << 16));
+
+	/*
+	 * CMD24 (WRITE_SINGLE_BLOCK). DP (bit 21) = data present; the DDIR
+	 * bit (4) stays clear to mark a host->card transfer (read uses it set).
+	 */
+	if (mmc_send_cmd(24, (uint32_t)block, RSP_R1 | (1 << 21)) != 0) {
+		printk("[MMC] Write block %u failed\n", (unsigned int)block);
+		return -1;
+	}
+
+	/* Wait for Buffer Write Ready */
+	timeout = 10000000;
+	while (!(mmc_read(MMCHS_STAT) & STAT_BWR)) {
+		if (mmc_read(MMCHS_STAT) & STAT_ERRI) {
+			printk("[MMC] BWR error at block %llu\n", (unsigned long long)block);
+			return -1;
+		}
+		if (--timeout == 0) {
+			printk("[MMC] BWR timeout at block %llu\n", (unsigned long long)block);
+			return -1;
+		}
+	}
+	mmc_write(MMCHS_STAT, STAT_BWR);
+
+	/* Write 512 bytes (128 words) */
+	const uint32_t *p = (const uint32_t *)buf;
+	for (int i = 0; i < 128; i++)
+		mmc_write(MMCHS_DATA, p[i]);
+
+	/* Wait for Transfer Complete */
+	timeout = 10000000;
+	while (!(mmc_read(MMCHS_STAT) & STAT_TC)) {
+		if (mmc_read(MMCHS_STAT) & STAT_ERRI) {
+			printk("[MMC] TC error at block %llu\n", (unsigned long long)block);
+			return -1;
+		}
+		if (--timeout == 0) {
+			printk("[MMC] TC timeout at block %llu\n", (unsigned long long)block);
+			return -1;
+		}
+	}
+	mmc_write(MMCHS_STAT, STAT_TC);
+
+	return 0;
+}
+
 static const struct block_device_operations omap_hsmmc_ops = {
 	.read_block  = omap_hsmmc_read_block,
-	.write_block = NULL,
+	.write_block = omap_hsmmc_write_block,
 };
 
 static struct gendisk omap_hsmmc_disk = {

@@ -19,6 +19,74 @@ extern struct task_struct *user_task_create(const char *name);
 extern struct task_struct *user_task_create_gui(void);
 extern struct task_struct *kernel_spawn(const char *path);
 
+/*
+ * Set to 1 to run the FAT32 write self-test at boot. Pure UART output —
+ * needs no touchscreen or shell. Verified PASS on BBB 2026-06-21
+ * (round-trip + boot counter persists across reboots); left off now.
+ */
+#define FAT_WRITE_SELFTEST  0
+
+#if FAT_WRITE_SELFTEST
+/*
+ * fat_write_selftest() - Exercise the FAT32 write path over UART only.
+ *
+ * 1. Round-trip: create /NOTHAN.TST, write a marker, read it back, and
+ *    compare — proves create + write + read in one boot.
+ * 2. Boot counter: read a u32 from /BOOTCNT.BIN, increment, write it
+ *    back. The count climbing across power cycles proves the data
+ *    actually persists on the SD card, not just in RAM.
+ */
+static void fat_write_selftest(void)
+{
+	static const char marker[] = "NothanOS FAT32 write works";
+	char rb[40];
+	int fd, n;
+
+	printk("[FATTEST] --- begin ---\n");
+
+	/* (1) Round-trip a known string. */
+	fd = vfs_open("/NOTHAN.TST", O_WRONLY | O_CREAT);
+	if (fd < 0) {
+		printk("[FATTEST] open(create) FAILED\n");
+		return;
+	}
+	n = vfs_write(fd, marker, sizeof(marker));
+	vfs_close(fd);
+	printk("[FATTEST] wrote %d bytes\n", n);
+
+	fd = vfs_open("/NOTHAN.TST", O_RDONLY);
+	if (fd < 0) {
+		printk("[FATTEST] reopen FAILED\n");
+		return;
+	}
+	n = vfs_read(fd, rb, sizeof(rb));
+	vfs_close(fd);
+
+	int match = (n == (int)sizeof(marker));
+	for (int i = 0; match && i < n; i++)
+		if (rb[i] != marker[i])
+			match = 0;
+	printk("[FATTEST] read %d bytes, round-trip %s\n",
+	       n, match ? "PASS" : "FAIL");
+
+	/* (2) Persistence counter across reboots. */
+	unsigned int boot = 0;
+	fd = vfs_open("/BOOTCNT.BIN", O_RDONLY);
+	if (fd >= 0) {
+		vfs_read(fd, (char *)&boot, sizeof(boot));
+		vfs_close(fd);
+	}
+	boot++;
+	fd = vfs_open("/BOOTCNT.BIN", O_WRONLY | O_CREAT);
+	if (fd >= 0) {
+		vfs_write(fd, (const char *)&boot, sizeof(boot));
+		vfs_close(fd);
+	}
+	printk("[FATTEST] boot count = %u (should climb every reboot)\n", boot);
+	printk("[FATTEST] --- end ---\n");
+}
+#endif
+
 void kernel_main(void)
 {
 	printk("[BOOT] page_alloc_init\n");
@@ -51,10 +119,14 @@ void kernel_main(void)
 	do_initcalls();        /* tda19988_init runs here as device_initcall */
 	printk("[BOOT] do_initcalls done\n");
 
-	if (vfs_mount("sda", "fat32") != 0)
+	if (vfs_mount("sda", "fat32") != 0) {
 		printk("[VFS] SD card mount failed\n");
-	else
+	} else {
 		printk("[VFS] fat32 mounted\n");
+#if FAT_WRITE_SELFTEST
+		fat_write_selftest();
+#endif
+	}
 
 	vfs_mount(NULL, "devfs");
 	printk("[VFS] devfs mounted\n");

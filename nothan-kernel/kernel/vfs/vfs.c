@@ -71,6 +71,21 @@ static int is_dev_prefix(const char *p)
 	       (p[3] == '/' || p[3] == '\0');
 }
 
+/*
+ * vfs_free_inode() - Release an inode via its filesystem's destroy_inode,
+ * which knows whether i_private is owned (FAT) or borrowed (devfs cdev).
+ * Falls back to a plain kfree if the FS provides no hook.
+ */
+static void vfs_free_inode(struct inode *inode)
+{
+	if (!inode)
+		return;
+	if (inode->i_sb && inode->i_sb->s_op && inode->i_sb->s_op->destroy_inode)
+		inode->i_sb->s_op->destroy_inode(inode);
+	else
+		kfree(inode);
+}
+
 static struct inode *walk_path(const char *pathname)
 {
 	if (!root_sb || !root_sb->s_op || !root_sb->s_op->dirlookup)
@@ -121,6 +136,75 @@ static struct inode *walk_path(const char *pathname)
 }
 
 /**
+ * vfs_create_path() - Create a missing file for O_CREAT
+ * @pathname: Path of the file to create
+ *
+ * Splits @pathname into a parent directory and a final component, walks
+ * to the parent, and asks the filesystem to create the entry. Only the
+ * final component is created — the parent directory must already exist.
+ * /dev paths are not creatable.
+ *
+ * Return: Inode for the new file, or NULL on error.
+ */
+static struct inode *vfs_create_path(const char *pathname)
+{
+	if (!root_sb || !root_sb->s_op || !root_sb->s_op->create)
+		return NULL;
+
+	while (*pathname == '/')
+		pathname++;
+
+	if (devfs_sb && is_dev_prefix(pathname))
+		return NULL;
+
+	/* Locate the final path component. */
+	const char *last_slash = NULL;
+	for (const char *p = pathname; *p; p++)
+		if (*p == '/')
+			last_slash = p;
+
+	struct inode *parent;
+	const char *name;
+	int free_parent = 0;
+
+	if (!last_slash) {
+		/* File lives directly in the root directory. */
+		if (!root_sb->s_root || !root_sb->s_root->d_inode)
+			return NULL;
+		parent = root_sb->s_root->d_inode;
+		name = pathname;
+	} else {
+		char parent_path[256];
+		int len = last_slash - pathname;
+		if (len > 255)
+			return NULL;
+		for (int i = 0; i < len; i++)
+			parent_path[i] = pathname[i];
+		parent_path[len] = '\0';
+		parent = walk_path(parent_path);
+		if (!parent || !(parent->i_mode & S_IFDIR)) {
+			if (parent)
+				vfs_free_inode(parent);
+			return NULL;
+		}
+		free_parent = 1;
+		name = last_slash + 1;
+	}
+
+	if (*name == '\0') {
+		if (free_parent)
+			vfs_free_inode(parent);
+		return NULL;
+	}
+
+	struct inode *inode = root_sb->s_op->create(root_sb, parent, name);
+
+	if (free_parent)
+		vfs_free_inode(parent);
+	return inode;
+}
+
+/**
  * vfs_open() - Open a file
  * @pathname: Path to the file (e.g., "SHELL.BIN", "/bin/hello")
  * @flags: Open flags (O_RDONLY, O_WRONLY, etc.)
@@ -159,6 +243,8 @@ int vfs_open(const char *pathname, int flags)
 	}
 
 	struct inode *inode = walk_path(pathname);
+	if (!inode && (flags & O_CREAT))
+		inode = vfs_create_path(pathname);
 	if (!inode) {
 		fd_table[fd] = NULL;
 		return -1;
@@ -166,14 +252,14 @@ int vfs_open(const char *pathname, int flags)
 
 	/* Directories cannot be opened as files */
 	if (inode->i_mode & S_IFDIR) {
-		kfree(inode);
+		vfs_free_inode(inode);
 		fd_table[fd] = NULL;
 		return -1;
 	}
 
 	struct file *f = (struct file *)kmalloc(sizeof(*f), GFP_KERNEL);
 	if (!f) {
-		kfree(inode);
+		vfs_free_inode(inode);
 		fd_table[fd] = NULL;
 		return -1;
 	}
@@ -187,7 +273,7 @@ int vfs_open(const char *pathname, int flags)
 	if (f->f_op && f->f_op->open) {
 		if (f->f_op->open(inode, f) != 0) {
 			kfree(f);
-			kfree(inode);
+			vfs_free_inode(inode);
 			fd_table[fd] = NULL;
 			return -1;
 		}
@@ -246,6 +332,7 @@ int vfs_close(int fd)
 	struct file *f = fd_table[fd];
 	if (f->f_op && f->f_op->release)
 		f->f_op->release(f->f_inode, f);
+	vfs_free_inode(f->f_inode);
 	kfree(f);
 	fd_table[fd] = NULL;
 	return 0;

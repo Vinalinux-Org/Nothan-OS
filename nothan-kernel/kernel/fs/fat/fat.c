@@ -7,12 +7,22 @@
 #include <nothan/printk.h>
 #include <nothan/slab.h>
 
+static void fat32_destroy_inode(struct inode *inode)
+{
+	if (!inode)
+		return;
+	if (inode->i_private)
+		kfree(inode->i_private);
+	kfree(inode);
+}
+
 static struct super_operations fat32_s_op = {
 	.alloc_inode   = NULL,
-	.destroy_inode = NULL,
+	.destroy_inode = fat32_destroy_inode,
 	.read_inode    = NULL,
 	.lookup_root   = fat32_lookup_root,
 	.dirlookup     = fat32_dirlookup,
+	.create        = fat32_create_file,
 	.readdir       = fat32_readdir,
 };
 
@@ -120,6 +130,13 @@ int fat32_mount(struct super_block *sb)
 	info->fat_start_lba       = part_lba + bpb->reserved_sector_count;
 	info->cluster_start_lba   = info->fat_start_lba + (bpb->num_fats * bpb->fat_size_32);
 	info->root_cluster        = bpb->root_cluster;
+	info->fat_size_32         = bpb->fat_size_32;
+	info->num_fats            = bpb->num_fats;
+
+	/* Data region = total - reserved - all FAT copies; clusters start at 2. */
+	uint32_t data_sectors = bpb->total_sectors_32 - bpb->reserved_sector_count -
+				(bpb->num_fats * bpb->fat_size_32);
+	info->total_clusters      = data_sectors / bpb->sectors_per_cluster;
 
 	sb->s_fs_info  = info;
 	sb->s_op       = &fat32_s_op;
@@ -180,4 +197,96 @@ uint32_t fat32_get_next_cluster(struct super_block *sb, uint32_t current_cluster
 		return FAT32_EOC;
 
 	return next_cluster;
+}
+
+/**
+ * fat32_set_fat_entry() - Write a value into a cluster's FAT entry
+ * @sb: The super_block
+ * @cluster: Cluster whose FAT entry to update
+ * @value: New 28-bit value (next cluster, or FAT32_EOC to end a chain)
+ *
+ * Updates every FAT copy so the redundant tables stay consistent. The
+ * top 4 bits of each entry are reserved and preserved.
+ *
+ * Return: 0 on success, -1 on error.
+ */
+int fat32_set_fat_entry(struct super_block *sb, uint32_t cluster, uint32_t value)
+{
+	struct fat32_fs_info *info = (struct fat32_fs_info *)sb->s_fs_info;
+	struct gendisk *disk = sb->s_bdev;
+	u8 buf[512];
+
+	if (info->bytes_per_sector > sizeof(buf))
+		return -1;
+
+	uint32_t fat_offset = cluster * 4;
+	uint32_t sector_in_fat = fat_offset / info->bytes_per_sector;
+	uint32_t ent_offset = fat_offset % info->bytes_per_sector;
+
+	for (uint32_t f = 0; f < info->num_fats; f++) {
+		uint32_t fat_sector = info->fat_start_lba +
+				      f * info->fat_size_32 + sector_in_fat;
+
+		if (disk->fops->read_block(disk, fat_sector, buf) != 0)
+			return -1;
+
+		/* Preserve the reserved top 4 bits of the existing entry. */
+		uint32_t old = rd32(&buf[ent_offset]);
+		uint32_t merged = (old & 0xF0000000) | (value & 0x0FFFFFFF);
+		buf[ent_offset]     = (u8)(merged & 0xFF);
+		buf[ent_offset + 1] = (u8)((merged >> 8) & 0xFF);
+		buf[ent_offset + 2] = (u8)((merged >> 16) & 0xFF);
+		buf[ent_offset + 3] = (u8)((merged >> 24) & 0xFF);
+
+		if (disk->fops->write_block(disk, fat_sector, buf) != 0)
+			return -1;
+	}
+
+	return 0;
+}
+
+/**
+ * fat32_alloc_cluster() - Find a free cluster and mark it end-of-chain
+ * @sb: The super_block
+ *
+ * Linear scan of the FAT from cluster 2 for an entry equal to 0 (free),
+ * reading one FAT sector at a time and reusing it across the 128 entries
+ * it holds. The found cluster is marked FAT32_EOC before returning so a
+ * concurrent caller cannot hand out the same one.
+ *
+ * Return: Allocated cluster number (>= 2), or 0 if the volume is full.
+ */
+uint32_t fat32_alloc_cluster(struct super_block *sb)
+{
+	struct fat32_fs_info *info = (struct fat32_fs_info *)sb->s_fs_info;
+	struct gendisk *disk = sb->s_bdev;
+	u8 buf[512];
+
+	if (info->bytes_per_sector > sizeof(buf))
+		return 0;
+
+	uint32_t entries_per_sector = info->bytes_per_sector / 4;
+	uint32_t last_cluster = info->total_clusters + 1; /* clusters 2 .. N+1 */
+	uint32_t cached_sector = 0xFFFFFFFF;
+
+	for (uint32_t cluster = 2; cluster <= last_cluster; cluster++) {
+		uint32_t sector_in_fat = cluster / entries_per_sector;
+		uint32_t fat_sector = info->fat_start_lba + sector_in_fat;
+
+		if (fat_sector != cached_sector) {
+			if (disk->fops->read_block(disk, fat_sector, buf) != 0)
+				return 0;
+			cached_sector = fat_sector;
+		}
+
+		uint32_t ent_offset = (cluster % entries_per_sector) * 4;
+		uint32_t entry = rd32(&buf[ent_offset]) & 0x0FFFFFFF;
+		if (entry == 0) {
+			if (fat32_set_fat_entry(sb, cluster, FAT32_EOC) != 0)
+				return 0;
+			return cluster;
+		}
+	}
+
+	return 0; /* no free cluster */
 }

@@ -89,7 +89,8 @@ void fat32_list_dir(struct super_block *sb, uint32_t dir_cluster)
 }
 
 static struct inode *fat_entry_to_inode(struct super_block *sb,
-	const struct fat32_dir_entry *ent)
+	const struct fat32_dir_entry *ent, uint32_t dirent_sector,
+	uint32_t dirent_offset)
 {
 	struct inode *inode = (struct inode *)kmalloc(sizeof(*inode), GFP_KERNEL);
 	if (!inode)
@@ -101,6 +102,15 @@ static struct inode *fat_entry_to_inode(struct super_block *sb,
 	inode->i_mode    = (ent->attr & ATTR_DIRECTORY) ? S_IFDIR : S_IFREG;
 	inode->i_fop     = (ent->attr & ATTR_DIRECTORY) ? NULL : &fat32_file_operations;
 	inode->i_private = NULL;
+
+	/* Remember where the entry lives so writes can update file_size. */
+	struct fat32_inode_private *priv =
+		(struct fat32_inode_private *)kmalloc(sizeof(*priv), GFP_KERNEL);
+	if (priv) {
+		priv->dirent_sector = dirent_sector;
+		priv->dirent_offset = dirent_offset;
+		inode->i_private = priv;
+	}
 	return inode;
 }
 
@@ -117,10 +127,14 @@ struct inode *fat32_lookup_root(struct super_block *sb, const char *name)
 	if (!root_inode)
 		return NULL;
 
-	root_inode->i_ino  = ((struct fat32_fs_info *)sb->s_fs_info)->root_cluster;
-	root_inode->i_sb   = sb;
-	root_inode->i_mode = S_IFDIR;
-	return fat32_dirlookup(root_inode, name);
+	root_inode->i_ino     = ((struct fat32_fs_info *)sb->s_fs_info)->root_cluster;
+	root_inode->i_sb      = sb;
+	root_inode->i_mode    = S_IFDIR;
+	root_inode->i_private = NULL;
+
+	struct inode *result = fat32_dirlookup(root_inode, name);
+	kfree(root_inode); /* temporary search root — dirlookup copies what it needs */
+	return result;
 }
 
 /**
@@ -165,13 +179,107 @@ struct inode *fat32_dirlookup(struct inode *dir, const char *name)
 						break;
 					}
 				}
-				if (match)
-					return fat_entry_to_inode(dir->i_sb, ent);
+				if (match) {
+					uint32_t ent_off = (u8 *)ent - buf;
+					return fat_entry_to_inode(dir->i_sb, ent,
+								  base + s, ent_off);
+				}
 			}
 		}
 		cluster = fat32_get_next_cluster(dir->i_sb, cluster);
 	}
 	return NULL;
+}
+
+/* Fill a fresh 32-byte regular-file directory entry (empty, cluster 0). */
+static void build_file_dirent(struct fat32_dir_entry *ent, const u8 raw[11])
+{
+	for (int k = 0; k < 11; k++)
+		ent->name[k] = raw[k];
+	ent->attr           = ATTR_ARCHIVE;
+	ent->nt_res         = 0;
+	ent->crt_time_tenth = 0;
+	ent->crt_time       = 0;
+	ent->crt_date       = 0;
+	ent->last_acc_date  = 0;
+	ent->fst_clus_hi    = 0;
+	ent->wrt_time       = 0;
+	ent->wrt_date       = 0;
+	ent->fst_clus_lo    = 0;
+	ent->file_size      = 0;
+}
+
+/**
+ * fat32_create_file() - Create an empty regular file in a directory
+ * @sb: The super_block
+ * @dir: Directory inode to create the entry in (i_ino = start cluster)
+ * @name: New file name (8.3, case-insensitive)
+ *
+ * Reuses a deleted (0xE5) or unused (0x00) directory slot, extending the
+ * directory with a fresh cluster if none is free. The file starts empty
+ * (first cluster 0, size 0); fat32_file_write() allocates clusters on
+ * first write.
+ *
+ * Return: Allocated inode for the new file, or NULL on error.
+ */
+struct inode *fat32_create_file(struct super_block *sb, struct inode *dir,
+				const char *name)
+{
+	struct fat32_fs_info *info = (struct fat32_fs_info *)sb->s_fs_info;
+	struct gendisk *disk = sb->s_bdev;
+	u8 buf[512];
+	uint32_t cluster = dir->i_ino;
+	uint32_t prev_cluster = cluster;
+	u8 raw[11];
+
+	if (info->bytes_per_sector > sizeof(buf) || !disk->fops->write_block)
+		return NULL;
+
+	name_to_raw(name, raw);
+
+	/* Scan existing directory clusters for a free slot. */
+	while (cluster >= 2 && cluster < FAT32_EOC) {
+		uint32_t base = fat32_cluster_to_sector(info, cluster);
+		for (uint32_t s = 0; s < info->sectors_per_cluster; s++) {
+			if (disk->fops->read_block(disk, base + s, buf) != 0)
+				return NULL;
+			uint32_t n = info->bytes_per_sector / sizeof(struct fat32_dir_entry);
+			struct fat32_dir_entry *ent = (struct fat32_dir_entry *)buf;
+			for (uint32_t j = 0; j < n; j++, ent++) {
+				if (ent->name[0] != 0x00 && ent->name[0] != 0xE5)
+					continue;
+				build_file_dirent(ent, raw);
+				if (disk->fops->write_block(disk, base + s, buf) != 0)
+					return NULL;
+				uint32_t off = (u8 *)ent - buf;
+				return fat_entry_to_inode(sb, ent, base + s, off);
+			}
+		}
+		prev_cluster = cluster;
+		cluster = fat32_get_next_cluster(sb, cluster);
+	}
+
+	/* Directory full — append a new cluster and place the entry first. */
+	uint32_t newcl = fat32_alloc_cluster(sb);
+	if (newcl == 0)
+		return NULL;
+	if (fat32_set_fat_entry(sb, prev_cluster, newcl) != 0)
+		return NULL;
+
+	uint32_t base = fat32_cluster_to_sector(info, newcl);
+	for (uint32_t b = 0; b < info->bytes_per_sector; b++)
+		buf[b] = 0;
+	/* Zero every sector of the new directory cluster first. */
+	for (uint32_t s = 0; s < info->sectors_per_cluster; s++) {
+		if (disk->fops->write_block(disk, base + s, buf) != 0)
+			return NULL;
+	}
+
+	struct fat32_dir_entry *ent = (struct fat32_dir_entry *)buf;
+	build_file_dirent(ent, raw);
+	if (disk->fops->write_block(disk, base, buf) != 0)
+		return NULL;
+	return fat_entry_to_inode(sb, ent, base, 0);
 }
 
 /**

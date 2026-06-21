@@ -49,6 +49,19 @@ struct fat32_fs_info {
 	uint32_t sectors_per_cluster;
 	uint32_t bytes_per_sector;
 	uint32_t bytes_per_cluster;
+	uint32_t fat_size_32;     /* sectors per FAT copy — locate the 2nd FAT */
+	uint32_t num_fats;        /* number of FAT copies (usually 2) */
+	uint32_t total_clusters;  /* count of data clusters (cluster 2 .. N+1) */
+};
+
+/*
+ * Where a file's 32-byte directory entry physically lives on disk, so
+ * fat32_file_write() can write back the updated file_size after a write.
+ * Stashed in inode->i_private at lookup/create time.
+ */
+struct fat32_inode_private {
+	uint32_t dirent_sector;
+	uint32_t dirent_offset;
 };
 
 struct fat32_dir_entry {
@@ -73,9 +86,12 @@ static inline uint32_t fat32_cluster_to_sector(struct fat32_fs_info *info, uint3
 
 int fat32_mount(struct super_block *sb);
 uint32_t fat32_get_next_cluster(struct super_block *sb, uint32_t current_cluster);
+int fat32_set_fat_entry(struct super_block *sb, uint32_t cluster, uint32_t value);
+uint32_t fat32_alloc_cluster(struct super_block *sb);
 void fat32_list_dir(struct super_block *sb, uint32_t dir_cluster);
 struct inode *fat32_lookup_root(struct super_block *sb, const char *name);
 struct inode *fat32_dirlookup(struct inode *dir, const char *name);
+struct inode *fat32_create_file(struct super_block *sb, struct inode *dir, const char *name);
 int fat32_readdir(struct inode *dir, struct file_entry *buf, int max);
 
 extern const struct file_operations fat32_file_operations;
