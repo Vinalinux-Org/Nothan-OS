@@ -8,8 +8,11 @@
  */
 
 #include "sms_chat.h"
+#include "dialer.h"
 #include "../theme/theme.h"
 #include "../core/log.h"
+#include "../core/nav.h"
+#include "../core/keyboard.h"
 #include "../widgets/app_header.h"
 #include "../widgets/nav_bar.h"
 #include "../services/messages.h"
@@ -24,6 +27,7 @@ static void on_call(lv_event_t *e)
 {
 	const struct sms_conversation *c = lv_event_get_user_data(e);
 	gui_logf("event: call %s\n", c ? c->peer : "?");
+	nav_push(dialer_create, c ? (void *)c->peer : NULL);
 }
 
 static void on_send(lv_event_t *e)
@@ -33,18 +37,6 @@ static void on_send(lv_event_t *e)
 	gui_logf("event: send msg '%s'\n", text ? text : "");
 	/* Append + transmit once telephony lands; clear the field for now. */
 	lv_textarea_set_text(chat_input, "");
-}
-
-static void add_date_sep(lv_obj_t *list, const char *label)
-{
-	lv_obj_t *lbl = lv_label_create(list);
-	lv_label_set_text(lbl, label);
-	lv_obj_set_style_text_color(lbl, theme_color(THEME_SUBTEXT), 0);
-	lv_obj_set_style_text_font(lbl, &lv_font_montserrat_12, 0);
-	lv_obj_set_style_pad_ver(lbl, 4, 0);
-	/* Center the separator within the column. */
-	lv_obj_set_width(lbl, lv_pct(100));
-	lv_obj_set_style_text_align(lbl, LV_TEXT_ALIGN_CENTER, 0);
 }
 
 static void add_bubble(lv_obj_t *list, const struct sms_message *m)
@@ -90,13 +82,9 @@ static void add_bubble(lv_obj_t *list, const struct sms_message *m)
 	lv_obj_set_style_text_color(txt, theme_color(THEME_TEXT), 0);
 	lv_obj_set_style_text_font(txt, &lv_font_montserrat_14, 0);
 
-	lv_obj_t *time = lv_label_create(bubble);
-	lv_label_set_text(time, m->time);
-	lv_obj_set_style_text_color(time, theme_color(THEME_SUBTEXT), 0);
-	lv_obj_set_style_text_font(time, &lv_font_montserrat_12, 0);
 }
 
-static void build_input_bar(lv_obj_t *parent)
+static lv_obj_t *build_input_bar(lv_obj_t *parent)
 {
 	lv_obj_t *bar = lv_obj_create(parent);
 	lv_obj_remove_style_all(bar);
@@ -140,6 +128,9 @@ static void build_input_bar(lv_obj_t *parent)
 	lv_obj_set_style_text_color(glyph, theme_color(THEME_TEXT), 0);
 	lv_obj_set_style_text_font(glyph, &lv_font_montserrat_16, 0);
 	lv_obj_center(glyph);
+
+	gui_keyboard_attach(chat_input, LV_KEYBOARD_MODE_TEXT_LOWER);
+	return bar;
 }
 
 void sms_chat_create(lv_obj_t *screen, void *arg)
@@ -152,7 +143,8 @@ void sms_chat_create(lv_obj_t *screen, void *arg)
 	if (call)
 		lv_obj_add_event_cb(call, on_call, LV_EVENT_CLICKED, (void *)c);
 
-	build_input_bar(screen);
+	lv_obj_t *input_bar = build_input_bar(screen);
+	gui_keyboard_set_lift(input_bar, -(int32_t)NAV_BAR_HEIGHT);
 
 	int list_top    = APP_HEADER_HEIGHT;
 	int list_bottom = NAV_BAR_HEIGHT + INPUT_H;
@@ -169,8 +161,6 @@ void sms_chat_create(lv_obj_t *screen, void *arg)
 	lv_obj_set_flex_align(list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
 			      LV_FLEX_ALIGN_START);
 
-	if (c && c->date_label)
-		add_date_sep(list, c->date_label);
 	for (int i = 0; c && i < c->message_count; i++)
 		add_bubble(list, &c->messages[i]);
 }

@@ -9,6 +9,7 @@
 #include "../theme/theme.h"
 #include "../core/nav.h"
 #include "../core/log.h"
+#include "../core/keyboard.h"
 #include "../widgets/app_header.h"
 #include "../widgets/nav_bar.h"
 #include "../widgets/avatar.h"
@@ -76,11 +77,6 @@ static void add_row(lv_obj_t *list, const struct sms_conversation *c)
 	lv_obj_set_style_text_color(peer, theme_color(THEME_TEXT), 0);
 	lv_obj_set_style_text_font(peer, &lv_font_montserrat_16, 0);
 
-	lv_obj_t *time = lv_label_create(top);
-	lv_label_set_text(time, c->time);
-	lv_obj_set_style_text_color(time, theme_color(THEME_SUBTEXT), 0);
-	lv_obj_set_style_text_font(time, &lv_font_montserrat_12, 0);
-
 	lv_obj_t *preview = lv_label_create(col);
 	lv_obj_set_width(preview, lv_pct(100));
 	lv_label_set_long_mode(preview, LV_LABEL_LONG_DOT);
@@ -104,6 +100,7 @@ static void build_search(lv_obj_t *parent)
 	lv_obj_set_style_text_font(search, &lv_font_montserrat_14, 0);
 	lv_obj_set_style_text_color(search, theme_color(THEME_SUBTEXT),
 				    LV_PART_TEXTAREA_PLACEHOLDER);
+	gui_keyboard_attach(search, LV_KEYBOARD_MODE_TEXT_LOWER);
 }
 
 void sms_list_create(lv_obj_t *screen, void *arg)
