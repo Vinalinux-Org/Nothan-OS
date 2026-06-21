@@ -12,6 +12,12 @@
 #include <stddef.h>
 #include "messages.h"
 
+static int str_eq(const char *a, const char *b)
+{
+	while (*a && *a == *b) { a++; b++; }
+	return *a == *b;
+}
+
 static const struct sms_message an_msgs[] = {
 	{ "Hey, are we still on for tonight?", "10:38", 0 },
 	{ "Yes, see you at 7",                "10:40", 1 },
@@ -57,4 +63,14 @@ const struct sms_conversation *sms_conversation_get(int index)
 	if (index < 0 || index >= CONV_COUNT)
 		return NULL;
 	return &conversations[index];
+}
+
+const struct sms_conversation *sms_conversation_find(const char *peer)
+{
+	if (!peer)
+		return NULL;
+	for (int i = 0; i < CONV_COUNT; i++)
+		if (str_eq(conversations[i].peer, peer))
+			return &conversations[i];
+	return NULL;
 }

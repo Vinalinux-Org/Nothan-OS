@@ -8,12 +8,16 @@
  */
 
 #include "contact_detail.h"
+#include "dialer.h"
+#include "sms_chat.h"
 #include "../theme/theme.h"
 #include "../core/log.h"
+#include "../core/nav.h"
 #include "../widgets/app_header.h"
 #include "../widgets/avatar.h"
 #include "../widgets/nav_bar.h"
 #include "../services/contacts.h"
+#include "../services/messages.h"
 
 #define AVATAR_SZ  88
 
@@ -21,12 +25,15 @@ static void on_call(lv_event_t *e)
 {
 	const struct contact *c = lv_event_get_user_data(e);
 	gui_logf("event: call %s\n", c ? c->name : "?");
+	nav_push(dialer_create, c ? (void *)c->phone : NULL);
 }
 
 static void on_sms(lv_event_t *e)
 {
 	const struct contact *c = lv_event_get_user_data(e);
 	gui_logf("event: sms %s\n", c ? c->name : "?");
+	nav_push(sms_chat_create,
+		 (void *)sms_conversation_find(c ? c->name : NULL));
 }
 
 static void big_avatar(lv_obj_t *parent, char initial)

@@ -27,5 +27,6 @@ struct sms_conversation {
 
 int sms_conversation_count(void);
 const struct sms_conversation *sms_conversation_get(int index);
+const struct sms_conversation *sms_conversation_find(const char *peer);
 
 #endif
