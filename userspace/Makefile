@@ -85,7 +85,7 @@ $(LVGL_LIB): $(LVGL_OBJS)
 # GUI app
 GUI_SRCS := gui/main.c \
             gui/port/lv_port_disp.c gui/port/lv_port_indev.c \
-            gui/core/nav.c gui/core/log.c \
+            gui/core/nav.c gui/core/log.c gui/core/keyboard.c \
             gui/services/contacts.c gui/services/messages.c gui/services/telephony.c \
             gui/widgets/status_bar.c gui/widgets/app_tile.c gui/widgets/nav_bar.c \
             gui/widgets/app_header.c gui/widgets/avatar.c \

@@ -2,8 +2,9 @@
  * core/nav.c - Phone-style navigation stack
  *
  * Screens are LVGL screen objects (lv_obj_create(NULL)) held in a small
- * fixed stack. push/pop animate with a horizontal slide; the system nav
- * bar sits on the display top layer so it never moves with them.
+ * fixed stack. All transitions are instant (no lv_screen_load_anim) —
+ * LVGL 9.2.2's SW masked blend over-runs the compositor layer and corrupts
+ * the heap. The system nav bar sits on the display top layer.
  *
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
@@ -11,11 +12,11 @@
 #include "lvgl/lvgl.h"
 #include "nav.h"
 #include "log.h"
+#include "keyboard.h"
 #include "../theme/theme.h"
 #include "../widgets/nav_bar.h"
 
 #define NAV_MAX     8		/* deepest screen nesting we allow */
-#define ANIM_MS     250
 
 static lv_obj_t *stack[NAV_MAX];
 static int       depth;
@@ -38,6 +39,10 @@ void nav_init(void)
 	navbar = nav_bar_create(lv_layer_top(), on_back, on_home, NULL);
 	lv_obj_add_flag(navbar, LV_OBJ_FLAG_HIDDEN);
 	depth = 0;
+
+	/* On-screen keyboard — also on lv_layer_top(), rendered above navbar
+	 * when visible so it can overlay any screen content. */
+	gui_keyboard_init();
 }
 
 void nav_show_chrome(bool show)
@@ -63,8 +68,8 @@ void nav_set_root(nav_builder_fn builder, void *arg)
 
 	lv_obj_t *old_active = depth ? stack[depth - 1] : NULL;
 
-	/* Free any screens stacked below the active one; the active one is
-	 * auto-deleted by the load animation once it finishes. */
+	/* Free stacked screens below the active one; delete the active one
+	 * explicitly after switching away from it. */
 	for (int i = 0; i < depth - 1; i++)
 		lv_obj_delete(stack[i]);
 
@@ -93,7 +98,7 @@ void nav_push(nav_builder_fn builder, void *arg)
 
 	stack[depth++] = scr;
 	gui_logf("nav: push, depth=%d\n", depth);
-	lv_screen_load(scr);		/* instant — no transition layer (see set_root) */
+	lv_screen_load(scr);
 }
 
 void nav_pop(void)
@@ -101,12 +106,11 @@ void nav_pop(void)
 	if (depth <= 1)
 		return;
 
-	lv_obj_t *prev = stack[depth - 2];
-	lv_obj_t *top  = stack[depth - 1];
+	lv_obj_t *dying = stack[depth - 1];
 	depth--;
 	gui_logf("nav: pop, depth=%d\n", depth);
-	lv_screen_load(prev);		/* instant — no transition layer */
-	lv_obj_delete(top);
+	lv_screen_load(stack[depth - 1]);
+	lv_obj_delete(dying);
 }
 
 void nav_to_root(void)

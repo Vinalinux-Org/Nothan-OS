@@ -191,7 +191,7 @@
 #define LV_USE_DROPDOWN     1
 #define LV_USE_IMAGE        1
 #define LV_USE_IMAGEBUTTON  0
-#define LV_USE_KEYBOARD     0
+#define LV_USE_KEYBOARD     1
 #define LV_USE_LABEL        1
 #define LV_USE_LED          0
 #define LV_USE_LINE         1

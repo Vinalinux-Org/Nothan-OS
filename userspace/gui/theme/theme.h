@@ -29,4 +29,15 @@ static inline lv_color_t theme_color(uint32_t hex)
 	return lv_color_hex(hex);
 }
 
+/* Apply a visible blinking cursor to a textarea.
+ * Without an active LVGL theme, LV_PART_CURSOR is transparent by default. */
+static inline void theme_apply_cursor(lv_obj_t *ta)
+{
+	lv_obj_set_style_bg_opa(ta, LV_OPA_TRANSP, LV_PART_CURSOR);
+	lv_obj_set_style_border_side(ta, LV_BORDER_SIDE_LEFT, LV_PART_CURSOR);
+	lv_obj_set_style_border_width(ta, 2, LV_PART_CURSOR);
+	lv_obj_set_style_border_color(ta, theme_color(THEME_TEXT), LV_PART_CURSOR);
+	lv_obj_set_style_border_opa(ta, LV_OPA_COVER, LV_PART_CURSOR);
+}
+
 #endif

@@ -40,3 +40,5 @@ void lv_port_indev_init(void)
 	lv_indev_set_type(indev, LV_INDEV_TYPE_KEYPAD);
 	lv_indev_set_read_cb(indev, keypad_read_cb);
 }
+
+void sim_register_ta(lv_obj_t *ta) { (void)ta; }
