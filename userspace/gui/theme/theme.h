@@ -1,0 +1,32 @@
+#ifndef __GUI_THEME_H
+#define __GUI_THEME_H
+
+#include "lvgl/lvgl.h"
+
+/*
+ * Deep Space color tokens — see Documentation/02-gui-design.md
+ */
+#define THEME_BG          0x0A0E1A   /* screen background */
+#define THEME_SURFACE     0x141929   /* card, status bar, dock */
+#define THEME_ACCENT      0x7C3AED   /* primary accent (gradient start) */
+#define THEME_ACCENT_2    0x3B82F6   /* accent gradient end */
+#define THEME_TEXT        0xF8FAFC   /* primary text */
+#define THEME_SUBTEXT     0x64748B   /* secondary text, labels */
+#define THEME_BORDER      0x1E2538   /* subtle dividers on dark bg */
+#define THEME_DANGER      0xEF4444   /* hangup, reject */
+#define THEME_SUCCESS     0x22C55E   /* accept call */
+
+/*
+ * Corner-radius scale — one consistent rounding language across the UI.
+ * Use these instead of ad-hoc numbers so every surface rounds alike.
+ */
+#define RADIUS_SM   8    /* small controls: nav keys, chips */
+#define RADIUS_MD   16   /* cards */
+#define RADIUS_LG   26   /* floating panels: dock */
+
+static inline lv_color_t theme_color(uint32_t hex)
+{
+	return lv_color_hex(hex);
+}
+
+#endif
