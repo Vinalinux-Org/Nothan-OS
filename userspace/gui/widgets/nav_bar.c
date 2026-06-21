@@ -63,6 +63,7 @@ lv_obj_t *nav_bar_create(lv_obj_t *parent, lv_event_cb_t on_back,
 	lv_obj_set_style_border_width(home, 2, 0);
 	lv_obj_set_style_radius(home, LV_RADIUS_CIRCLE, 0);
 	lv_obj_clear_flag(home, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_clear_flag(home, LV_OBJ_FLAG_CLICKABLE);
 
 	/* Recents: square outline */
 	lv_obj_t *recents_slot = make_button_slot(bar, on_recents);
@@ -74,6 +75,7 @@ lv_obj_t *nav_bar_create(lv_obj_t *parent, lv_event_cb_t on_back,
 	lv_obj_set_style_border_width(recents, 2, 0);
 	lv_obj_set_style_radius(recents, 2, 0);
 	lv_obj_clear_flag(recents, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_clear_flag(recents, LV_OBJ_FLAG_CLICKABLE);
 
 	return bar;
 }
