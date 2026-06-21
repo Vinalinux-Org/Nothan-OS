@@ -85,8 +85,15 @@ $(LVGL_LIB): $(LVGL_OBJS)
 # GUI app
 GUI_SRCS := gui/main.c \
             gui/port/lv_port_disp.c gui/port/lv_port_indev.c \
-            gui/widgets/status_bar.c gui/widgets/app_tile.c \
-            gui/screens/home.c gui/screens/messages.c
+            gui/core/nav.c gui/core/log.c \
+            gui/services/contacts.c gui/services/messages.c gui/services/telephony.c \
+            gui/widgets/status_bar.c gui/widgets/app_tile.c gui/widgets/nav_bar.c \
+            gui/widgets/app_header.c gui/widgets/avatar.c \
+            gui/screens/boot.c gui/screens/home.c \
+            gui/screens/contacts_list.c gui/screens/contact_detail.c \
+            gui/screens/contacts_add.c \
+            gui/screens/sms_list.c gui/screens/sms_chat.c \
+            gui/screens/dialer.c gui/screens/active_call.c gui/screens/incoming_call.c
 GUI_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(GUI_SRCS))
 GUI_CFLAGS := $(CFLAGS) -I lib/lvgl -I gui -DLV_CONF_INCLUDE_SIMPLE
 
@@ -104,7 +111,8 @@ $(BUILD)/gui.bin: $(BUILD)/gui.elf
 LVGL_LIB_DIRS := $(sort $(dir $(LVGL_OBJS)))
 
 DIRS := $(BUILD)/lib $(BUILD)/example \
-        $(BUILD)/gui/port $(BUILD)/gui/widgets $(BUILD)/gui/screens \
+        $(BUILD)/gui/port $(BUILD)/gui/core $(BUILD)/gui/services \
+        $(BUILD)/gui/widgets $(BUILD)/gui/screens \
         $(foreach p,$(BIN_PROGRAMS),$(BUILD)/bin/$(p)) \
         $(foreach p,$(SBIN_PROGRAMS),$(BUILD)/sbin/$(p))
 

@@ -12,9 +12,14 @@
 #define LB_X            ((PHYS_W - DISP_HOR_RES) / 2)  /* 460 */
 #define LB_Y            ((PHYS_H - DISP_VER_RES) / 2)  /* 40  */
 
-/* Draw buffers: 10 lines each (partial render mode) */
-static lv_color_t draw_buf_1[DISP_HOR_RES * 10];
-static lv_color_t draw_buf_2[DISP_HOR_RES * 10];
+/*
+ * Full-screen render buffer (RGB565, 2 bytes/pixel). A full-height buffer
+ * means every object renders in a single piece — there are no partial
+ * render-strip boundaries, which is where the SW masked blend over-ran the
+ * mask/dest buffer during scroll (heap corruption). Per-process page tables
+ * let user bss hold a buffer this large (~460 KB).
+ */
+static uint8_t draw_buf_1[DISP_HOR_RES * DISP_VER_RES * 2];
 
 static int fb_fd = -1;
 
@@ -40,7 +45,6 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 		};
 		ioctl(fb_fd, FB_FLUSH, (unsigned long)&f);
 
-		/* Last partial update for this frame — flip to display it */
 		if (lv_display_flush_is_last(disp)) {
 			if (first_flip) {
 				write("[GUI] first flip\n");
@@ -58,6 +62,6 @@ void lv_port_disp_init(void)
 
 	lv_display_t *disp = lv_display_create(DISP_HOR_RES, DISP_VER_RES);
 	lv_display_set_flush_cb(disp, flush_cb);
-	lv_display_set_buffers(disp, draw_buf_1, draw_buf_2,
+	lv_display_set_buffers(disp, draw_buf_1, NULL,
 			       sizeof(draw_buf_1), LV_DISPLAY_RENDER_MODE_PARTIAL);
 }

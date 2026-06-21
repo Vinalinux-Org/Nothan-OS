@@ -26,8 +26,16 @@
 #define LV_LIMITS_INCLUDE       <limits.h>
 #define LV_STDARG_INCLUDE       <stdarg.h>
 
-/* 128 KB heap for LVGL */
-#define LV_MEM_SIZE (128 * 1024U)
+/*
+ * LVGL heap. 384 KB: the phone-style flow keeps the home launcher (24
+ * gradient+shadow tiles) live while an app screen is pushed on top, and
+ * a slide transition renders both screens — with shadow mask buffers —
+ * at once. 256 KB overflowed the pool past __bss_end into an unmapped
+ * page (Data Abort, DFAR at pool_end). User VA is a single 1 MB region
+ * (code 0x10000.., stack top 0x100000); 384 KB keeps ~76 KB of guard
+ * between the mapped bss top and the 32 KB stack.
+ */
+#define LV_MEM_SIZE (256 * 1024U)
 #define LV_MEM_POOL_EXPAND_SIZE 0
 #define LV_MEM_ADR 0
 
@@ -45,7 +53,15 @@
 /*=========================
  * RENDERING
  *=========================*/
-#define LV_DRAW_BUF_STRIDE_ALIGN    4
+/*
+ * Stride align = 2. The SW blend walks A8 masks two bytes at a time and
+ * exits when the pointer hits the row end; a 2-byte stride keeps mask rows
+ * even-width so that loop terminates (align=1 → odd width → the 2-step loop
+ * skips the end and runs away / hangs). RGB565 flush rows are width*2
+ * (already even) so the kernel's row-by-row copy is unaffected; align=4
+ * padded odd-width RGB565 rows and sheared the blit, hence not 4.
+ */
+#define LV_DRAW_BUF_STRIDE_ALIGN    2
 #define LV_DRAW_BUF_ALIGN           4
 #define LV_DRAW_TRANSFORM_USE_MATRIX 0
 #define LV_DRAW_LAYER_SIMPLE_BUF_SIZE (16 * 1024)
@@ -55,9 +71,13 @@
 #if LV_USE_DRAW_SW == 1
     #define LV_DRAW_SW_SUPPORT_RGB565       1
     #define LV_DRAW_SW_SUPPORT_RGB565A8     0
-    #define LV_DRAW_SW_SUPPORT_RGB888       0
-    #define LV_DRAW_SW_SUPPORT_XRGB8888     0
-    #define LV_DRAW_SW_SUPPORT_ARGB8888     0
+    /* ARGB8888 (+RGB888/XRGB8888) ON: shadows and transition/opacity layers
+     * render to 32-bit buffers, then blend to the RGB565 screen. With these
+     * off the blender hit its default branch and SKIPPED drawing — flooding
+     * "Not supported source color format" every frame and dropping shadows. */
+    #define LV_DRAW_SW_SUPPORT_RGB888       1
+    #define LV_DRAW_SW_SUPPORT_XRGB8888     1
+    #define LV_DRAW_SW_SUPPORT_ARGB8888     1
     #define LV_DRAW_SW_SUPPORT_L8           0
     #define LV_DRAW_SW_SUPPORT_AL88         0
     #define LV_DRAW_SW_SUPPORT_A8           1
@@ -67,7 +87,7 @@
     #define LV_USE_NATIVE_HELIUM_ASM        0
     #define LV_DRAW_SW_COMPLEX              1
     #if LV_DRAW_SW_COMPLEX == 1
-        #define LV_DRAW_SW_SHADOW_CACHE_SIZE    0
+        #define LV_DRAW_SW_SHADOW_CACHE_SIZE    4
         #define LV_DRAW_SW_CIRCLE_CACHE_SIZE    4
     #endif
     #define LV_USE_DRAW_SW_ASM  LV_DRAW_SW_ASM_NONE
@@ -133,7 +153,7 @@
 #define LV_FONT_MONTSERRAT_36   0
 #define LV_FONT_MONTSERRAT_38   0
 #define LV_FONT_MONTSERRAT_40   0
-#define LV_FONT_MONTSERRAT_42   0
+#define LV_FONT_MONTSERRAT_42   1
 #define LV_FONT_MONTSERRAT_44   0
 #define LV_FONT_MONTSERRAT_46   0
 #define LV_FONT_MONTSERRAT_48   0
