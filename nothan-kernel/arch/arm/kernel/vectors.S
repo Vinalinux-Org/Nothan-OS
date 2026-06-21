@@ -87,7 +87,10 @@ vector_svc:
 vector_pabt:
 	sub	lr, lr, #4
 	push	{r0-r12, lr}
-	mrs	r0, spsr
+	cps	#0x1f			@ System mode shares lr_usr (IRQs masked on abort)
+	mov	r1, lr			@ arg1 = lr_usr = caller of the wild jump
+	cps	#0x17			@ back to Abort mode
+	mrs	r0, spsr		@ arg0 = SPSR
 	push	{r0}
 	bl	pabt_handler
 	pop	{r0}
@@ -96,9 +99,10 @@ vector_pabt:
 
 /* --- Data abort --- */
 vector_dabt:
-	sub	lr, lr, #8
+	sub	lr, lr, #8		@ lr = faulting instruction PC
 	push	{r0-r12, lr}
-	mrs	r0, spsr
+	mov	r1, lr			@ arg1 = faulting PC
+	mrs	r0, spsr		@ arg0 = SPSR
 	push	{r0}
 	bl	dabt_handler
 	pop	{r0}

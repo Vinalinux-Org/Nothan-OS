@@ -48,10 +48,8 @@ void und_handler(unsigned int spsr)
  * Reads IFAR (Instruction Fault Address) and IFSR (Instruction Fault
  * Status) from CP15 to determine the fault address and reason.
  */
-void pabt_handler(unsigned int spsr)
+void pabt_handler(unsigned int spsr, unsigned int lr_usr)
 {
-	(void)spsr;
-
 	unsigned int ifar, ifsr;
 	__asm__ __volatile__(
 		"mrc p15, 0, %0, c6, c0, 2\n"	/* IFAR */
@@ -60,7 +58,7 @@ void pabt_handler(unsigned int spsr)
 
 	printk("\nException: Prefetch Abort!\n");
 	printk("  IFAR=0x%08x, IFSR=0x%08x\n", ifar, ifsr);
-	printk("  SPSR=0x%08x\n", spsr);
+	printk("  LR_usr=0x%08x  SPSR=0x%08x\n", lr_usr, spsr);
 
 	const char *reason;
 	switch (ifsr & 0xF) {
@@ -84,7 +82,7 @@ void pabt_handler(unsigned int spsr)
  * Reads DFAR (Data Fault Address) and DFSR (Data Fault Status)
  * from CP15 to determine the fault address and reason.
  */
-void dabt_handler(unsigned int spsr)
+void dabt_handler(unsigned int spsr, unsigned int pc)
 {
 	unsigned int dfar, dfsr;
 	__asm__ __volatile__(
@@ -94,7 +92,7 @@ void dabt_handler(unsigned int spsr)
 
 	printk("\nException: Data Abort!\n");
 	printk("  DFAR=0x%08x, DFSR=0x%08x\n", dfar, dfsr);
-	printk("  SPSR=0x%08x\n", spsr);
+	printk("  PC=0x%08x  SPSR=0x%08x\n", pc, spsr);
 
 	const char *reason;
 	switch (dfsr & 0xF) {
