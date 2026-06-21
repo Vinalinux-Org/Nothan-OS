@@ -17,10 +17,11 @@
 #include "../widgets/nav_bar.h"
 #include "../services/contacts.h"
 
-/* Only one add form exists at a time, so file-scope handles to its two
- * fields are enough for the Save handler. */
+/* Only one add/edit form exists at a time, so file-scope state is enough.
+ * edit_index = -1 means "add new"; >= 0 means "edit that contact". */
 static lv_obj_t *name_field;
 static lv_obj_t *phone_field;
+static int       edit_index = -1;
 
 static void on_save(lv_event_t *e)
 {
@@ -28,10 +29,15 @@ static void on_save(lv_event_t *e)
 	const char *name  = lv_textarea_get_text(name_field);
 	const char *phone = lv_textarea_get_text(phone_field);
 
-	gui_logf("event: save contact name='%s' phone='%s'\n",
-		 name ? name : "", phone ? phone : "");
-	if (name && name[0])
-		contacts_add(name, phone);
+	gui_logf("event: save contact name='%s' phone='%s' (%s)\n",
+		 name ? name : "", phone ? phone : "",
+		 edit_index >= 0 ? "edit" : "add");
+	if (name && name[0]) {
+		if (edit_index >= 0)
+			contacts_update(edit_index, name, phone);
+		else
+			contacts_add(name, phone);
+	}
 	nav_pop();
 }
 
@@ -64,19 +70,26 @@ static lv_obj_t *text_field(lv_obj_t *parent, int y, const char *accepted)
 
 void contacts_add_create(lv_obj_t *screen, void *arg)
 {
-	(void)arg;
-	gui_log("screen: contacts-add\n");
+	/* arg encodes the mode: 0 = add new, n = edit contact (n-1). */
+	edit_index = (int)(long)arg - 1;
+	const struct contact *cur =
+		edit_index >= 0 ? contacts_get(edit_index) : NULL;
+	gui_logf("screen: contacts-%s\n", cur ? "edit" : "add");
 
-	app_header_create(screen, "Add contact", NULL);
+	app_header_create(screen, cur ? "Edit contact" : "Add contact", NULL);
 
 	int y = APP_HEADER_HEIGHT + 24;
 	field_label(screen, "Name", y);
 	name_field = text_field(screen, y + 22, NULL);
+	if (cur)
+		lv_textarea_set_text(name_field, cur->name);
 	gui_keyboard_attach(name_field, LV_KEYBOARD_MODE_TEXT_LOWER);
 
 	y += 22 + 44 + 20;
 	field_label(screen, "Phone", y);
 	phone_field = text_field(screen, y + 22, "0123456789 +");
+	if (cur)
+		lv_textarea_set_text(phone_field, cur->phone);
 	gui_keyboard_attach(phone_field, LV_KEYBOARD_MODE_NUMBER);
 
 	lv_obj_t *save = lv_button_create(screen);

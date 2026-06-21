@@ -18,13 +18,26 @@ struct contact {
 	char phone[CONTACT_PHONE_MAX];
 };
 
+/* Load persisted contacts at startup; falls back to the seeded mock. */
+void contacts_init(void);
+
 /* Number of stored contacts (kept sorted by name). */
 int contacts_count(void);
 
 /* Contact at index [0, contacts_count()), or NULL if out of range. */
 const struct contact *contacts_get(int index);
 
-/* Append a contact. Returns 0 on success, -1 if the store is full. */
+/* Insert a contact, kept sorted by name. Returns 0, or -1 if full. */
 int contacts_add(const char *name, const char *phone);
+
+/* Replace the contact at @index (re-sorts). Returns 0, -1 on bad index. */
+int contacts_update(int index, const char *name, const char *phone);
+
+/* Delete the contact at @index. Returns 0, -1 on bad index. */
+int contacts_remove(int index);
+
+/* Find a contact by exact phone string, or NULL. For Phone/SMS to show
+ * a saved name instead of a raw number. */
+const struct contact *contacts_find_by_phone(const char *phone);
 
 #endif
