@@ -214,6 +214,30 @@ static void lcdc_flip(void)
 	copy_buf((u8 *)fb_va[back_idx], (u8 *)fb_va[front_idx], FB_SZ);
 }
 
+/*
+ * lcdc_shutdown() - Stop the raster DMA. Called from sys_reboot before
+ * triggering PRM warm reset so the LCDC isn't mid-burst on DDR when the
+ * bootloader starts its memory test on the next boot.
+ */
+void lcdc_shutdown(void)
+{
+	/* Stop the raster engine and its DMA */
+	mmio_write32(LCDC_BASE + LCDC_RASTER_CTRL, 0);
+	mmio_write32(LCDC_BASE + LCDC_IRQENABLE_SET, 0);
+	mmio_write32(LCDC_BASE + LCDC_DMA_CTRL, 0);
+
+	/* Disable the LCDC clocks so no pending DMA can still hit DDR */
+	mmio_write32(LCDC_BASE + LCDC_CLKC_ENABLE, 0);
+
+	/* Gate the LCDC module clock at the PRCM level */
+	mmio_write32(CM_PER_LCDC_CLKCTRL, 0);
+
+	/* Let any in-flight bus transaction drain */
+	dsb();
+	for (volatile int i = 0; i < 10000; i++)
+		;
+}
+
 static struct fb_ops lcdc_fb_ops = {
 	.flush = lcdc_flush,
 	.flip  = lcdc_flip,
