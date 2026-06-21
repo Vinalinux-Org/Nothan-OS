@@ -17,7 +17,7 @@
 #include "screens/boot.h"
 #include "screens/home.h"
 
-#define SIM_BOOT_MS  2000   /* 2 s boot splash (hardware uses 7 s) */
+#define SIM_BOOT_MS  BOOT_DURATION_MS
 
 void sim_indev_feed(const SDL_Event *e);
 
