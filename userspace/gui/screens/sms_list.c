@@ -1,6 +1,11 @@
 /*
  * screens/sms_list.c - SMS: scrollable conversation list
  *
+ * Rows show the peer, a one-line preview of the last message, and an unread
+ * badge. Tapping opens the thread. The list rebuilds on every screen load so
+ * a newly received message (mock receiver) or a reply sent from the thread
+ * shows up here. Search filters by peer or preview text.
+ *
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 
@@ -19,21 +24,47 @@
 #define ROW_H      66
 #define AVATAR_SZ  44
 
+static lv_obj_t *list_obj;
+static lv_obj_t *search_box;
+
+static char lc(char c)
+{
+	return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
+}
+
+static int contains_ci(const char *hay, const char *needle)
+{
+	if (!needle || !needle[0])
+		return 1;
+	for (; *hay; hay++) {
+		const char *h = hay, *n = needle;
+		while (*h && *n && lc(*h) == lc(*n)) { h++; n++; }
+		if (!*n)
+			return 1;
+	}
+	return 0;
+}
+
 static void on_compose(lv_event_t *e)
 {
 	(void)e;
-	gui_log("event: sms compose (new)\n");
+	/* A standalone compose screen is deferred; new threads are started
+	 * from a contact's SMS button. */
+	gui_log("event: sms compose (new) - deferred\n");
 }
 
 static void on_row(lv_event_t *e)
 {
-	const struct sms_conversation *c = lv_event_get_user_data(e);
+	int idx = (int)(long)lv_event_get_user_data(e);
+	const struct sms_conversation *c = sms_conversation_get(idx);
 	gui_logf("event: open chat %s\n", c ? c->peer : "?");
-	nav_push(sms_chat_create, (void *)c);
+	nav_push(sms_chat_create, (void *)(long)idx);
 }
 
-static void add_row(lv_obj_t *list, const struct sms_conversation *c)
+static void add_row(lv_obj_t *list, const struct sms_conversation *c, int idx)
 {
+	int unread = c->unread > 0;
+
 	lv_obj_t *row = lv_button_create(list);
 	lv_obj_remove_style_all(row);
 	lv_obj_set_size(row, lv_pct(100), ROW_H);
@@ -46,11 +77,11 @@ static void add_row(lv_obj_t *list, const struct sms_conversation *c)
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
 			      LV_FLEX_ALIGN_CENTER);
 	lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-	lv_obj_add_event_cb(row, on_row, LV_EVENT_CLICKED, (void *)c);
+	lv_obj_add_event_cb(row, on_row, LV_EVENT_CLICKED, (void *)(long)idx);
 
 	avatar_create(row, c->peer[0], AVATAR_SZ, &lv_font_montserrat_18);
 
-	/* Text column: top line peer + time, bottom line preview. */
+	/* Text column: peer on top, preview below. */
 	lv_obj_t *col = lv_obj_create(row);
 	lv_obj_remove_style_all(col);
 	lv_obj_set_height(col, lv_pct(100));
@@ -62,17 +93,7 @@ static void add_row(lv_obj_t *list, const struct sms_conversation *c)
 	lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
 	lv_obj_clear_flag(col, LV_OBJ_FLAG_CLICKABLE);
 
-	lv_obj_t *top = lv_obj_create(col);
-	lv_obj_remove_style_all(top);
-	lv_obj_set_width(top, lv_pct(100));
-	lv_obj_set_height(top, LV_SIZE_CONTENT);
-	lv_obj_set_flex_flow(top, LV_FLEX_FLOW_ROW);
-	lv_obj_set_flex_align(top, LV_FLEX_ALIGN_SPACE_BETWEEN,
-			      LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-	lv_obj_clear_flag(top, LV_OBJ_FLAG_SCROLLABLE);
-	lv_obj_clear_flag(top, LV_OBJ_FLAG_CLICKABLE);
-
-	lv_obj_t *peer = lv_label_create(top);
+	lv_obj_t *peer = lv_label_create(col);
 	lv_label_set_text(peer, c->peer);
 	lv_obj_set_style_text_color(peer, theme_color(THEME_TEXT), 0);
 	lv_obj_set_style_text_font(peer, &lv_font_montserrat_16, 0);
@@ -80,9 +101,52 @@ static void add_row(lv_obj_t *list, const struct sms_conversation *c)
 	lv_obj_t *preview = lv_label_create(col);
 	lv_obj_set_width(preview, lv_pct(100));
 	lv_label_set_long_mode(preview, LV_LABEL_LONG_DOT);
-	lv_label_set_text(preview, c->preview);
-	lv_obj_set_style_text_color(preview, theme_color(THEME_SUBTEXT), 0);
+	lv_label_set_text(preview, sms_preview(c));
+	lv_obj_set_style_text_color(preview,
+				    theme_color(unread ? THEME_TEXT : THEME_SUBTEXT), 0);
 	lv_obj_set_style_text_font(preview, &lv_font_montserrat_12, 0);
+
+	/* Unread badge: small accent dot with the count. */
+	if (unread) {
+		lv_obj_t *badge = lv_obj_create(row);
+		lv_obj_remove_style_all(badge);
+		lv_obj_set_size(badge, 22, 22);
+		lv_obj_set_style_radius(badge, LV_RADIUS_CIRCLE, 0);
+		lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
+		lv_obj_set_style_bg_color(badge, theme_color(THEME_ACCENT), 0);
+		lv_obj_clear_flag(badge, LV_OBJ_FLAG_SCROLLABLE);
+
+		lv_obj_t *n = lv_label_create(badge);
+		lv_label_set_text_fmt(n, "%d", c->unread);
+		lv_obj_set_style_text_color(n, theme_color(THEME_TEXT), 0);
+		lv_obj_set_style_text_font(n, &lv_font_montserrat_12, 0);
+		lv_obj_center(n);
+	}
+}
+
+static void populate(const char *filter)
+{
+	if (!list_obj)
+		return;
+	lv_obj_clean(list_obj);
+	for (int i = 0; i < sms_conversation_count(); i++) {
+		const struct sms_conversation *c = sms_conversation_get(i);
+		if (!contains_ci(c->peer, filter) &&
+		    !contains_ci(sms_preview(c), filter))
+			continue;
+		add_row(list_obj, c, i);
+	}
+}
+
+static void on_search_changed(lv_event_t *e)
+{
+	populate(lv_textarea_get_text(lv_event_get_target(e)));
+}
+
+static void on_screen_loaded(lv_event_t *e)
+{
+	(void)e;
+	populate(search_box ? lv_textarea_get_text(search_box) : NULL);
 }
 
 static void build_search(lv_obj_t *parent)
@@ -100,7 +164,9 @@ static void build_search(lv_obj_t *parent)
 	lv_obj_set_style_text_font(search, &lv_font_montserrat_14, 0);
 	lv_obj_set_style_text_color(search, theme_color(THEME_SUBTEXT),
 				    LV_PART_TEXTAREA_PLACEHOLDER);
+	lv_obj_add_event_cb(search, on_search_changed, LV_EVENT_VALUE_CHANGED, NULL);
 	gui_keyboard_attach(search, LV_KEYBOARD_MODE_TEXT_LOWER);
+	search_box = search;
 }
 
 void sms_list_create(lv_obj_t *screen, void *arg)
@@ -116,17 +182,17 @@ void sms_list_create(lv_obj_t *screen, void *arg)
 
 	int list_top    = APP_HEADER_HEIGHT + 8 + SEARCH_H + 8;
 	int list_bottom = NAV_BAR_HEIGHT + 8;
-	lv_obj_t *list = lv_obj_create(screen);
-	lv_obj_remove_style_all(list);
-	lv_obj_set_size(list, lv_pct(100), 640 - list_top - list_bottom);
-	lv_obj_align(list, LV_ALIGN_TOP_MID, 0, list_top);
-	lv_obj_set_style_pad_hor(list, 12, 0);
-	lv_obj_set_scroll_dir(list, LV_DIR_VER);
-	lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_AUTO);
-	lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_flex_align(list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
+	list_obj = lv_obj_create(screen);
+	lv_obj_remove_style_all(list_obj);
+	lv_obj_set_size(list_obj, lv_pct(100), 640 - list_top - list_bottom);
+	lv_obj_align(list_obj, LV_ALIGN_TOP_MID, 0, list_top);
+	lv_obj_set_style_pad_hor(list_obj, 12, 0);
+	lv_obj_set_scroll_dir(list_obj, LV_DIR_VER);
+	lv_obj_set_scrollbar_mode(list_obj, LV_SCROLLBAR_MODE_AUTO);
+	lv_obj_set_flex_flow(list_obj, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_align(list_obj, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
 			      LV_FLEX_ALIGN_START);
 
-	for (int i = 0; i < sms_conversation_count(); i++)
-		add_row(list, sms_conversation_get(i));
+	lv_obj_add_event_cb(screen, on_screen_loaded, LV_EVENT_SCREEN_LOADED, NULL);
+	populate(NULL);
 }

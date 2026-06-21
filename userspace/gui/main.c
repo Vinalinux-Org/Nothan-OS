@@ -23,33 +23,27 @@
 #include "screens/sms_list.h"
 #include "screens/sms_chat.h"
 #include "screens/dialer.h"
-#include "screens/active_call.h"
-#include "screens/incoming_call.h"
+#include "screens/call_log.h"
+#include "core/call_ui.h"
 #include "services/contacts.h"
 #include "services/messages.h"
 #include "services/telephony.h"
 #include "../lib/syscall.h"
 
-/* Mock caller for the Phone leg of the tour (a known contact). */
-static const struct call_info demo_call = { "Nam Hoang", "0988 333 222" };
-
 enum demo_phase {
 	PHASE_BOOT,
-	PHASE_HOME,		/* home settled, about to sweep the grid */
+	PHASE_HOME,			/* home settled, about to sweep the grid */
 	PHASE_HOME_SCROLL_DOWN,
 	PHASE_HOME_SCROLL_UP,
-	PHASE_LIST,		/* Contacts list shown */
+	PHASE_LIST,			/* Contacts list shown */
 	PHASE_DETAIL,		/* a contact's detail shown */
 	PHASE_LIST_RETURN,	/* popped back to the list */
-	PHASE_ADD,		/* add-contact form shown */
+	PHASE_ADD,			/* add-contact form shown */
 	PHASE_SMS_HOME,		/* back on home, about to open Messages */
 	PHASE_SMS_LIST,		/* SMS conversation list shown */
 	PHASE_SMS_CHAT,		/* a conversation thread shown */
 	PHASE_PHONE_HOME,	/* back on home, about to open Phone */
-	PHASE_DIALER,		/* dial pad shown */
-	PHASE_ACTIVE,		/* active-call screen shown */
-	PHASE_DIAL_BACK,	/* call ended, back on the dialer */
-	PHASE_INCOMING,		/* incoming-call overlay shown */
+	PHASE_RECENTS,		/* recent-calls list shown */
 };
 
 #define BOOT_MS   7000
@@ -140,8 +134,7 @@ static void demo_tick(unsigned long now)
 	case PHASE_LIST:
 		if (dt >= DWELL_MS + 600) {
 			gui_log("tour: open first contact\n");
-			nav_push(contact_detail_create,
-				 (void *)contacts_get(0));
+			nav_push(contact_detail_create, (void *)(long)0);
 			phase = PHASE_DETAIL;
 			phase_t = now;
 		}
@@ -181,8 +174,7 @@ static void demo_tick(unsigned long now)
 	case PHASE_SMS_LIST:
 		if (dt >= DWELL_MS + 600) {
 			gui_log("tour: open first chat\n");
-			nav_push(sms_chat_create,
-				 (void *)sms_conversation_get(0));
+			nav_push(sms_chat_create, (void *)(long)0);
 			phase = PHASE_SMS_CHAT;
 			phase_t = now;
 		}
@@ -198,36 +190,14 @@ static void demo_tick(unsigned long now)
 	case PHASE_PHONE_HOME:
 		if (dt >= DWELL_MS) {
 			gui_log("tour: open Phone app\n");
-			nav_push(dialer_create, NULL);
-			phase = PHASE_DIALER;
+			nav_push(call_log_create, NULL);
+			phase = PHASE_RECENTS;
 			phase_t = now;
 		}
 		break;
-	case PHASE_DIALER:
-		if (dt >= DWELL_MS + 600) {
-			gui_log("tour: place call\n");
-			nav_push(active_call_create, (void *)&demo_call);
-			phase = PHASE_ACTIVE;
-			phase_t = now;
-		}
-		break;
-	case PHASE_ACTIVE:
-		if (dt >= SWEEP_MS) {
-			gui_log("tour: end call\n");
-			nav_pop();		/* back to the dialer */
-			phase = PHASE_DIAL_BACK;
-			phase_t = now;
-		}
-		break;
-	case PHASE_DIAL_BACK:
-		if (dt >= DWELL_MS) {
-			gui_log("tour: incoming call\n");
-			nav_push(incoming_call_create, (void *)&demo_call);
-			phase = PHASE_INCOMING;
-			phase_t = now;
-		}
-		break;
-	case PHASE_INCOMING:
+	case PHASE_RECENTS:
+		/* The mock radio injects incoming calls on its own timer, so the
+		 * call overlay demos itself; just dwell, then loop home. */
 		if (dt >= SWEEP_MS) {
 			gui_log("tour: return to home (loop)\n");
 			nav_to_root();		/* collapse back to home */
@@ -246,6 +216,10 @@ void main(void)
 	lv_port_indev_init();
 
 	nav_init();
+	contacts_init();	/* load persisted contacts before any screen reads them */
+	messages_init();	/* SMS threads + mock receiver */
+	telephony_init();	/* call log + mock radio timer */
+	call_ui_init();		/* call overlay on the top layer */
 	nav_set_root(boot_create, NULL);
 	gui_log("ready\n");
 

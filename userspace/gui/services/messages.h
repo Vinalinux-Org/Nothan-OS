@@ -4,29 +4,50 @@
 /*
  * Messages store — the data layer behind the SMS app.
  *
- * The UI talks only to this interface. Today the backend is an in-RAM
- * mock; when the SIM7600CE telephony stack lands, the SMS send/receive
- * path replaces this file and the screens stay unchanged. Mirrors the
- * shape of the contacts store.
+ * Real, mutable, persisted state (not the old read-only mock): conversations
+ * live in fixed-size arrays so they serialize straight to /SMS.BIN, and
+ * messages can be sent and received. The hardware boundary is mocked — an
+ * lv_timer injects an incoming SMS now and then — so the send/receive UX is
+ * complete. When the SIM7600CE lands, sms_send() becomes AT+CMGS and the mock
+ * timer becomes +CMTI handling; the screens stay unchanged.
  */
 
+#define SMS_TEXT_MAX   160
+#define SMS_PEER_MAX   32
+#define SMS_PER_CONV   16
+#define SMS_CONV_MAX   10
+
 struct sms_message {
-	const char *text;
-	const char *time;
-	int         sent;   /* 1 = sent by us (right bubble), 0 = received */
+	char          text[SMS_TEXT_MAX];
+	unsigned char sent;   /* 1 = sent by us (right bubble), 0 = received */
 };
 
 struct sms_conversation {
-	const char               *peer;        /* contact name or raw number */
-	const char               *preview;     /* last message, one line */
-	const char               *time;        /* last activity: "10:42"/"Mon" */
-	const char               *date_label;  /* separator inside the thread */
-	const struct sms_message *messages;
-	int                       message_count;
+	char               peer[SMS_PEER_MAX];   /* contact name or raw number */
+	struct sms_message messages[SMS_PER_CONV];
+	int                message_count;
+	int                unread;               /* received-but-unseen count */
 };
 
-int sms_conversation_count(void);
+/* Load persisted threads (else seed a mock) and start the mock receiver. */
+void messages_init(void);
+
+int  sms_conversation_count(void);
 const struct sms_conversation *sms_conversation_get(int index);
-const struct sms_conversation *sms_conversation_find(const char *peer);
+
+/* Find a thread by exact peer, returning its index or -1. */
+int  sms_conversation_find(const char *peer);
+/* Like find, but creates an empty thread if none exists. Returns index or -1. */
+int  sms_conversation_find_or_create(const char *peer);
+
+/* Last message text of a thread (for the list preview), or "". */
+const char *sms_preview(const struct sms_conversation *c);
+
+/* Append an outgoing message to a thread and persist. */
+void sms_send(int conv_index, const char *text);
+/* Clear a thread's unread count and persist. */
+void sms_mark_read(int conv_index);
+/* Total unread across all threads (for a badge). */
+int  sms_total_unread(void);
 
 #endif

@@ -16,6 +16,10 @@
 #include "core/log.h"
 #include "screens/boot.h"
 #include "screens/home.h"
+#include "core/call_ui.h"
+#include "services/contacts.h"
+#include "services/messages.h"
+#include "services/telephony.h"
 
 #define SIM_BOOT_MS  BOOT_DURATION_MS
 
@@ -37,6 +41,10 @@ int main(void)
 	lv_port_indev_init();
 
 	nav_init();
+	contacts_init();
+	messages_init();
+	telephony_init();
+	call_ui_init();
 	nav_set_root(boot_create, NULL);
 	gui_log("ready\n");
 

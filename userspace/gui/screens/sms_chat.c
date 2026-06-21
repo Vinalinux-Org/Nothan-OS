@@ -1,8 +1,10 @@
 /*
  * screens/sms_chat.c - SMS: one conversation thread + composer
  *
- * Sending is visual for now — it lands on the SIM7600CE SMS path once
- * the telephony stack exists (mock-data phase).
+ * Identified by conversation index. Sending appends to the store and the
+ * thread rebuilds so the bubble appears immediately; opening (or returning
+ * to) the thread marks it read and rebuilds, so messages received while away
+ * show up. The thread auto-scrolls to the newest bubble.
  *
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
@@ -20,28 +22,20 @@
 #define INPUT_H     56
 #define BUBBLE_MAXW 240
 
-/* One composer exists at a time, so a file-scope handle is enough. */
-static lv_obj_t *chat_input;
+static int        chat_idx;
+static lv_obj_t  *chat_input;
+static lv_obj_t  *chat_list;
 
 static void on_call(lv_event_t *e)
 {
-	const struct sms_conversation *c = lv_event_get_user_data(e);
+	(void)e;
+	const struct sms_conversation *c = sms_conversation_get(chat_idx);
 	gui_logf("event: call %s\n", c ? c->peer : "?");
 	nav_push(dialer_create, c ? (void *)c->peer : NULL);
 }
 
-static void on_send(lv_event_t *e)
-{
-	(void)e;
-	const char *text = lv_textarea_get_text(chat_input);
-	gui_logf("event: send msg '%s'\n", text ? text : "");
-	/* Append + transmit once telephony lands; clear the field for now. */
-	lv_textarea_set_text(chat_input, "");
-}
-
 static void add_bubble(lv_obj_t *list, const struct sms_message *m)
 {
-	/* Full-width row that pushes the bubble to one side. */
 	lv_obj_t *row = lv_obj_create(list);
 	lv_obj_remove_style_all(row);
 	lv_obj_set_width(row, lv_pct(100));
@@ -60,8 +54,7 @@ static void add_bubble(lv_obj_t *list, const struct sms_message *m)
 	lv_obj_set_style_radius(bubble, RADIUS_MD, 0);
 	lv_obj_set_style_bg_opa(bubble, LV_OPA_COVER, 0);
 	lv_obj_set_flex_flow(bubble, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_flex_align(bubble,
-			      LV_FLEX_ALIGN_START,
+	lv_obj_set_flex_align(bubble, LV_FLEX_ALIGN_START,
 			      m->sent ? LV_FLEX_ALIGN_END : LV_FLEX_ALIGN_START,
 			      LV_FLEX_ALIGN_START);
 	lv_obj_set_style_pad_row(bubble, 2, 0);
@@ -81,7 +74,43 @@ static void add_bubble(lv_obj_t *list, const struct sms_message *m)
 	lv_label_set_text(txt, m->text);
 	lv_obj_set_style_text_color(txt, theme_color(THEME_TEXT), 0);
 	lv_obj_set_style_text_font(txt, &lv_font_montserrat_14, 0);
+}
 
+/* Rebuild every bubble from the store and scroll to the newest. */
+static void rebuild_thread(void)
+{
+	if (!chat_list)
+		return;
+	lv_obj_clean(chat_list);
+
+	const struct sms_conversation *c = sms_conversation_get(chat_idx);
+	lv_obj_t *last = NULL;
+	for (int i = 0; c && i < c->message_count; i++) {
+		add_bubble(chat_list, &c->messages[i]);
+		last = lv_obj_get_child(chat_list, -1);
+	}
+	if (last) {
+		lv_obj_update_layout(chat_list);
+		lv_obj_scroll_to_view(last, LV_ANIM_OFF);
+	}
+}
+
+static void on_send(lv_event_t *e)
+{
+	(void)e;
+	const char *text = lv_textarea_get_text(chat_input);
+	if (text && text[0]) {
+		sms_send(chat_idx, text);
+		lv_textarea_set_text(chat_input, "");
+		rebuild_thread();
+	}
+}
+
+static void on_screen_loaded(lv_event_t *e)
+{
+	(void)e;
+	sms_mark_read(chat_idx);   /* seen now */
+	rebuild_thread();          /* show anything received while away */
 }
 
 static lv_obj_t *build_input_bar(lv_obj_t *parent)
@@ -135,32 +164,35 @@ static lv_obj_t *build_input_bar(lv_obj_t *parent)
 
 void sms_chat_create(lv_obj_t *screen, void *arg)
 {
-	const struct sms_conversation *c = arg;
+	chat_idx = (int)(long)arg;
+	const struct sms_conversation *c = sms_conversation_get(chat_idx);
 	gui_logf("screen: sms-chat (%s)\n", c ? c->peer : "?");
 
 	lv_obj_t *call = app_header_create(screen, c ? c->peer : "Chat",
 					   LV_SYMBOL_CALL);
 	if (call)
-		lv_obj_add_event_cb(call, on_call, LV_EVENT_CLICKED, (void *)c);
+		lv_obj_add_event_cb(call, on_call, LV_EVENT_CLICKED, NULL);
 
 	lv_obj_t *input_bar = build_input_bar(screen);
 	gui_keyboard_set_lift(input_bar, -(int32_t)NAV_BAR_HEIGHT);
 
 	int list_top    = APP_HEADER_HEIGHT;
 	int list_bottom = NAV_BAR_HEIGHT + INPUT_H;
-	lv_obj_t *list = lv_obj_create(screen);
-	lv_obj_remove_style_all(list);
-	lv_obj_set_size(list, lv_pct(100), 640 - list_top - list_bottom);
-	lv_obj_align(list, LV_ALIGN_TOP_MID, 0, list_top);
-	lv_obj_set_style_pad_hor(list, 12, 0);
-	lv_obj_set_style_pad_ver(list, 8, 0);
-	lv_obj_set_style_pad_row(list, 10, 0);
-	lv_obj_set_scroll_dir(list, LV_DIR_VER);
-	lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_AUTO);
-	lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
-	lv_obj_set_flex_align(list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
+	chat_list = lv_obj_create(screen);
+	lv_obj_remove_style_all(chat_list);
+	lv_obj_set_size(chat_list, lv_pct(100), 640 - list_top - list_bottom);
+	lv_obj_align(chat_list, LV_ALIGN_TOP_MID, 0, list_top);
+	lv_obj_set_style_pad_hor(chat_list, 12, 0);
+	lv_obj_set_style_pad_ver(chat_list, 8, 0);
+	lv_obj_set_style_pad_row(chat_list, 10, 0);
+	lv_obj_set_scroll_dir(chat_list, LV_DIR_VER);
+	lv_obj_set_scrollbar_mode(chat_list, LV_SCROLLBAR_MODE_AUTO);
+	lv_obj_set_flex_flow(chat_list, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_align(chat_list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
 			      LV_FLEX_ALIGN_START);
 
-	for (int i = 0; c && i < c->message_count; i++)
-		add_bubble(list, &c->messages[i]);
+	lv_obj_add_event_cb(screen, on_screen_loaded, LV_EVENT_SCREEN_LOADED, NULL);
+
+	sms_mark_read(chat_idx);
+	rebuild_thread();
 }
