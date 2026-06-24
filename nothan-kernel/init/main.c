@@ -17,7 +17,6 @@ extern void mmu_log_config(void);
 extern void omap_intc_init(void);
 extern struct task_struct *user_task_create(const char *name);
 extern struct task_struct *user_task_create_gui(void);
-extern struct task_struct *kernel_spawn(const char *path);
 
 /*
  * Set to 1 to run the FAT32 write self-test at boot. Pure UART output —
@@ -153,7 +152,7 @@ void kernel_main(void)
 		enqueue_task(&runqueue, gui);
 	}
 
-	struct task_struct *sh = kernel_spawn("/bin/sh");
+	struct task_struct *sh = user_task_create("shell");
 	if (sh) {
 		printk("[KERN] Spawning shell\n");
 		enqueue_task(&runqueue, sh);

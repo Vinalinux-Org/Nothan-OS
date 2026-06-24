@@ -36,7 +36,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOPDIR="$(dirname "$SCRIPT_DIR")"
 MLO="$TOPDIR/bootloader/MLO"
 KERNEL="$TOPDIR/nothan-kernel/build/kernel.bin"
-USPACE="$TOPDIR/userspace/build"
 PART="${DEVICE}1"
 
 if [ ! -f "$MLO" ]; then
@@ -68,35 +67,8 @@ dd if="$MLO"    of="$DEVICE" bs=512 seek=512  conv=notrunc status=none
 dd if="$MLO"    of="$DEVICE" bs=512 seek=768  conv=notrunc status=none
 dd if="$KERNEL" of="$DEVICE" bs=512 seek=2048 conv=notrunc status=none
 
-echo "==> populate rootfs"
-MOUNT=$(mktemp -d)
-mount "$PART" "$MOUNT"
-
-mkdir -p "$MOUNT/bin" "$MOUNT/sbin" "$MOUNT/etc"
-
-copy_bin() {
-    local src="$1" dst="$2"
-    if [ -f "$src" ]; then
-        cp "$src" "$dst"
-        echo "  $(basename "$dst")  ($(stat -c%s "$src") bytes)"
-    else
-        echo "  warning: $src not found, skipping"
-    fi
-}
-
-echo "  /bin/"
-for name in sh ps ls info uname reboot shutdown; do
-    copy_bin "$USPACE/bin/${name}.bin" "$MOUNT/bin/$name"
-done
-
-echo "  /sbin/"
-copy_bin "$USPACE/sbin/init.bin" "$MOUNT/sbin/init"
-
-echo "  / (user programs)"
-copy_bin "$USPACE/example.bin" "$MOUNT/example"
-
-sync
-umount "$MOUNT"
-rmdir "$MOUNT"
+# FAT32 partition holds only persistent data (CONTACTS.BIN, SMS.BIN, CALLLOG.BIN).
+# All process binaries are embedded in the kernel image — no files to populate here.
+# Data files are created automatically by the apps on first write.
 
 echo "done — eject and boot BBB."

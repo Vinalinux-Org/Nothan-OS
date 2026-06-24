@@ -374,38 +374,3 @@ struct task_struct *user_task_create_gui(void)
 				    _binary_user_gui_end);
 }
 
-/**
- * kernel_spawn() - Spawn a user task from a VFS path
- * @path: Absolute path to the binary on the mounted filesystem
- *
- * Reads the binary from the VFS and creates a user task.
- * Used during early boot to launch /sbin/init from SD card.
- *
- * Return: Pointer to the task_struct, or NULL on failure.
- */
-struct task_struct *kernel_spawn(const char *path)
-{
-	int fd = vfs_open(path, 0);
-	if (fd < 0)
-		return NULL;
-
-	unsigned long buf_size = 8192;
-	u8 *buf = (u8 *)kmalloc(buf_size, GFP_KERNEL);
-	if (!buf) {
-		vfs_close(fd);
-		return NULL;
-	}
-
-	int bytes = vfs_read(fd, (char *)buf, buf_size);
-	vfs_close(fd);
-
-	if (bytes <= 0) {
-		kfree(buf);
-		return NULL;
-	}
-
-	struct task_struct *tsk = user_task_create_bin(path, (char *)buf,
-						       (char *)(buf + bytes));
-	kfree(buf);
-	return tsk;
-}

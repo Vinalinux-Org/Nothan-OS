@@ -41,26 +41,9 @@ echo "==> update userspace on $PART"
 MOUNT=$(mktemp -d)
 mount "$PART" "$MOUNT"
 
-mkdir -p "$MOUNT/bin" "$MOUNT/sbin"
-
-copy_bin() {
-    local src="$1" dst="$2"
-    if [ -f "$src" ]; then
-        cp "$src" "$dst"
-        echo "  $(basename "$dst")"
-    else
-        echo "  warning: $src not found, skipping"
-    fi
-}
-
-for name in sh ps ls info uname reboot shutdown; do
-    copy_bin "$USPACE/bin/${name}.bin" "$MOUNT/bin/$name"
-done
-
-copy_bin "$USPACE/sbin/init.bin" "$MOUNT/sbin/init"
-
-echo "  / (user programs)"
-copy_bin "$USPACE/example.bin" "$MOUNT/example"
+# All process binaries are embedded in the kernel image.
+# FAT partition holds only persistent data (contacts, messages, etc.)
+echo "  (no userspace binaries — all embedded in kernel)"
 
 sync
 umount "$MOUNT"

@@ -342,7 +342,7 @@ int vfs_close(int fd)
  * vfs_chdir() - Validate a path for use as working directory
  * @path: Target path — only "/" and devfs paths ("/dev") are allowed.
  *
- * FAT32 subdirectories (/bin, /sbin, etc.) are rejected.
+ * FAT32 subdirectories are rejected — only "/" and "/dev" are valid.
  * Return: 0 if allowed, -1 otherwise.
  */
 int vfs_chdir(const char *path)

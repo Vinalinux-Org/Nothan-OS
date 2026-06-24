@@ -434,8 +434,7 @@ static long sys_ioctl(unsigned long a0, unsigned long a1, unsigned long a2)
  * sys_chdir - change the current working directory
  * @a0: path string (must be "/" or a devfs path like "/dev")
  *
- * Only root and devfs paths are allowed. FAT32 subdirectories
- * (/bin, /sbin) are rejected.
+ * Only root and devfs paths are allowed. FAT32 subdirectories are rejected.
  * Return: 0 on success, -1 on error or restricted path.
  */
 static long sys_chdir(unsigned long a0, unsigned long a1, unsigned long a2)
