@@ -24,6 +24,7 @@ OBJS += $(BUILD_DIR)/arch/arm/kernel/switch_to.o
 OBJS += $(BUILD_DIR)/arch/arm/mm/mmu.o
 OBJS += $(BUILD_DIR)/arch/arm/mm/mmu_enable.o
 OBJS += $(BUILD_DIR)/arch/arm/mm/pgd.o
+OBJS += $(BUILD_DIR)/arch/arm/mm/uaccess.o
 OBJS += $(BUILD_DIR)/drivers/irqchip/irq-omap-intc.o
 OBJS += $(BUILD_DIR)/kernel/irq/irq_core.o
 OBJS += $(BUILD_DIR)/drivers/tty/serial/omap-serial.o

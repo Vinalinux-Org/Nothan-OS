@@ -22,6 +22,9 @@ typedef unsigned int gfp_t;
 #define PHYS_OFFSET		0x80000000UL
 #define phys_to_kva(pa)		((void *)((unsigned long)(pa) + (PAGE_OFFSET - PHYS_OFFSET)))
 
+/* User image base — must match userspace/lib/user.lds and mmu_map_user(). */
+#define USER_CODE_VA		0x00010000UL
+
 /*
  * Max L2 (coarse) page tables a process may own. Each covers a 1 MB VA
  * window; code+bss usually need 1-2, the high stack 1, leaving slack for

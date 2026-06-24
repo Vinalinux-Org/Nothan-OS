@@ -14,6 +14,12 @@
 #include <nothan/mm.h>
 #include <nothan/mmio.h>
 #include <nothan/time.h>
+#include <nothan/uaccess.h>
+
+/* Longest path/string a syscall will scan out of user space. */
+#define USER_STR_MAX	256
+/* Sanity cap on user-supplied array counts, so count*sizeof can't wrap. */
+#define USER_ARR_MAX	65536
 
 extern struct task_struct *user_task_create_bin(const char *name,
 	char *blob_start, char *blob_end);
@@ -83,6 +89,9 @@ static long sys_write(unsigned long a0, unsigned long a1, unsigned long a2)
 
 	if (!buf)
 		return -1L;
+	/* Reject a kernel/unmapped or unterminated string before printk scans it. */
+	if (strnlen_user(buf, USER_STR_MAX) < 0)
+		return -1L;
 
 	printk("%s", buf);
 	return 0;
@@ -98,6 +107,8 @@ static long sys_write(unsigned long a0, unsigned long a1, unsigned long a2)
 static long sys_open(unsigned long a0, unsigned long a1, unsigned long a2)
 {
 	(void)a2;
+	if (strnlen_user((const char *)a0, USER_STR_MAX) < 0)
+		return -1;
 	return vfs_open((const char *)a0, (int)a1);
 }
 
@@ -115,6 +126,11 @@ static long sys_read(unsigned long a0, unsigned long a1, unsigned long a2)
 	int fd = (int)a0;
 	char *buf = (char *)a1;
 	size_t count = (size_t)a2;
+
+	/* The kernel will write up to @count bytes into @buf; prove the whole
+	 * range is the caller's own user memory (not kernel/unmapped). */
+	if (!access_ok(buf, count))
+		return -1;
 
 	if (fd == 0) {
 		for (size_t i = 0; i < count; i++) {
@@ -143,6 +159,10 @@ static long sys_writefile(unsigned long a0, unsigned long a1, unsigned long a2)
 	int fd = (int)a0;
 	const char *buf = (const char *)a1;
 	size_t count = (size_t)a2;
+
+	/* The kernel will read @count bytes from @buf; validate the source. */
+	if (!access_ok(buf, count))
+		return -1;
 
 	if (fd == 1) {
 		for (size_t i = 0; i < count; i++)
@@ -179,6 +199,9 @@ static long sys_gettasklist(unsigned long a0, unsigned long a1, unsigned long a2
 	unsigned long max = a1;
 	unsigned long count = 0;
 	struct rq *rq = &runqueue;
+
+	if (max > USER_ARR_MAX || !access_ok(buf, max * sizeof(struct task_info)))
+		return -1;
 
 	/* Always include the currently running task */
 	if (count < max && rq->curr) {
@@ -223,6 +246,9 @@ static long sys_sysinfo(unsigned long a0, unsigned long a1, unsigned long a2)
 	struct sys_info *buf = (struct sys_info *)a0;
 	struct zone *z = get_zone();
 
+	if (!access_ok(buf, sizeof(struct sys_info)))
+		return -1;
+
 	buf->total_pages = z->managed_pages;
 	buf->free_pages = z->free_pages;
 	return 0;
@@ -242,6 +268,11 @@ static long sys_listdir(unsigned long a0, unsigned long a1, unsigned long a2)
 	struct file_entry *buf = (struct file_entry *)a1;
 	unsigned long max = a2;
 
+	if (strnlen_user(path, USER_STR_MAX) < 0)
+		return -1;
+	if (max > USER_ARR_MAX || !access_ok(buf, max * sizeof(struct file_entry)))
+		return -1;
+
 	return vfs_listdir(path, buf, (int)max);
 }
 
@@ -257,6 +288,9 @@ static long sys_spawn(unsigned long a0, unsigned long a1, unsigned long a2)
 	(void)a1; (void)a2;
 	const char *path = (const char *)a0;
 	unsigned long blob_size = 16384; /* 4 pages — covers text+rodata+data up to 16KB */
+
+	if (strnlen_user(path, USER_STR_MAX) < 0)
+		return -1;
 
 	int fd = vfs_open(path, 0);
 	if (fd < 0)
@@ -418,6 +452,8 @@ static long sys_uname(unsigned long a0, unsigned long a1, unsigned long a2)
 {
 	(void)a1; (void)a2;
 	struct uname_info *u = (struct uname_info *)a0;
+	if (!access_ok(u, sizeof(struct uname_info)))
+		return -1;
 	const char *sysname = "NothanOS";
 	const char *version = "1.0";
 	const char *machine = "armv7";
@@ -464,6 +500,8 @@ static long sys_chdir(unsigned long a0, unsigned long a1, unsigned long a2)
 	(void)a1; (void)a2;
 	const char *path = (const char *)a0;
 	if (!path)
+		return -1;
+	if (strnlen_user(path, USER_STR_MAX) < 0)
 		return -1;
 
 	struct task_struct *tsk = runqueue.curr;
@@ -527,6 +565,8 @@ static long sys_getcwd(unsigned long a0, unsigned long a1, unsigned long a2)
 	char *buf = (char *)a0;
 	unsigned long size = a1;
 	if (!buf || size == 0)
+		return -1;
+	if (!access_ok(buf, size))
 		return -1;
 
 	const char *cwd = runqueue.curr->cwd;
