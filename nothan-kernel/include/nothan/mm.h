@@ -38,6 +38,19 @@ struct mm_l2 {
 };
 
 /*
+ * BSS is allocated as a handful of physically-contiguous chunks (each up to
+ * one buddy MAX_ORDER block) rather than a single contiguous block. This lifts
+ * the old ~4 MB ceiling (a single power-of-2 alloc capped at MAX_ORDER) and
+ * survives physical fragmentation on respawn, since the chunks need not be
+ * contiguous with each other — they are mapped into consecutive user VAs.
+ */
+struct mm_bss_chunk {
+	unsigned long pa;      /* physical base of this chunk */
+	unsigned int  order;   /* buddy order (chunk = 2^order pages) */
+};
+#define MM_MAX_BSS_CHUNKS  16
+
+/*
  * struct mm_struct - per-process memory descriptor
  *
  * Each user task owns a private 16 KB L1 page table (@pgd). The kernel
@@ -53,12 +66,13 @@ struct mm_struct {
 	unsigned int  nr_l2;      /* number of L2 tables in use */
 
 	unsigned long code_pa;   /* physical address of user code pages   */
-	unsigned long bss_pa;    /* physical address of BSS pages (0 if none) */
+	struct mm_bss_chunk bss_chunks[MM_MAX_BSS_CHUNKS]; /* scatter-allocated bss */
+	unsigned int  nr_bss_chunks;
 	unsigned long stack_pa;  /* physical address of user stack pages */
 	unsigned long entry_va;  /* user-space entry point VA */
 	unsigned long sp_top;    /* user stack top VA (initial sp) */
 	unsigned int  code_pages;  /* number of 4KB code pages  */
-	unsigned int  bss_pages;   /* number of 4KB BSS pages   */
+	unsigned int  bss_pages;   /* total number of 4KB BSS pages (across chunks) */
 	unsigned int  stack_pages; /* number of 4KB stack pages */
 };
 
@@ -241,5 +255,17 @@ void __free_pages(struct page *page, unsigned int order);
 int  pgd_alloc(struct mm_struct *mm);
 void pgd_free(struct mm_struct *mm);
 int  mmu_map_user(struct mm_struct *mm);
+
+/* Release every BSS chunk back to the buddy allocator (spawn cleanup + exit). */
+static inline void mm_free_bss_chunks(struct mm_struct *mm, struct zone *zone)
+{
+	for (unsigned int i = 0; i < mm->nr_bss_chunks; i++) {
+		struct page *pg = pfn_to_page(zone,
+			(mm->bss_chunks[i].pa - zone->base_pa) >> PAGE_SHIFT);
+		if (pg)
+			__free_pages(pg, mm->bss_chunks[i].order);
+	}
+	mm->nr_bss_chunks = 0;
+}
 
 #endif /* _MM_H */

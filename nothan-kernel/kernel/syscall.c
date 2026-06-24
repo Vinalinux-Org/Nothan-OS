@@ -14,6 +14,7 @@
 #include <nothan/mm.h>
 #include <nothan/mmio.h>
 #include <nothan/time.h>
+#include <nothan/delay.h>
 #include <nothan/uaccess.h>
 
 /* Longest path/string a syscall will scan out of user space. */
@@ -372,15 +373,7 @@ static long sys_kill(unsigned long a0, unsigned long a1, unsigned long a2)
 				if (cp)
 					__free_pages(cp, code_order);
 
-				if (mm->bss_pa) {
-					unsigned int bss_order = 0;
-					while ((1u << bss_order) < mm->bss_pages)
-						bss_order++;
-					struct page *bp = pfn_to_page(zone,
-						(mm->bss_pa - zone->base_pa) >> PAGE_SHIFT);
-					if (bp)
-						__free_pages(bp, bss_order);
-				}
+				mm_free_bss_chunks(mm, zone);
 
 				unsigned int stack_order = 0;
 				while ((1u << stack_order) < mm->stack_pages)
@@ -395,6 +388,12 @@ static long sys_kill(unsigned long a0, unsigned long a1, unsigned long a2)
 			}
 
 			printk("[KILL] task \"%s\" pid=%d killed\n", tsk->comm, tsk->pid);
+
+			/* The caller runs on its own kernel stack, not the
+			 * target's, so the target's kernel stack and task_struct
+			 * can be freed right here (no reaper needed). */
+			kfree(tsk->kstack_base);
+			kfree(tsk);
 			return 0;
 		}
 	}
@@ -590,6 +589,23 @@ static long sys_getticks(unsigned long a0, unsigned long a1, unsigned long a2)
 	return (long)(get_jiffies() * (1000 / HZ));
 }
 
+/**
+ * sys_sleep - block the calling task for @a0 milliseconds
+ * @a0: milliseconds to sleep
+ *
+ * Sleeps via a kernel timer + schedule() (msleep), so the CPU can drop to
+ * the idle WFI instead of spinning. A GUI/event loop calls this between
+ * frames to bound its tick rate without busy-waiting.
+ *
+ * Return: 0 on success.
+ */
+static long sys_sleep(unsigned long a0, unsigned long a1, unsigned long a2)
+{
+	(void)a1; (void)a2;
+	msleep((unsigned long)a0);
+	return 0;
+}
+
 /*
  * Syscall dispatch table
  * Indexed by syscall number; must match __NR_xxx constants.
@@ -617,6 +633,7 @@ static const syscall_fn_t syscall_table[NR_SYSCALLS] = {
 	[__NR_chdir]       = sys_chdir,
 	[__NR_getcwd]      = sys_getcwd,
 	[__NR_getticks]    = sys_getticks,
+	[__NR_sleep]       = sys_sleep,
 };
 
 /**

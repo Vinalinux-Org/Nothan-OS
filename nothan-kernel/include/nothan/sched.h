@@ -62,6 +62,7 @@ struct sched_rt_entity {
  */
 struct task_struct {
 	void				*stack;
+	void				*kstack_base;	/* kmalloc base of kernel stack (free on exit) */
 	unsigned long			user_sp;
 	unsigned long			user_lr;
 	unsigned int			__state;
@@ -158,5 +159,6 @@ extern int need_resched;
 extern bool sched_running;  /* true after first real context switch */
 
 void do_exit(int code);
+void sched_queue_zombie(struct task_struct *tsk);
 
 #endif /* _NOTHAN_SCHED_H */

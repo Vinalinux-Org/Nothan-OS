@@ -103,6 +103,10 @@ void *kmalloc(size_t size, unsigned int flags)
 		if (!page)
 			return NULL;
 		page->slab = NULL;
+		/* Stash the order so kfree() can release the block by pointer
+		 * alone. alloc_pages() leaves private=0 and clears PG_BUDDY on the
+		 * head page, so this is free to reuse and won't read as a buddy. */
+		page->private = order;
 		return (void *)__phys_to_virt(page_to_phys(get_zone(), page));
 	}
 
@@ -149,11 +153,11 @@ void kfree(void *ptr)
 
 	if (!cache) {
 		/*
-		 * Direct buddy allocation — the caller must know
-		 * the right order.  We cannot recover the order
-		 * from the pointer alone, so this path is a no-op
-		 * until we store the order in page metadata.
+		 * Direct buddy allocation (size > largest cache). kmalloc() stashed
+		 * the order in page->private; release the whole block so large
+		 * allocations (e.g. a task's 16 KB kernel stack) don't leak.
 		 */
+		__free_pages(page, page->private);
 		return;
 	}
 

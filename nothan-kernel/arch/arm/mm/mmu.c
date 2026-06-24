@@ -115,10 +115,17 @@ static inline u32 *pgd_kva(void)
  * =================================================================== */
 
 #define USER_L1_END	0xC00		/* first kernel L1 index (VA 0xC0000000) */
-#define USER_CODE_VA	0x00010000UL	/* user image base (matches user.lds) */
+/* USER_CODE_VA now lives in <nothan/mm.h> (shared with uaccess). */
 #define TTBR0_FLAGS	0x4A		/* walk attributes — same as boot TTBR0 */
 
-#define L2_ATTR_MEM	(PTE_SMALL_C | PTE_SMALL_B)
+/*
+ * Normal, Inner+Outer Write-Back Write-Allocate (TEX=001, C=1, B=1) — must
+ * MATCH the kernel's MT_NORMAL section attributes for RAM. The kernel writes
+ * a task's code/bss through its own cacheable kernel mapping; if the user
+ * mapping of the same physical page used a different memory type the two
+ * views are an architecturally "mismatched memory attribute" pair.
+ */
+#define L2_ATTR_MEM	(PTE_SMALL_TEX(1) | PTE_SMALL_C | PTE_SMALL_B)
 #define L2_USER_RW	(PTE_SMALL_AP_BOTH | PTE_SMALL_NG)
 #define PTE_USER_CODE	(L2_ATTR_MEM | L2_USER_RW)			/* RW + exec */
 #define PTE_USER_DATA	(PTE_SMALL_XN | L2_ATTR_MEM | L2_USER_RW)	/* RW + XN  */
@@ -234,9 +241,16 @@ int mmu_map_user(struct mm_struct *mm)
 
 	if (map_user_range(mm, code_va, mm->code_pa, mm->code_pages, PTE_USER_CODE))
 		return -1;
-	if (mm->bss_pages &&
-	    map_user_range(mm, bss_va, mm->bss_pa, mm->bss_pages, PTE_USER_DATA))
-		return -1;
+
+	/* bss: lay each scatter-allocated chunk into consecutive VAs above code. */
+	unsigned long va = bss_va;
+	for (unsigned int i = 0; i < mm->nr_bss_chunks; i++) {
+		unsigned int npages = 1u << mm->bss_chunks[i].order;
+		if (map_user_range(mm, va, mm->bss_chunks[i].pa, npages, PTE_USER_DATA))
+			return -1;
+		va += (unsigned long)npages * PAGE_SIZE;
+	}
+
 	if (map_user_range(mm, stack_va, mm->stack_pa, mm->stack_pages, PTE_USER_DATA))
 		return -1;
 

@@ -26,8 +26,9 @@
 #define __NR_chdir      17  /* change working directory          */
 #define __NR_getcwd     18  /* get current working directory     */
 #define __NR_getticks   19  /* get system tick count in ms       */
+#define __NR_sleep      20  /* block the task for N milliseconds  */
 
-#define NR_SYSCALLS     20
+#define NR_SYSCALLS     21
 
 /* reboot commands */
 #define REBOOT_WARM     0

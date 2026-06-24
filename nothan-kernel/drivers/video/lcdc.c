@@ -1,18 +1,23 @@
 /*
  * drivers/video/lcdc.c - AM335x LCD Controller driver
  *
- * Drives the LCDC in raster TFT mode for 1280x720@60Hz HDMI output
- * via SiI9022A. Implements double buffering with IRQ-driven VSYNC:
+ * Drives the LCDC in raster TFT mode for 800x480@60Hz HDMI output
+ * via TDA19988. Implements double buffering with IRQ-driven VSYNC:
  *   - front buffer: LCDC DMA reads from here
  *   - back buffer:  CPU writes here (never touches front during scan)
  *   - FB_FLIP ioctl: waits for EOF0 IRQ, swaps buffers, copies front→back
  *
- * Framebuffer layout (each buffer):
- *   [0..31]        palette (entry 0 = 0x4000 → 16bpp indicator)
- *   [32..1843231]  1280×720 RGB565 pixel data
+ * The panel is run at native 800×480 landscape but mounted physically
+ * rotated 90°, so the user sees a 480×800 portrait screen. The GUI renders
+ * portrait (480×800); lcdc_flush() transposes each flushed region into the
+ * 800×480 landscape framebuffer (see the rotation note there).
  *
- * Pixel clock: DPLL_DISP M=99 N=7 → 297 MHz, M2=2 → 148.5 MHz,
- *              LCDC CLKDIV=2 → 74.25 MHz.
+ * Framebuffer layout (each buffer):
+ *   [0..31]       palette (entry 0 = 0x4000 → 16bpp indicator)
+ *   [32..768031]  800×480 RGB565 pixel data
+ *
+ * Pixel clock: DPLL_DISP M=118 N=7 → 354 MHz, M2=6 → 59 MHz,
+ *              LCDC CLKDIV=2 → 29.5 MHz (CVT 800×480@60).
  *
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
@@ -59,13 +64,14 @@
 /* LCDC_RASTER_CTRL bits */
 #define RASTER_ENABLE       (1 << 0)
 #define RASTER_TFT_MODE     (1 << 7)
-#define RASTER_DATA_ONLY    (0x02 << 20)
+#define RASTER_DATA_ONLY    (0x02 << 20)  /* bits 21:20 = 10: raw pixel data, no palette DMA */
 
 /* LCDC_RASTER_TIMING_2 bits (TRM 13.5.1.13) */
 #define TIMING2_HSYNC_INV   (1 << 21)   /* ihs: 1=active low */
 #define TIMING2_PCLK_INV    (1 << 22)   /* ipc: drive data on falling PCLK */
 #define TIMING2_PHSVS_FALL  (1 << 24)   /* 0=rising, 1=falling edge */
 #define TIMING2_PHSVS_ON    (1 << 25)   /* drive HS/VS per bit 24 */
+#define TIMING2_HSWMSB      (1 << 27)   /* HSW high bits when (HSW-1) > 6 bits */
 #define TIMING2_ACB_DEFAULT 0x0000FF00U /* AC bias frequency */
 
 /* DMA + interrupts */
@@ -81,39 +87,49 @@
 #define CM_IDLEST_DPLL_DISP     0xF0E00448
 #define CLKSEL_LCDC_PIXEL_CLK   0xF0E00534
 
-#define DPLL_DISP_M     99U
+/* DPLL_DISP for 29.5 MHz pixel clock (CVT 800×480@60):
+ *   DCO = SYS_CLKIN(24) × M / (N+1) = 24 × 118 / 8 = 354 MHz
+ *   M2 = 6 → 59 MHz, LCDC CLKDIV = 2 → 29.5 MHz.
+ * DCO 354 MHz sits close to the known-good 720p config (297 MHz). */
+#define DPLL_DISP_M     118U
 #define DPLL_DISP_N     7U
-#define DPLL_DISP_M2    2U
+#define DPLL_DISP_M2    6U
 #define LCDC_CLKDIV     2U
 
-/* Framebuffer geometry */
+/* Framebuffer geometry — native panel orientation (landscape).
+ * The GUI renders portrait 480×800; lcdc_flush() transposes into this. */
 #define PALETTE_SZ  32U
-#define FB_W        1280U
-#define FB_H        720U
+#define FB_W        800U
+#define FB_H        480U
 #define FB_BPP      2U
 #define FB_SZ       (PALETTE_SZ + FB_W * FB_H * FB_BPP)
 
-/*
- * RASTER_TIMING_0 for 1280×720@60Hz:
- *   PPL=1280: HORLSB=0x2F0, HORMSB=0x008
- *   HSW=40:   HSWLSB=0x9C00
- *   HFP=110:  HFPLSB=0x006D0000
- *   HBP=220:  HBPLSB=0xDB000000
- */
-#define TIMING0_VAL     0xDB6D9CF8U
+/* Portrait logical geometry the GUI flushes in (rotated 90° into FB) */
+#define PORT_W      480U    /* = FB_H */
+#define PORT_H      800U    /* = FB_W */
 
 /*
- * RASTER_TIMING_1 for 720 lines, VFP=5, VSW=5, VBP=20:
- *   VERLSB(720)=0x2CF, VSW(5)=0x1000,
- *   VFP(5)=0x00050000, VBP(20)=0x14000000
+ * RASTER_TIMING_0 for 800×480 CVT (htotal 992):
+ *   PPL=800: HORLSB(800)=0x310, HORMSB=0 (bit10 of 799 clear)
+ *   HSW=72:  (HSW-1=71)&0x3F=7 → 0x1C00; high bit → TIMING2 HSWMSB
+ *   HFP=24:  (HFP-1=23)=0x17 → 0x00170000
+ *   HBP=96:  (HBP-1=95)=0x5F → 0x5F000000
  */
-#define TIMING1_VAL     0x140512CFU
+#define TIMING0_VAL     0x5F171F10U
+
+/*
+ * RASTER_TIMING_1 for 480 lines, VFP=3, VSW=10, VBP=3:
+ *   VERLSB(480)=0x1DF, VSW(10)=(10-1)<<10=0x2400,
+ *   VFP(3)=0x00030000, VBP(3)=0x03000000
+ */
+#define TIMING1_VAL     0x030325DFU
 
 /* RASTER_TIMING_2: data driven on falling PCLK edge, TDA19988 samples on rising.
- * IHS active low, AC bias 0xFF, PHSVS controlled by bit 24. */
+ * IHS active low (CVT -hsync), VSYNC active high (no invert), AC bias 0xFF,
+ * PHSVS controlled by bit 24. HSWMSB carries HSW=72's high bit. */
 #define TIMING2_VAL     (TIMING2_PHSVS_ON | TIMING2_PHSVS_FALL | \
 			 TIMING2_PCLK_INV | TIMING2_HSYNC_INV | \
-			 TIMING2_ACB_DEFAULT)
+			 TIMING2_HSWMSB | TIMING2_ACB_DEFAULT)
 
 /* Double buffer state */
 static u32  fb_pa[2];
@@ -144,9 +160,12 @@ static void dpll_disp_configure(void)
 /* EOF0 IRQ handler — fires when LCDC finishes scanning a frame */
 static void lcdc_eof_handler(unsigned int irq)
 {
+	static int eof_count;
 	(void)irq;
 	mmio_write32(LCDC_BASE + LCDC_IRQSTATUS, IRQBIT_EOF0);
 	eof_flag = 1;
+	if (++eof_count <= 3)
+		printk("[LCDC] EOF0 IRQ fired (#%d)\n", eof_count);
 }
 
 /* Block until EOF0 fires (max 30 ms = 2 frames at 60 Hz) */
@@ -156,8 +175,12 @@ static void wait_eof(void)
 
 	eof_flag = 0;
 	while (!eof_flag) {
-		if (get_jiffies() >= end)
+		if (get_jiffies() >= end) {
+			/* EOF0 IRQ did not fire within 30 ms — tearing will occur.
+			 * Root cause: IRQ 36 not reaching the handler. */
+			printk("[LCDC] WARN wait_eof: EOF0 IRQ timeout (IRQ 36 not firing)\n");
 			return;
+		}
 	}
 }
 
@@ -172,23 +195,42 @@ static void copy_buf(u8 *dst, const u8 *src, unsigned int bytes)
 		*dst++ = *src++;
 }
 
+/*
+ * lcdc_flush — copy a GUI-rendered region straight into the framebuffer.
+ *
+ * Rotation is now done in userspace (lv_draw_sw_rotate in lv_port_disp.c),
+ * so the region handed to us is already in the panel's native landscape
+ * orientation. We just blit it 1:1 at (x1,y1)..(x2,y2). No transpose.
+ */
 static void lcdc_flush(int x1, int y1, int x2, int y2,
 		       const void *data, unsigned int len)
 {
-	int          width     = x2 - x1 + 1;
-	int          rows      = y2 - y1 + 1;
-	unsigned int row_bytes = (unsigned int)width * FB_BPP;
-	u8          *pixels    = (u8 *)fb_va[back_idx] + PALETTE_SZ;
-	const u8    *src       = (const u8 *)data;
+	/*
+	 * Reject any region outside the landscape framebuffer, inverted, or
+	 * whose length doesn't match its area. The blit below turns each source
+	 * pixel into an absolute framebuffer index; an out-of-range coord would
+	 * write past the framebuffer into adjacent kernel memory, and a short
+	 * buffer would read past the user's source. The ioctl seam is the only
+	 * way userspace reaches this, so the args are not trusted here.
+	 */
+	if (x1 < 0 || y1 < 0 || x2 >= (int)FB_W || y2 >= (int)FB_H ||
+	    x1 > x2 || y1 > y2)
+		return;
+
+	int width = x2 - x1 + 1;
+	int rows  = y2 - y1 + 1;
+
+	if (len != (unsigned int)width * (unsigned int)rows * FB_BPP)
+		return;
+
+	u16       *pixels = (u16 *)((u8 *)fb_va[back_idx] + PALETTE_SZ);
+	const u16 *src    = (const u16 *)data;
 
 	for (int row = 0; row < rows; row++) {
-		u8 *dst = pixels + ((unsigned int)(y1 + row) * FB_W +
-				    (unsigned int)x1) * FB_BPP;
-		copy_buf(dst, src, row_bytes);
-		src += row_bytes;
+		u16 *dst = pixels + (unsigned int)(y1 + row) * FB_W + (unsigned int)x1;
+		for (int col = 0; col < width; col++)
+			*dst++ = *src++;
 	}
-
-	(void)len;
 }
 
 static void lcdc_flip(void)
@@ -203,8 +245,8 @@ static void lcdc_flip(void)
 	/* Wait for current frame scan to finish */
 	wait_eof();
 
-	/* Point LCDC DMA at the new front buffer */
-	mmio_write32(LCDC_BASE + LCDC_FB0_BASE,    fb_pa[new_front]);
+	/* Point LCDC DMA at the new front buffer — skip palette, pixel-only range */
+	mmio_write32(LCDC_BASE + LCDC_FB0_BASE,    fb_pa[new_front] + PALETTE_SZ);
 	mmio_write32(LCDC_BASE + LCDC_FB0_CEILING, fb_pa[new_front] + FB_SZ - 4);
 
 	front_idx = new_front;
@@ -291,12 +333,23 @@ static int __init lcdc_init(void)
 	back_idx  = 1;
 
 	mmio_write32(LCDC_BASE + LCDC_DMA_CTRL,    DMA_BURST_16 | DMA_TH_FIFO_512);
-	mmio_write32(LCDC_BASE + LCDC_FB0_BASE,    fb_pa[front_idx]);
+	/* BASE points at first pixel (skip 32-byte palette); CEILING = last byte of pixel data.
+	 * DMA reads exactly 800×480×2 = 768000 bytes — no stray palette pixels. */
+	mmio_write32(LCDC_BASE + LCDC_FB0_BASE,    fb_pa[front_idx] + PALETTE_SZ);
 	mmio_write32(LCDC_BASE + LCDC_FB0_CEILING, fb_pa[front_idx] + FB_SZ - 4);
 	mmio_write32(LCDC_BASE + LCDC_TIMING0,     TIMING0_VAL);
 	mmio_write32(LCDC_BASE + LCDC_TIMING1,     TIMING1_VAL);
 	mmio_write32(LCDC_BASE + LCDC_TIMING2,     TIMING2_VAL);
 
+	/*
+	 * DATA_ONLY mode (bits 21:20 = 10): LCDC DMA reads raw pixel data with
+	 * no palette step. We set BASE = fb_pa + PALETTE_SZ so the DMA starts
+	 * at the first pixel, not the palette header. CEILING covers exactly
+	 * 800×480×2 = 768000 bytes. With BASE = fb_pa the palette bytes (32 B)
+	 * were treated as 16 extra pixels per frame, filling the FIFO faster than
+	 * the display drained it; AUTO_UFLOW restarted DMA mid-frame from whatever
+	 * BASE was, producing the seam at a different scan line each boot.
+	 */
 	mmio_write32(LCDC_BASE + LCDC_RASTER_CTRL, RASTER_TFT_MODE | RASTER_DATA_ONLY);
 	rctrl = mmio_read32(LCDC_BASE + LCDC_RASTER_CTRL);
 	mmio_write32(LCDC_BASE + LCDC_RASTER_CTRL, rctrl | RASTER_ENABLE);
@@ -308,8 +361,31 @@ static int __init lcdc_init(void)
 
 	fb_register_ops(&lcdc_fb_ops);
 
-	printk("[LCDC] 1280x720 RGB565 double-buffer, front=PA 0x%08lx back=PA 0x%08lx\n",
+	printk("[LCDC] 800x480 RGB565 double-buffer, front=PA 0x%08lx back=PA 0x%08lx\n",
 	       (unsigned long)fb_pa[front_idx], (unsigned long)fb_pa[back_idx]);
+
+#define LCDC_TEST_PATTERN 1
+#if LCDC_TEST_PATTERN
+	/*
+	 * DEBUG: paint 8 vertical colour bars straight into the FB (no GUI) and
+	 * hold for ~3 s. If a seam appears in THIS, it is the LCDC/monitor, not
+	 * the GUI/rotate/copy. Bars across the 800-wide FB: any mid-line break
+	 * shows immediately.
+	 */
+	{
+		static const u16 bars[8] = {
+			0xF800, 0x07E0, 0x001F, 0xFFE0,
+			0xF81F, 0x07FF, 0xFFFF, 0x4208,
+		};
+		u16 *tp = (u16 *)((u8 *)fb_va[front_idx] + PALETTE_SZ);
+		for (unsigned int y = 0; y < FB_H; y++)
+			for (unsigned int x = 0; x < FB_W; x++)
+				tp[y * FB_W + x] = bars[(x * 8u) / FB_W];
+		clean_dcache_range((unsigned long)fb_va[front_idx],
+				   (unsigned long)fb_va[front_idx] + FB_SZ);
+		printk("[LCDC] TEST PATTERN: 8 colour bars — check for seam before GUI starts\n");
+	}
+#endif
 	return 0;
 }
 device_initcall(lcdc_init);

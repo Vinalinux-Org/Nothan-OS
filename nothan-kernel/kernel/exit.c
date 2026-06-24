@@ -22,6 +22,12 @@ void do_exit(int code)
 {
 	struct task_struct *tsk = runqueue.curr;
 
+	/* Loud, earliest-possible marker: ANY task death lands here first,
+	 * whether from a fault (preceded by a [DABT]/[PABT] line) or a clean
+	 * exit syscall (main() returning -> crt0 svc, with no fault line). */
+	printk("\n[DOEXIT] >>> pid=%d \"%s\" code=%d <<<\n",
+	       tsk->pid, tsk->comm, code);
+
 	tsk->exit_code = code;
 	tsk->exit_state = EXIT_ZOMBIE;
 	tsk->__state = TASK_UNINTERRUPTIBLE;
@@ -29,6 +35,7 @@ void do_exit(int code)
 	/* Release user-space resources if any */
 	if (tsk->mm) {
 		struct zone *zone = get_zone();
+		unsigned long f_start = zone->free_pages;	/* MEMCHK */
 
 		/* Switch off this task's address space (TTBR0 → swapper) before
 		 * freeing its page tables, since they are the active TTBR0. */
@@ -36,6 +43,7 @@ void do_exit(int code)
 
 		/* Free the private L1 + its L2 tables. */
 		pgd_free(tsk->mm);
+		unsigned long f_pgd = zone->free_pages;		/* MEMCHK */
 
 		/* Compute orders matching how spawn allocated. */
 		unsigned int code_order = 0;
@@ -47,15 +55,7 @@ void do_exit(int code)
 		if (cp)
 			__free_pages(cp, code_order);
 
-		if (tsk->mm->bss_pa) {
-			unsigned int bss_order = 0;
-			while ((1u << bss_order) < tsk->mm->bss_pages)
-				bss_order++;
-			struct page *bp = pfn_to_page(zone,
-				(tsk->mm->bss_pa - zone->base_pa) >> PAGE_SHIFT);
-			if (bp)
-				__free_pages(bp, bss_order);
-		}
+		mm_free_bss_chunks(tsk->mm, zone);
 
 		unsigned int stack_order = 0;
 		while ((1u << stack_order) < tsk->mm->stack_pages)
@@ -68,12 +68,23 @@ void do_exit(int code)
 		kfree(tsk->mm);
 		tsk->mm = NULL;
 
+		/* MEMCHK: how many pages each stage returned. pgd should be +4
+		 * (16 KB L1); code/bss/stack the rest. Kernel stack is freed later
+		 * by the reaper — see [MEMCHK] reap. */
+		printk("[MEMCHK] exit pid=%d: free %lu->%lu pages (pgd +%lu, rest +%lu)\n",
+		       tsk->pid, f_start, zone->free_pages,
+		       f_pgd - f_start, zone->free_pages - f_pgd);
 		printk("[EXIT] task \"%s\" pid=%d: user pages freed\n",
 		       tsk->comm, tsk->pid);
 	}
 
 	printk("[EXIT] task \"%s\" pid=%d exited with code %d\n",
 	       tsk->comm, tsk->pid, code);
+
+	/* We're still executing on this task's kernel stack, so we can't free
+	 * it (or the task_struct) here. Hand both to the reaper, which runs in
+	 * the next task's context. */
+	sched_queue_zombie(tsk);
 
 	schedule();
 

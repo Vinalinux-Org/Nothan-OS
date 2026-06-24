@@ -37,6 +37,7 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 		kfree(p);
 		return NULL;
 	}
+	void *kstack_base = sp;	/* keep the allocation base for kfree on exit */
 
 	/*
 	 * Fill the stack from the top, matching __switch_to layout:
@@ -57,7 +58,8 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 	*--sp = (unsigned long)task_exit;	/* r5: return address for fn */
 	*--sp = (unsigned long)fn;		/* r4: first argument to task_entry */
 
-	p->stack      = sp;
+	p->stack       = sp;
+	p->kstack_base = kstack_base;
 	p->user_sp    = 0;
 	p->user_lr    = 0;
 	p->__state    = TASK_RUNNING;
@@ -138,7 +140,15 @@ struct task_struct *user_task_create_bin(const char *name,
 	if (!p)
 		return NULL;
 
-	unsigned long *ksp = (unsigned long *)kmalloc(PAGE_SIZE, GFP_KERNEL);
+	/*
+	 * Kernel (SVC) stack: 16 KB. 4 KB was risky — a user task takes a
+	 * syscall (vector_svc re-enables IRQs), and a timer IRQ can then nest
+	 * vector_irq → irq_handler → schedule → __switch_to on top of the
+	 * syscall frame on this same stack. An overflow corrupts the adjacent
+	 * kmalloc allocation (an L2 table, task_struct…) → random faults.
+	 */
+#define KSTACK_SIZE  (4u * PAGE_SIZE)
+	unsigned long *ksp = (unsigned long *)kmalloc(KSTACK_SIZE, GFP_KERNEL);
 	if (!ksp) {
 		kfree(p);
 		return NULL;
@@ -193,44 +203,76 @@ struct task_struct *user_task_create_bin(const char *name,
 	 * Allocate and zero BSS pages. Linker pads .data to a 4 KB boundary
 	 * so BSS starts on a fresh page right after the code pages.
 	 */
-	unsigned long bss_pa = 0;
 	unsigned int bss_pages = 0;
-	unsigned int bss_order = 0;
-	struct page *bss_pg = NULL;
+
+	mm->nr_bss_chunks = 0;
 
 	if (bss_size > 0) {
 		bss_pages = (bss_size + PAGE_SIZE - 1) / PAGE_SIZE;
-		while ((1u << bss_order) < bss_pages)
-			bss_order++;
 
-		bss_pg = alloc_pages(GFP_USER, bss_order);
-		if (!bss_pg) {
-			printk("[SPAWN] %s: alloc_pages(bss, order=%u) failed\n",
-			       name, bss_order);
-			__free_pages(code_pg, order);
-			kfree(mm); kfree(ksp); kfree(p);
-			return NULL;
+		/*
+		 * Scatter-allocate bss as a few contiguous chunks: take the
+		 * largest buddy block that fits the remainder, backing off the
+		 * order if the buddy can't satisfy it. This lifts the old single
+		 * 4 MB block ceiling (MAX_ORDER) and tolerates fragmentation; the
+		 * chunks need not be contiguous with each other — mmu_map_user()
+		 * maps them into consecutive user VAs.
+		 */
+		unsigned int remaining = bss_pages;
+		while (remaining > 0) {
+			if (mm->nr_bss_chunks >= MM_MAX_BSS_CHUNKS) {
+				printk("[SPAWN] %s: bss too large (%u pages)\n",
+				       name, bss_pages);
+				mm_free_bss_chunks(mm, zone);
+				__free_pages(code_pg, order);
+				kfree(mm); kfree(ksp); kfree(p);
+				return NULL;
+			}
+
+			unsigned int ord = 0;
+			while ((1u << (ord + 1)) <= remaining && ord < MAX_ORDER)
+				ord++;
+
+			struct page *pg = alloc_pages(GFP_USER, ord);
+			while (!pg && ord > 0) {
+				ord--;
+				pg = alloc_pages(GFP_USER, ord);
+			}
+			if (!pg) {
+				printk("[SPAWN] %s: alloc_pages(bss) failed\n", name);
+				mm_free_bss_chunks(mm, zone);
+				__free_pages(code_pg, order);
+				kfree(mm); kfree(ksp); kfree(p);
+				return NULL;
+			}
+
+			unsigned long cpa = page_to_phys(zone, pg);
+			mm->bss_chunks[mm->nr_bss_chunks].pa    = cpa;
+			mm->bss_chunks[mm->nr_bss_chunks].order = ord;
+			mm->nr_bss_chunks++;
+
+			u8 *kva = (u8 *)phys_to_kva(cpa);
+			unsigned long nbytes = (unsigned long)(1u << ord) << PAGE_SHIFT;
+			for (unsigned long i = 0; i < nbytes; i++)
+				kva[i] = 0;
+
+			remaining -= (1u << ord);
 		}
-		bss_pa = page_to_phys(zone, bss_pg);
-
-		u8 *bss_kva = (u8 *)phys_to_kva(bss_pa);
-		for (unsigned long i = 0; i < (unsigned long)bss_pages * PAGE_SIZE; i++)
-			bss_kva[i] = 0;
 	}
-	mm->bss_pa    = bss_pa;
 	mm->bss_pages = bss_pages;
 
 	/*
-	 * User stack: 32 KB (8 pages). 4 KB was not enough for LVGL — deep
-	 * widget/draw call chains overflow into unmapped VA and fault.
+	 * User stack: 128 KB (32 pages). 4 KB was far too little for LVGL;
+	 * 32 KB held LVGL 9.2 but 9.5's deeper draw/render call chains overflow
+	 * it (Data Abort writing just below the stack bottom at ~0xBEFF8000).
+	 * The high stack VA leaves room to grow without nearing bss.
 	 */
-#define USER_STACK_ORDER  3
+#define USER_STACK_ORDER  5
 #define USER_STACK_PAGES  (1u << USER_STACK_ORDER)
 	struct page *stack_pg = alloc_pages(GFP_USER, USER_STACK_ORDER);
 	if (!stack_pg) {
 		printk("[SPAWN] %s: alloc_pages(stack) failed\n", name);
-		if (bss_pg)
-			__free_pages(bss_pg, bss_order);
+		mm_free_bss_chunks(mm, zone);
 		__free_pages(code_pg, order);
 		kfree(mm); kfree(ksp); kfree(p);
 		return NULL;
@@ -251,8 +293,7 @@ struct task_struct *user_task_create_bin(const char *name,
 	if (pgd_alloc(mm) || mmu_map_user(mm)) {
 		pgd_free(mm);
 		__free_pages(stack_pg, USER_STACK_ORDER);
-		if (bss_pg)
-			__free_pages(bss_pg, bss_order);
+		mm_free_bss_chunks(mm, zone);
 		__free_pages(code_pg, order);
 		kfree(mm); kfree(ksp); kfree(p);
 		return NULL;
@@ -266,7 +307,7 @@ struct task_struct *user_task_create_bin(const char *name,
 	 *   r6-r11 = 0
 	 *   pc = user_task_trampoline
 	 */
-	unsigned long *sp = (unsigned long *)((char *)ksp + PAGE_SIZE);
+	unsigned long *sp = (unsigned long *)((char *)ksp + KSTACK_SIZE);
 	*--sp = (unsigned long)user_task_trampoline;
 	*--sp = 0;
 	*--sp = 0;
@@ -278,6 +319,7 @@ struct task_struct *user_task_create_bin(const char *name,
 	*--sp = mm->sp_top;	/* r4: user stack top, becomes sp_usr */
 
 	p->stack      = sp;
+	p->kstack_base = ksp;	/* kmalloc base of the kernel stack, for kfree on exit */
 	p->user_sp    = mm->sp_top;
 	p->user_lr    = 0;
 	p->__state    = TASK_RUNNING;
@@ -316,6 +358,23 @@ struct task_struct *user_task_create_bin(const char *name,
 	       p->comm, p->pid, code_pa, stack_pa);
 	printk("[SPAWN]   pgd_pa=0x%lx nr_l2=%u sp_top=0x%lx (stack high VA)\n",
 	       mm->pgd_pa, mm->nr_l2, mm->sp_top);
+
+	/* User VA memory map — the only mapped regions; everything else in the
+	 * 0..0xBF000000 range is UNMAPPED (touching it = translation fault). */
+	{
+		unsigned long code_va  = 0x00010000UL;
+		unsigned long code_end = code_va + (unsigned long)code_pages * PAGE_SIZE;
+		unsigned long bss_va   = code_end;
+		unsigned long bss_end  = bss_va + (unsigned long)bss_pages * PAGE_SIZE;
+		unsigned long stk_top  = USER_STACK_TOP;
+		unsigned long stk_bot  = stk_top - (unsigned long)USER_STACK_PAGES * PAGE_SIZE;
+		printk("[SPAWN]   MAP code [%08lx-%08lx) %luK | data+bss [%08lx-%08lx) %luK | stack [%08lx-%08lx) %luK\n",
+		       code_va, code_end, (code_end - code_va) / 1024,
+		       bss_va, bss_end, (bss_end - bss_va) / 1024,
+		       stk_bot, stk_top, (stk_top - stk_bot) / 1024);
+		printk("[SPAWN]   first UNMAPPED above bss = 0x%08lx  (a fault at/just past here = ran off the bss/pool top)\n",
+		       bss_end);
+	}
 
 	return p;
 }

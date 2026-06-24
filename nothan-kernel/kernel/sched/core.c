@@ -7,6 +7,7 @@
 #include <nothan/types.h>
 #include <nothan/sched.h>
 #include <nothan/mm.h>
+#include <nothan/slab.h>
 #include <nothan/printk.h>
 
 struct rq runqueue;
@@ -14,6 +15,42 @@ int need_resched;
 bool sched_running = false;
 
 extern void __switch_to(struct task_struct *prev, struct task_struct *next);
+
+/*
+ * Zombie reaping. A task that calls do_exit() is still running on its own
+ * kernel stack, so it cannot free that stack itself. do_exit() queues the
+ * dying task here; the next task scheduled in reaps it — freeing the kernel
+ * stack and the task_struct (both kmalloc'd).
+ */
+static struct list_head zombie_list;
+
+void sched_queue_zombie(struct task_struct *tsk)
+{
+	/* tsk is the running (off-runqueue) task, so its rt.run_list is free. */
+	list_add(&tsk->rt.run_list, &zombie_list);
+}
+
+static void reap_zombies(void)
+{
+	struct sched_rt_entity *rt, *tmp;
+
+	list_for_each_entry_safe(rt, tmp, &zombie_list,
+				 struct sched_rt_entity, run_list) {
+		struct task_struct *z = container_of(rt, struct task_struct, rt);
+
+		if (z == runqueue.curr)
+			continue;	/* never free the stack we're running on */
+		list_del(&rt->run_list);
+		unsigned long f0 = get_zone()->free_pages;	/* MEMCHK */
+		if (z->kstack_base)
+			kfree(z->kstack_base);
+		/* MEMCHK: kstack should return +4 pages (16 KB). +0 = the leak. */
+		printk("[MEMCHK] reap pid=%d: kstack free %lu->%lu pages (+%lu)\n",
+		       z->pid, f0, get_zone()->free_pages,
+		       get_zone()->free_pages - f0);
+		kfree(z);
+	}
+}
 
 /* Idle task — always runnable, lowest priority, no kmalloc needed. */
 #define IDLE_STACK_WORDS 256
@@ -84,6 +121,8 @@ void sched_init(void)
 
 	need_resched = 0;
 
+	list_init(&zombie_list);
+
 	idle_task_init();
 
 	/*
@@ -107,6 +146,10 @@ void sched_init(void)
 void schedule(void)
 {
 	__asm__ __volatile__ ("cpsid i" : : : "memory");
+
+	/* Free any task that exited while running on its own kernel stack.
+	 * Safe here: we run on the caller's stack, never the zombie's. */
+	reap_zombies();
 
 	struct task_struct *prev = runqueue.curr;
 
@@ -165,6 +208,14 @@ void schedule(void)
 	__asm__ __volatile__ ("cpsie i" : : : "memory");
 }
 
+/*
+ * Preemptive scheduling: the timer tick rotates the running task once its
+ * RR timeslice is spent. (Was toggled to 0 during a 2026-06 A/B test; the
+ * project has since chosen real preemptive multitasking so background tasks
+ * can run alongside the GUI without it having to yield() cooperatively.)
+ */
+#define SCHED_PREEMPT  1
+
 void scheduler_tick(void)
 {
 	struct task_struct *curr = runqueue.curr;
@@ -176,5 +227,7 @@ void scheduler_tick(void)
 		return;
 
 	curr->rt.time_slice = RR_TIMESLICE;
+#if SCHED_PREEMPT
 	need_resched = 1;
+#endif
 }
