@@ -99,13 +99,15 @@ static void cmd_info(void)
 	unsigned long used_kb  = total_kb - free_kb;
 	unsigned long pct      = total_kb > 0 ? used_kb * 100 / total_kb : 0;
 
+	unsigned long used_pages = si.total_pages - si.free_pages;
+
 	putchar('\n');
 	puts("  ---------------------\n");
 	puts("  Memory Info\n");
 	puts("  ---------------------\n");
-	puts("  Total:  "); putint(total_kb, 8); puts(" KB\n");
-	puts("  Used:   "); putint(used_kb,  8); puts(" KB ("); putint(pct, 2);       puts("%)\n");
-	puts("  Free:   "); putint(free_kb,  8); puts(" KB ("); putint(100 - pct, 2); puts("%)\n");
+	puts("  Total:  "); putint(total_kb, 8); puts(" KB  ("); putint(si.total_pages, 6); puts(" pages)\n");
+	puts("  Used:   "); putint(used_kb,  8); puts(" KB  ("); putint(used_pages,      6); puts(" pages)  "); putint(pct, 2);       puts("%\n");
+	puts("  Free:   "); putint(free_kb,  8); puts(" KB  ("); putint(si.free_pages,   6); puts(" pages)  "); putint(100 - pct, 2); puts("%\n");
 	puts("  ---------------------\n");
 }
 
