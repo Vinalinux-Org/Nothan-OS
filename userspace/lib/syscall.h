@@ -5,7 +5,6 @@
 #define __NR_exit       1
 #define __NR_getpid     2
 #define __NR_write      3
-#define __NR_getppid    4
 #define __NR_open       5
 #define __NR_read       6
 #define __NR_writefile  7
@@ -13,7 +12,6 @@
 #define __NR_gettasklist 9
 #define __NR_sysinfo    10
 #define __NR_listdir    11
-#define __NR_spawn      12
 #define __NR_kill       13
 #define __NR_reboot     14
 #define __NR_uname      15
@@ -137,11 +135,6 @@ static inline long sysinfo(struct sys_info *buf)
 static inline long listdir(const char *path, struct file_entry *buf, unsigned long max)
 {
 	return __syscall3(__NR_listdir, (long)path, (long)buf, (long)max);
-}
-
-static inline long spawn(const char *path)
-{
-	return __syscall1(__NR_spawn, (long)path);
 }
 
 struct uname_info {

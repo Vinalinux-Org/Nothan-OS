@@ -8,9 +8,8 @@
  */
 #define __NR_yield      0   /* yield CPU to next runnable task    */
 #define __NR_exit       1   /* terminate the current task         */
-#define __NR_getpid     2   /* return current task PID (tgid)     */
+#define __NR_getpid     2   /* return current task PID            */
 #define __NR_write      3   /* write NUL-terminated string to log */
-#define __NR_getppid    4   /* return parent PID                  */
 #define __NR_open       5   /* open a file                       */
 #define __NR_read       6   /* read from file descriptor         */
 #define __NR_writefile  7   /* write to file descriptor          */
@@ -18,7 +17,6 @@
 #define __NR_gettasklist 9  /* get list of running tasks         */
 #define __NR_sysinfo    10  /* get system info                   */
 #define __NR_listdir    11  /* list directory contents           */
-#define __NR_spawn      12  /* spawn a .bin file from VFS        */
 #define __NR_kill       13  /* terminate a task by PID           */
 #define __NR_reboot     14  /* reboot or halt the system         */
 #define __NR_uname      15  /* get OS/kernel name string         */

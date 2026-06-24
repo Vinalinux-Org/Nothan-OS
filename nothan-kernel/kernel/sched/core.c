@@ -17,37 +17,33 @@ bool sched_running = false;
 extern void __switch_to(struct task_struct *prev, struct task_struct *next);
 
 /*
- * Zombie reaping. A task that calls do_exit() is still running on its own
+ * Deferred-free list. A task that calls do_exit() is still running on its own
  * kernel stack, so it cannot free that stack itself. do_exit() queues the
- * dying task here; the next task scheduled in reaps it — freeing the kernel
- * stack and the task_struct (both kmalloc'd).
+ * dying task here; the next task scheduled in frees it.
  */
-static struct list_head zombie_list;
+static struct list_head dead_list;
 
-void sched_queue_zombie(struct task_struct *tsk)
+void sched_defer_free(struct task_struct *tsk)
 {
-	/* tsk is the running (off-runqueue) task, so its rt.run_list is free. */
-	list_add(&tsk->rt.run_list, &zombie_list);
+	list_add(&tsk->rt.run_list, &dead_list);
+	printk("[DEAD] queued pid=%d kstack=%p\n",
+	       tsk->pid, tsk->kstack_base);
 }
 
-static void reap_zombies(void)
+static void reap_dead(void)
 {
 	struct sched_rt_entity *rt, *tmp;
 
-	list_for_each_entry_safe(rt, tmp, &zombie_list,
+	list_for_each_entry_safe(rt, tmp, &dead_list,
 				 struct sched_rt_entity, run_list) {
 		struct task_struct *z = container_of(rt, struct task_struct, rt);
 
 		if (z == runqueue.curr)
 			continue;	/* never free the stack we're running on */
+		printk("[REAP] free pid=%d kstack=%p\n", z->pid, z->kstack_base);
 		list_del(&rt->run_list);
-		unsigned long f0 = get_zone()->free_pages;	/* MEMCHK */
 		if (z->kstack_base)
 			kfree(z->kstack_base);
-		/* MEMCHK: kstack should return +4 pages (16 KB). +0 = the leak. */
-		printk("[MEMCHK] reap pid=%d: kstack free %lu->%lu pages (+%lu)\n",
-		       z->pid, f0, get_zone()->free_pages,
-		       get_zone()->free_pages - f0);
 		kfree(z);
 	}
 }
@@ -84,15 +80,11 @@ static void idle_task_init(void)
 		idle_tsk.user_sp    = 0;
 		idle_tsk.user_lr    = 0;
 		idle_tsk.__state    = TASK_RUNNING;
-		idle_tsk.exit_state = 0;
 		idle_tsk.pid        = 0;
-		idle_tsk.tgid       = 0;
 		idle_tsk.prio       = IDLE_PRIO;
 		idle_tsk.rt.time_slice = RR_TIMESLICE;
 		idle_tsk.rt.on_rq   = 0;
 		idle_tsk.exit_code  = 0;
-		idle_tsk.real_parent = &idle_tsk;
-		idle_tsk.parent     = &idle_tsk;
 		idle_tsk.mm         = NULL;
 
 	const char *name = "idle";
@@ -121,7 +113,7 @@ void sched_init(void)
 
 	need_resched = 0;
 
-	list_init(&zombie_list);
+	list_init(&dead_list);
 
 	idle_task_init();
 
@@ -147,9 +139,7 @@ void schedule(void)
 {
 	__asm__ __volatile__ ("cpsid i" : : : "memory");
 
-	/* Free any task that exited while running on its own kernel stack.
-	 * Safe here: we run on the caller's stack, never the zombie's. */
-	reap_zombies();
+	reap_dead();
 
 	struct task_struct *prev = runqueue.curr;
 

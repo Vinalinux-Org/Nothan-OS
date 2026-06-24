@@ -53,18 +53,6 @@ static long sys_exit(unsigned long a0, unsigned long a1, unsigned long a2)
 }
 
 /**
- * sys_getppid - return the PID of the parent process
- *
- * Return: parent->pid, or 0 if no parent.
- */
-static long sys_getppid(unsigned long a0, unsigned long a1, unsigned long a2)
-{
-	(void)a0; (void)a1; (void)a2;
-	struct task_struct *p = runqueue.curr->parent;
-	return p ? (long)p->pid : 0;
-}
-
-/**
  * sys_getpid - return the PID of the calling task
  *
  * Return: current->pid cast to long.
@@ -72,8 +60,7 @@ static long sys_getppid(unsigned long a0, unsigned long a1, unsigned long a2)
 static long sys_getpid(unsigned long a0, unsigned long a1, unsigned long a2)
 {
 	(void)a0; (void)a1; (void)a2;
-	/* Linux: getpid() returns tgid (process ID, not thread ID) */
-	return (long)runqueue.curr->tgid;
+	return (long)runqueue.curr->pid;
 }
 
 /**
@@ -278,48 +265,6 @@ static long sys_listdir(unsigned long a0, unsigned long a1, unsigned long a2)
 }
 
 /**
- * sys_spawn - load and run a .bin file from the mounted filesystem
- * @a0: path to .bin file (user)
- *
- * Opens the file, reads its content, creates a new user task,
- * and enqueues it. Returns the new PID, or -1 on error.
- */
-static long sys_spawn(unsigned long a0, unsigned long a1, unsigned long a2)
-{
-	(void)a1; (void)a2;
-	const char *path = (const char *)a0;
-	unsigned long blob_size = 16384; /* 4 pages — covers text+rodata+data up to 16KB */
-
-	if (strnlen_user(path, USER_STR_MAX) < 0)
-		return -1;
-
-	int fd = vfs_open(path, 0);
-	if (fd < 0)
-		return -1;
-
-	u8 *buf = (u8 *)kmalloc(blob_size, GFP_KERNEL);
-	if (!buf) {
-		vfs_close(fd);
-		return -1;
-	}
-
-	int bytes = vfs_read(fd, (char *)buf, blob_size);
-	vfs_close(fd);
-	if (bytes <= 0) {
-		kfree(buf);
-		return -1;
-	}
-
-	struct task_struct *tsk = user_task_create_bin(path, (char *)buf, (char *)(buf + bytes));
-	kfree(buf);
-	if (!tsk)
-		return -1;
-
-	enqueue_task(&runqueue, tsk);
-	return (long)tsk->pid;
-}
-
-/**
  * sys_kill - terminate a task by PID
  * @a0: PID of the target task
  *
@@ -353,7 +298,6 @@ static long sys_kill(unsigned long a0, unsigned long a1, unsigned long a2)
 				continue;
 
 			dequeue_task(rq, tsk);
-			tsk->exit_state = EXIT_ZOMBIE;
 			tsk->__state = TASK_UNINTERRUPTIBLE;
 
 			if (tsk->mm) {
@@ -617,7 +561,6 @@ static const syscall_fn_t syscall_table[NR_SYSCALLS] = {
 	[__NR_exit]    = sys_exit,
 	[__NR_getpid]  = sys_getpid,
 	[__NR_write]   = sys_write,
-	[__NR_getppid] = sys_getppid,
 	[__NR_open]    = sys_open,
 	[__NR_read]    = sys_read,
 	[__NR_writefile] = sys_writefile,
@@ -625,8 +568,7 @@ static const syscall_fn_t syscall_table[NR_SYSCALLS] = {
 	[__NR_gettasklist] = sys_gettasklist,
 	[__NR_sysinfo]     = sys_sysinfo,
 	[__NR_listdir]     = sys_listdir,
-	[__NR_spawn]       = sys_spawn,
-	[__NR_kill]        = sys_kill,
+[__NR_kill]        = sys_kill,
 	[__NR_reboot]      = sys_reboot,
 	[__NR_uname]       = sys_uname,
 	[__NR_ioctl]       = sys_ioctl,

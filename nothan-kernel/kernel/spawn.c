@@ -63,9 +63,7 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 	p->user_sp    = 0;
 	p->user_lr    = 0;
 	p->__state    = TASK_RUNNING;
-	p->exit_state = 0;
 	p->pid        = next_pid++;
-	p->tgid       = p->pid;
 	p->prio       = prio;
 	p->rt.time_slice = RR_TIMESLICE;
 	p->rt.on_rq   = 0;
@@ -73,15 +71,6 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 	p->mm         = NULL;
 	p->cwd[0]     = '/';
 	p->cwd[1]     = '\0';
-
-	/* Parent = current task, or self if called before the scheduler starts. */
-	if (runqueue.curr) {
-		p->real_parent = runqueue.curr;
-		p->parent      = runqueue.curr;
-	} else {
-		p->real_parent = p;
-		p->parent      = p;
-	}
 
 	unsigned int i = 0;
 	for (; i < 15 && name[i]; i++)
@@ -323,9 +312,7 @@ struct task_struct *user_task_create_bin(const char *name,
 	p->user_sp    = mm->sp_top;
 	p->user_lr    = 0;
 	p->__state    = TASK_RUNNING;
-	p->exit_state = 0;
 	p->pid        = next_pid++;
-	p->tgid       = p->pid;
 	p->prio       = DEFAULT_PRIO;
 	p->rt.time_slice = RR_TIMESLICE;
 	p->rt.on_rq   = 0;
@@ -333,21 +320,6 @@ struct task_struct *user_task_create_bin(const char *name,
 	p->exit_code  = 0;
 	p->cwd[0]     = '/';
 	p->cwd[1]     = '\0';
-
-	if (runqueue.curr) {
-		p->real_parent = runqueue.curr;
-		p->parent      = runqueue.curr;
-		/* Inherit cwd from parent */
-		unsigned int ci = 0;
-		while (ci < 63 && runqueue.curr->cwd[ci]) {
-			p->cwd[ci] = runqueue.curr->cwd[ci];
-			ci++;
-		}
-		p->cwd[ci] = '\0';
-	} else {
-		p->real_parent = p;
-		p->parent      = p;
-	}
 
 	unsigned int i = 0;
 	for (; i < 15 && name[i]; i++)

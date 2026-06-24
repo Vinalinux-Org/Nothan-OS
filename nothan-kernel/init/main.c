@@ -143,22 +143,24 @@ void kernel_main(void)
 	 */
 	__asm__ __volatile__ ("cpsid i" : : : "memory");
 
-	struct task_struct *ut = kernel_spawn("/sbin/init");
-	if (ut) {
-		printk("[KERN] Spawning /sbin/init\n");
-		enqueue_task(&runqueue, ut);
-	} else {
-		printk("[KERN] /sbin/init not found, falling back to embedded shell\n");
-		ut = user_task_create("shell");
-		if (ut)
-			enqueue_task(&runqueue, ut);
-	}
-
+	/* BOOT_GUI: set to 1 to spawn the LVGL GUI as normal. 0 leaves the
+	 * kernel's solid-red LCDC test pattern on screen (display smoke test). */
+#define BOOT_GUI 0
+#if BOOT_GUI
 	struct task_struct *gui = user_task_create_gui();
 	if (gui) {
-		printk("[KERN] Spawning embedded GUI\n");
+		printk("[KERN] Spawning GUI\n");
 		enqueue_task(&runqueue, gui);
 	}
+
+	struct task_struct *sh = kernel_spawn("/bin/sh");
+	if (sh) {
+		printk("[KERN] Spawning shell\n");
+		enqueue_task(&runqueue, sh);
+	}
+#else
+	printk("[KERN] BOOT_GUI=0: holding kernel red-screen test (GUI not spawned)\n");
+#endif
 
 	printk("[KERN] NothanOS started\n");
 

@@ -8,16 +8,19 @@ OBJDUMP = $(CROSS_COMPILE)objdump
 BUILD   := build
 
 CFLAGS  := -mcpu=cortex-a8 -marm -O2 -std=gnu11 -ffreestanding -nostdlib
+# -fno-strict-aliasing: LVGL (and our type-punning) violate strict aliasing;
+# without this, ARM GCC -O2 miscompiles the SW draw path (the masked RGB565
+# blend's loop bound and lv_area pointers came out garbage → Data Aborts).
+# This is the standard, LVGL-recommended fix and keeps -O2 performance.
+CFLAGS  += -fno-strict-aliasing
 CFLAGS  += -Wall -Wextra -Wno-unused-parameter -I lib
 AFLAGS  := -mcpu=cortex-a8 -marm -D__ASSEMBLY__
 
 LDS     := lib/user.lds
 CRT0    := $(BUILD)/lib/crt0.o
 
-BIN_PROGRAMS  := sh ps ls info uname reboot shutdown
-SBIN_PROGRAMS := init
-ALL_BINS      := $(foreach p,$(BIN_PROGRAMS),$(BUILD)/bin/$(p).bin) \
-                 $(foreach p,$(SBIN_PROGRAMS),$(BUILD)/sbin/$(p).bin)
+BIN_PROGRAMS  := sh
+ALL_BINS      := $(foreach p,$(BIN_PROGRAMS),$(BUILD)/bin/$(p).bin)
 
 # LVGL static library
 LVGL_DIR  := lib/lvgl
@@ -29,7 +32,7 @@ LVGL_CFLAGS := $(CFLAGS) -I lib/lvgl -DLV_CONF_INCLUDE_SIMPLE \
 
 .PHONY: all clean size
 
-all: $(BUILD)/shell.bin $(BUILD)/example.bin $(ALL_BINS) $(BUILD)/gui.bin
+all: $(BUILD)/shell.bin $(ALL_BINS) $(BUILD)/gui.bin
 
 $(BUILD)/lib/crt0.o: lib/crt0.S | $(BUILD)/lib
 	$(CC) $(AFLAGS) -c -o $@ $<
@@ -46,33 +49,11 @@ $(BUILD)/bin/$(1).bin: $(BUILD)/bin/$(1).elf
 	$(OBJCOPY) -O binary $$< $$@
 endef
 
-define SBIN_template
-$(BUILD)/sbin/$(1)/main.o: sbin/$(1)/main.c | $(BUILD)/sbin/$(1)
-	$(CC) $(CFLAGS) -c -o $$@ $$<
-
-$(BUILD)/sbin/$(1).elf: $(CRT0) $(BUILD)/sbin/$(1)/main.o
-	$(CC) -nostdlib -T $(LDS) -o $$@ $$^ -lgcc
-	$(OBJDUMP) -d $$@ > $(BUILD)/sbin/$(1).dis
-
-$(BUILD)/sbin/$(1).bin: $(BUILD)/sbin/$(1).elf
-	$(OBJCOPY) -O binary $$< $$@
-endef
 
 $(foreach p,$(BIN_PROGRAMS),$(eval $(call BIN_template,$(p))))
-$(foreach p,$(SBIN_PROGRAMS),$(eval $(call SBIN_template,$(p))))
 
 $(BUILD)/shell.bin: $(BUILD)/bin/sh.bin
 	cp $< $@
-
-$(BUILD)/example/main.o: example/main.c | $(BUILD)/example
-	$(CC) $(CFLAGS) -c -o $@ $<
-
-$(BUILD)/example.elf: $(CRT0) $(BUILD)/example/main.o
-	$(CC) -nostdlib -T $(LDS) -o $@ $^
-	$(OBJDUMP) -d $@ > $(BUILD)/example.dis
-
-$(BUILD)/example.bin: $(BUILD)/example.elf
-	$(OBJCOPY) -O binary $< $@
 
 # LVGL build rules
 $(BUILD)/$(LVGL_DIR)/%.o: $(LVGL_DIR)/%.c | $(LVGL_LIB_DIRS)
@@ -111,17 +92,17 @@ $(BUILD)/gui.bin: $(BUILD)/gui.elf
 
 LVGL_LIB_DIRS := $(sort $(dir $(LVGL_OBJS)))
 
-DIRS := $(BUILD)/lib $(BUILD)/example \
+DIRS := $(BUILD)/lib \
         $(BUILD)/gui/port $(BUILD)/gui/core $(BUILD)/gui/services \
         $(BUILD)/gui/widgets $(BUILD)/gui/screens \
-        $(foreach p,$(BIN_PROGRAMS),$(BUILD)/bin/$(p)) \
-        $(foreach p,$(SBIN_PROGRAMS),$(BUILD)/sbin/$(p))
+        $(foreach p,$(BIN_PROGRAMS),$(BUILD)/bin/$(p))
 
 $(DIRS):
 	mkdir -p $@
 
 size: all
 	ls -la $(ALL_BINS) $(BUILD)/gui.bin
+
 
 clean:
 	rm -rf $(BUILD)

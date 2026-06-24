@@ -20,10 +20,6 @@
 
 #define TASK_NEW		0x00000800	/* just spawned, not yet seen by scheduler */
 
-/* Exit states (in tsk->exit_state, not __state): */
-#define EXIT_DEAD		0x00000010	/* parent wait()ed, entry can be freed */
-#define EXIT_ZOMBIE		0x00000020	/* exited, parent hasn't wait()ed */
-
 /* Scheduling constants */
 #define MAX_PRIO			32	/* 32 fixed priority levels */
 #define IDLE_PRIO			(MAX_PRIO - 1)	/* lowest: idle task */
@@ -44,21 +40,14 @@ struct sched_rt_entity {
 
 /**
  * struct task_struct - per-task descriptor
- * @stack:   saved kernel SP (points to top of saved register frame on
- *           the task's kernel stack, set by __switch_to on context out)
- * @__state: TASK_RUNNING / TASK_INTERRUPTIBLE / TASK_UNINTERRUPTIBLE / ...
- * @exit_state: EXIT_ZOMBIE / EXIT_DEAD (valid after task calls do_exit)
- * @pid:     process identifier (monotonically increasing)
- * @prio:    static priority, 0 = highest, MAX_PRIO-1 = lowest
- * @rt:      embedded scheduling entity
- * @comm:    human-readable task name (for printk debugging)
- * @mm:      NULL = kernel thread
- *
- * Linux-style process fields:
- * @tgid:         thread group ID (= pid, single-thread for now)
- * @real_parent:  original parent (set at creation, immutable)
- * @parent:       receiving parent for wait (normally == real_parent)
- * @exit_code:    exit status code set by do_exit()
+ * @stack:     saved kernel SP (top of saved register frame on kernel stack)
+ * @__state:   TASK_RUNNING / TASK_INTERRUPTIBLE / TASK_UNINTERRUPTIBLE / ...
+ * @pid:       process identifier (monotonically increasing)
+ * @prio:      static priority, 0 = highest, MAX_PRIO-1 = lowest
+ * @rt:        embedded scheduling entity
+ * @comm:      human-readable task name (for printk debugging)
+ * @mm:        NULL = kernel thread
+ * @exit_code: exit status code set by do_exit()
  */
 struct task_struct {
 	void				*stack;
@@ -66,20 +55,13 @@ struct task_struct {
 	unsigned long			user_sp;
 	unsigned long			user_lr;
 	unsigned int			__state;
-	unsigned int			exit_state;
 	int				pid;
 	int				prio;
 	struct sched_rt_entity		rt;
 	char				comm[16];
 	struct mm_struct		*mm;    /* NULL = kernel thread */
-
-	/* Process identity (Linux 6.17 naming) */
-	pid_t				tgid;
-	struct task_struct		*real_parent;
-	struct task_struct		*parent;
 	int				exit_code;
-
-	char				cwd[64];  /* current working directory */
+	char				cwd[64];
 };
 
 /**
@@ -159,6 +141,6 @@ extern int need_resched;
 extern bool sched_running;  /* true after first real context switch */
 
 void do_exit(int code);
-void sched_queue_zombie(struct task_struct *tsk);
+void sched_defer_free(struct task_struct *tsk);
 
 #endif /* _NOTHAN_SCHED_H */

@@ -29,7 +29,6 @@ void do_exit(int code)
 	       tsk->pid, tsk->comm, code);
 
 	tsk->exit_code = code;
-	tsk->exit_state = EXIT_ZOMBIE;
 	tsk->__state = TASK_UNINTERRUPTIBLE;
 
 	/* Release user-space resources if any */
@@ -84,7 +83,7 @@ void do_exit(int code)
 	/* We're still executing on this task's kernel stack, so we can't free
 	 * it (or the task_struct) here. Hand both to the reaper, which runs in
 	 * the next task's context. */
-	sched_queue_zombie(tsk);
+	sched_defer_free(tsk);
 
 	schedule();
 
