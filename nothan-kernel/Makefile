@@ -73,9 +73,8 @@ KERNEL_BIN := $(BUILD_DIR)/kernel.bin
 all: $(KERNEL_BIN)
 
 # User-space binary blobs (embedded into kernel image)
-USER_SHELL_BIN   := $(BUILD_DIR)/shell.usr
-USER_EXAMPLE_BIN := $(BUILD_DIR)/example.usr
-USER_GUI_BIN     := $(BUILD_DIR)/gui.usr
+USER_SHELL_BIN := $(BUILD_DIR)/shell.usr
+USER_GUI_BIN   := $(BUILD_DIR)/gui.usr
 
 .PHONY: userspace
 userspace:
@@ -84,14 +83,11 @@ userspace:
 $(USER_SHELL_BIN): userspace | $(BUILD_DIR)
 	cp ../userspace/build/shell.bin $@
 
-$(USER_EXAMPLE_BIN): userspace | $(BUILD_DIR)
-	cp ../userspace/build/example.bin $@
-
 $(USER_GUI_BIN): userspace | $(BUILD_DIR)
 	cp ../userspace/build/gui.bin $@
 
 $(BUILD_DIR)/kernel/userspace_blobs.o: kernel/userspace_blobs.S \
-	$(USER_SHELL_BIN) $(USER_EXAMPLE_BIN) $(USER_GUI_BIN) | $(BUILD_DIR)
+	$(USER_SHELL_BIN) $(USER_GUI_BIN) | $(BUILD_DIR)
 	@mkdir -p $(dir $@)
 	$(CC) $(KBUILD_AFLAGS) -c -o $@ $<
 

@@ -19,9 +19,6 @@ AFLAGS  := -mcpu=cortex-a8 -marm -D__ASSEMBLY__
 LDS     := lib/user.lds
 CRT0    := $(BUILD)/lib/crt0.o
 
-BIN_PROGRAMS  := sh
-ALL_BINS      := $(foreach p,$(BIN_PROGRAMS),$(BUILD)/bin/$(p).bin)
-
 # LVGL static library
 LVGL_DIR  := lib/lvgl
 LVGL_SRCS := $(shell find $(LVGL_DIR)/src -name '*.c')
@@ -32,28 +29,21 @@ LVGL_CFLAGS := $(CFLAGS) -I lib/lvgl -DLV_CONF_INCLUDE_SIMPLE \
 
 .PHONY: all clean size
 
-all: $(BUILD)/shell.bin $(ALL_BINS) $(BUILD)/gui.bin
+all: $(BUILD)/shell.bin $(BUILD)/gui.bin
 
 $(BUILD)/lib/crt0.o: lib/crt0.S | $(BUILD)/lib
 	$(CC) $(AFLAGS) -c -o $@ $<
 
-define BIN_template
-$(BUILD)/bin/$(1)/main.o: bin/$(1)/main.c | $(BUILD)/bin/$(1)
-	$(CC) $(CFLAGS) -c -o $$@ $$<
+# Shell
+$(BUILD)/sh/main.o: sh/main.c | $(BUILD)/sh
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-$(BUILD)/bin/$(1).elf: $(CRT0) $(BUILD)/bin/$(1)/main.o
-	$(CC) -nostdlib -T $(LDS) -o $$@ $$^ -lgcc
-	$(OBJDUMP) -d $$@ > $(BUILD)/bin/$(1).dis
+$(BUILD)/shell.elf: $(CRT0) $(BUILD)/sh/main.o
+	$(CC) -nostdlib -T $(LDS) -o $@ $^ -lgcc
+	$(OBJDUMP) -d $@ > $(BUILD)/shell.dis
 
-$(BUILD)/bin/$(1).bin: $(BUILD)/bin/$(1).elf
-	$(OBJCOPY) -O binary $$< $$@
-endef
-
-
-$(foreach p,$(BIN_PROGRAMS),$(eval $(call BIN_template,$(p))))
-
-$(BUILD)/shell.bin: $(BUILD)/bin/sh.bin
-	cp $< $@
+$(BUILD)/shell.bin: $(BUILD)/shell.elf
+	$(OBJCOPY) -O binary $< $@
 
 # LVGL build rules
 $(BUILD)/$(LVGL_DIR)/%.o: $(LVGL_DIR)/%.c | $(LVGL_LIB_DIRS)
@@ -92,17 +82,15 @@ $(BUILD)/gui.bin: $(BUILD)/gui.elf
 
 LVGL_LIB_DIRS := $(sort $(dir $(LVGL_OBJS)))
 
-DIRS := $(BUILD)/lib \
+DIRS := $(BUILD)/lib $(BUILD)/sh \
         $(BUILD)/gui/port $(BUILD)/gui/core $(BUILD)/gui/services \
-        $(BUILD)/gui/widgets $(BUILD)/gui/screens \
-        $(foreach p,$(BIN_PROGRAMS),$(BUILD)/bin/$(p))
+        $(BUILD)/gui/widgets $(BUILD)/gui/screens
 
 $(DIRS):
 	mkdir -p $@
 
 size: all
-	ls -la $(ALL_BINS) $(BUILD)/gui.bin
-
+	ls -la $(BUILD)/shell.bin $(BUILD)/gui.bin
 
 clean:
 	rm -rf $(BUILD)
