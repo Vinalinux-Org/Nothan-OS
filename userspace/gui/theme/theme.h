@@ -4,6 +4,14 @@
 #include "lvgl/lvgl.h"
 
 /*
+ * Logical screen size (portrait). The panel is native 800×480 landscape,
+ * mounted rotated 90°; the kernel rotates this portrait output in lcdc_flush.
+ * Use these instead of hardcoding pixel dimensions.
+ */
+#define SCREEN_W   480
+#define SCREEN_H   800
+
+/*
  * Deep Space color tokens — see Documentation/02-gui-design.md
  */
 #define THEME_BG          0x0A0E1A   /* screen background */

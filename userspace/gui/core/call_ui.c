@@ -182,7 +182,7 @@ void call_ui_init(void)
 {
 	overlay = lv_obj_create(lv_layer_top());
 	lv_obj_remove_style_all(overlay);
-	lv_obj_set_size(overlay, 360, 640);
+	lv_obj_set_size(overlay, SCREEN_W, SCREEN_H);
 	lv_obj_align(overlay, LV_ALIGN_TOP_LEFT, 0, 0);
 	lv_obj_set_style_bg_color(overlay, theme_color(THEME_BG), 0);
 	lv_obj_set_style_bg_opa(overlay, LV_OPA_COVER, 0);

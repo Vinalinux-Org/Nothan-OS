@@ -35,7 +35,7 @@
  * (code 0x10000.., stack top 0x100000); 384 KB keeps ~76 KB of guard
  * between the mapped bss top and the 32 KB stack.
  */
-#define LV_MEM_SIZE (256 * 1024U)
+#define LV_MEM_SIZE (512 * 1024U)
 #define LV_MEM_POOL_EXPAND_SIZE 0
 #define LV_MEM_ADR 0
 
@@ -85,6 +85,8 @@
     #define LV_DRAW_SW_DRAW_UNIT_CNT        1
     #define LV_USE_DRAW_ARM2D_SYNC          0
     #define LV_USE_NATIVE_HELIUM_ASM        0
+    /* COMPLEX=0 (no masks) was tested and did NOT stop the heap corruption,
+     * so the masked blend is not the cause — back on for proper rendering. */
     #define LV_DRAW_SW_COMPLEX              1
     #if LV_DRAW_SW_COMPLEX == 1
         #define LV_DRAW_SW_SHADOW_CACHE_SIZE    4
@@ -104,14 +106,23 @@
 /*=========================
  * LOGGING & DEBUG
  *=========================*/
-#define LV_USE_LOG 0
+#define LV_USE_LOG 1
+#define LV_LOG_LEVEL LV_LOG_LEVEL_ERROR
+#define LV_LOG_PRINTF 0			/* route through the registered callback */
+#define LV_LOG_USE_FILE_LINE 1		/* include file:line — pinpoints asserts */
 #define LV_USE_ASSERT_NULL          1
 #define LV_USE_ASSERT_MALLOC        1
-#define LV_USE_ASSERT_STYLE         0
-#define LV_USE_ASSERT_MEM_INTEGRITY 0
-#define LV_USE_ASSERT_OBJ           0
+#define LV_USE_ASSERT_STYLE         0	/* DIAG (off): catch corrupted style metadata */
+#define LV_USE_ASSERT_MEM_INTEGRITY 0	/* DIAG (off): TLSF check on alloc → catch pool overrun */
+#define LV_USE_ASSERT_OBJ           0	/* DIAG (off): validate obj sentinel on access */
 #define LV_ASSERT_HANDLER_INCLUDE   <stdint.h>
-#define LV_ASSERT_HANDLER           while(1);
+/* Print a loud marker instead of spinning silently. The [Error] file:line
+ * logged by LVGL just above this (LV_LOG_USE_FILE_LINE) names the exact
+ * assert — style/mem-integrity/obj/null/malloc — so corruption is pinned at
+ * its source instead of crashing later in get_prop_core. */
+#define LV_ASSERT_HANDLER  { extern void gui_logf(const char *, ...); \
+                             gui_logf("\n*** LVGL ASSERT FIRED — see [Error] file:line above ***\n"); \
+                             for(;;); }
 
 #define LV_USE_REFR_DEBUG           0
 #define LV_USE_LAYER_DEBUG          0
@@ -146,7 +157,7 @@
 #define LV_FONT_MONTSERRAT_22   0
 #define LV_FONT_MONTSERRAT_24   1
 #define LV_FONT_MONTSERRAT_26   0
-#define LV_FONT_MONTSERRAT_28   0
+#define LV_FONT_MONTSERRAT_28   1
 #define LV_FONT_MONTSERRAT_30   0
 #define LV_FONT_MONTSERRAT_32   0
 #define LV_FONT_MONTSERRAT_34   0

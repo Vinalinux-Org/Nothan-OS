@@ -1,7 +1,7 @@
 /*
  * drivers/video/tda19988.c - NXP TDA19988 HDMI framer driver
  *
- * Configures the TDA19988 via I2C0 for 1280x720@60Hz HDMI output.
+ * Configures the TDA19988 via I2C0 for 800x480@60Hz HDMI output.
  * The TDA19988 receives parallel RGB from the LCDC and outputs HDMI.
  *
  * I2C addresses (BBB):
@@ -52,6 +52,8 @@
 #define REG_VIP_CNTRL_1     REG(0x00, 0x21)
 #define REG_VIP_CNTRL_2     REG(0x00, 0x22)
 #define REG_VIP_CNTRL_3     REG(0x00, 0x23)
+# define VIP_CNTRL_3_H_TGL      (1 << 1)   /* invert low-active HSYNC at input */
+# define VIP_CNTRL_3_V_TGL      (1 << 2)   /* invert low-active VSYNC at input */
 # define VIP_CNTRL_3_SYNC_HS    (1 << 5)
 #define REG_VIP_CNTRL_4     REG(0x00, 0x24)
 #define REG_VIP_CNTRL_5     REG(0x00, 0x25)
@@ -81,7 +83,10 @@
 #define REG_DE_START_MSB       REG(0x00, 0xC5)
 #define REG_DE_STOP_MSB        REG(0x00, 0xC7)
 #define REG_TBG_CNTRL_0     REG(0x00, 0xCA)
+# define TBG_CNTRL_0_SYNC_ONCE  (1 << 7)   /* sync TBG to next VP VSYNC, then free-run */
 #define REG_TBG_CNTRL_1     REG(0x00, 0xCB)
+# define TBG_CNTRL_1_H_TGL      (1 << 0)   /* revert toggled HSYNC at output */
+# define TBG_CNTRL_1_V_TGL      (1 << 1)   /* revert toggled VSYNC at output */
 # define TBG_CNTRL_1_DWIN_DIS   (1 << 6)
 # define TBG_CNTRL_1_TGL_EN     (1 << 2)
 #define REG_HVF_CNTRL_0     REG(0x00, 0xE4)
@@ -133,30 +138,31 @@
 #define TDA19988_REV        0x0301
 
 /*
- * 720p@60Hz CEA-861 timing (pixel clock 74.25 MHz):
- *   H: 1280 active + HFP=110 + HSW=40 + HBP=220 = htotal 1650
- *   V:  720 active + VFP=5   + VSW=5  + VBP=20  = vtotal  750
- *   Sync: PHSYNC, PVSYNC
+ * 800×480@60Hz CVT timing (pixel clock 29.5 MHz), per Waveshare
+ * `hdmi_cvt 800 480 60`:
+ *   H: 800 active + HFP=24 + HSW=72 + HBP=96 = htotal 992
+ *   V: 480 active + VFP=3  + VSW=10 + VBP=3  = vtotal 496
+ *   Sync: -HSYNC, +VSYNC
  */
-#define N_PIX           1650U
-#define N_LINE           750U
-#define HS_PIX_S         110U   /* hsync_start - hdisplay */
-#define HS_PIX_E         150U   /* hsync_end   - hdisplay */
-#define DE_PIX_S         370U   /* htotal - hdisplay */
-#define DE_PIX_E        1650U   /* htotal */
-#define REF_PIX          113U   /* 3 + hs_pix_s */
-#define REF_LINE           6U   /* 1 + (vsync_start - vdisplay) */
-#define VWIN1_LINE_S      29U   /* vtotal - vdisplay - 1 */
-#define VWIN1_LINE_E     749U   /* vwin1_line_s + vdisplay */
-#define VS1_LINE_S         5U   /* vsync_start - vdisplay */
-#define VS1_LINE_E        10U   /* vs1_line_s + vsw */
-#define VS1_PIX          110U   /* = hs_pix_s */
+#define N_PIX            992U
+#define N_LINE           496U
+#define HS_PIX_S          24U   /* hsync_start - hdisplay = hfp */
+#define HS_PIX_E          96U   /* hsync_end   - hdisplay = hfp + hsw */
+#define DE_PIX_S         192U   /* htotal - hdisplay */
+#define DE_PIX_E         992U   /* htotal */
+#define REF_PIX           27U   /* 3 + hs_pix_s */
+#define REF_LINE           4U   /* 1 + (vsync_start - vdisplay) */
+#define VWIN1_LINE_S      15U   /* vtotal - vdisplay - 1 */
+#define VWIN1_LINE_E     495U   /* vtotal - 1 */
+#define VS1_LINE_S         3U   /* vsync_start - vdisplay = vfp */
+#define VS1_LINE_E        13U   /* vs1_line_s + vsw */
+#define VS1_PIX           24U   /* = hs_pix_s */
 
 /*
- * PLL divisor for 74.25 MHz TMDS: loop breaks at div=1
- * (condition: 80000 >> div <= 74250 kHz → div=1 → NOSC=1)
+ * PLL divisor for 29.5 MHz TMDS: div = 148.5MHz / pixclk = 5, div-- = 4,
+ * clamped to 3 (max SRL_NOSC) → NOSC=3.
  */
-#define PLL_NOSC    1
+#define PLL_NOSC    3
 
 /* VIP channel swap for BBB LCDC→TDA19988 wiring (from working old-OS) */
 #define VIP_CNTRL_0_VAL  0x23   /* SWAP_A=2, SWAP_B=3 */
@@ -288,9 +294,9 @@ static int tda19988_reset(struct i2c_client *c)
 	return 0;
 }
 
-static int tda19988_mode_set_720p(struct i2c_client *c)
+static int tda19988_mode_set_800x480(struct i2c_client *c)
 {
-	printk("[TDA19988] mode_set: 720p@60Hz\n");
+	printk("[TDA19988] mode_set: 800x480@60Hz\n");
 	/* Mute audio FIFO */
 	if (reg_set(c, REG_AIP_CNTRL_0, AIP_CNTRL_0_RST_FIFO) < 0) return -1;
 
@@ -322,8 +328,11 @@ static int tda19988_mode_set_720p(struct i2c_client *c)
 	/* BIAS for TMDS */
 	if (reg_write(c, REG_ANA_GENERAL, 0x09) < 0) return -1;
 
-	/* Sync: rising edge HS (PHSYNC, PVSYNC → no toggle needed) */
-	if (reg_write(c, REG_VIP_CNTRL_3, VIP_CNTRL_3_SYNC_HS) < 0) return -1;
+	/* Sync at input: SYNC_HS base; CVT 800×480 has active-low HSYNC, so
+	 * toggle H to present high-active sync to the TDA. VSYNC is high-active
+	 * (no V toggle). */
+	if (reg_write(c, REG_VIP_CNTRL_3,
+		      VIP_CNTRL_3_SYNC_HS | VIP_CNTRL_3_H_TGL) < 0) return -1;
 
 	if (reg_write(c, REG_VIDFORMAT, 0x00) < 0) return -1;
 
@@ -352,22 +361,30 @@ static int tda19988_mode_set_720p(struct i2c_client *c)
 	/* TDA19988-specific: fill active space */
 	if (reg_write(c, REG_ENABLE_SPACE, 0x00) < 0) return -1;
 
-	/* Output sync polarity: regenerate from input, toggle enabled */
+	/* Output sync polarity: regenerate from input, toggle enabled.
+	 * H_TGL reverts the input-stage HSYNC toggle so output matches CVT. */
 	if (reg_write(c, REG_TBG_CNTRL_1,
-		      TBG_CNTRL_1_DWIN_DIS | TBG_CNTRL_1_TGL_EN) < 0) return -1;
+		      TBG_CNTRL_1_DWIN_DIS | TBG_CNTRL_1_TGL_EN |
+		      TBG_CNTRL_1_H_TGL) < 0) return -1;
 
 	/*
 	 * Enable HDMI mode (TX33_HDMI + ENC_CNTRL CTL_CODE=1).
 	 * Clear DWIN_DIS to allow data islands through.
 	 * Must happen before TBG_CNTRL_0 is written.
 	 */
-	if (reg_write(c, REG_TBG_CNTRL_1, TBG_CNTRL_1_TGL_EN) < 0) return -1;
+	if (reg_write(c, REG_TBG_CNTRL_1,
+		      TBG_CNTRL_1_TGL_EN | TBG_CNTRL_1_H_TGL) < 0) return -1;
 	if (reg_write(c, REG_ENC_CNTRL, ENC_CNTRL_CTL_CODE(1)) < 0) return -1;
 	if (reg_set(c,   REG_TX33, TX33_HDMI) < 0) return -1;
 
-	/* Commit timing — must be the last register written */
-	if (reg_write(c, REG_TBG_CNTRL_0, 0x00) < 0) return -1;
-
+	/*
+	 * TBG_CNTRL_0 is intentionally NOT written here. If written before VP
+	 * pins are enabled (tda19988_enable), the TBG arms with no VSYNC present
+	 * and free-runs from an arbitrary internal counter. When VP comes live, it
+	 * is already out of phase → entire image shifts by a random N pixels each
+	 * boot. TBG_CNTRL_0 must be committed after VP is active. See
+	 * tda19988_enable().
+	 */
 	printk("[TDA19988] mode_set: timing committed\n");
 	return 0;
 }
@@ -385,6 +402,24 @@ static int tda19988_enable(struct i2c_client *c)
 	if (reg_write(c, REG_VIP_CNTRL_1, VIP_CNTRL_1_VAL) < 0) return -1;
 	if (reg_write(c, REG_VIP_CNTRL_2, VIP_CNTRL_2_VAL) < 0) return -1;
 
+	/*
+	 * LCDC video is now flowing into TDA19988 VP pins. Arm SYNC_ONCE so the
+	 * TBG locks to the next incoming VSYNC instead of free-running from the
+	 * arbitrary position it was at during reset. Without this, TBG starts
+	 * counting from wherever the LCDC happened to be mid-frame when the VP
+	 * pins were enabled — causing the entire image to shift by a random N
+	 * pixels that differs each boot.
+	 *
+	 * Sequence: wait > 1 frame for VP signal to stabilize, then arm SYNC_ONCE
+	 * (TBG holds until the next VSYNC arrives), then wait two full VSYNC
+	 * periods (2 × 16.7 ms) so the sync definitely happened, then release.
+	 */
+	mdelay(20);
+	if (reg_write(c, REG_TBG_CNTRL_0, TBG_CNTRL_0_SYNC_ONCE) < 0) return -1;
+	mdelay(35);
+	if (reg_write(c, REG_TBG_CNTRL_0, 0x00) < 0) return -1;
+
+	printk("[TDA19988] enable: TBG synced to VSYNC\n");
 	return 0;
 }
 
@@ -440,7 +475,7 @@ static int tda19988_probe(struct i2c_client *client)
 	/* Disable CEC interrupts (not using CEC) */
 	if (cec_write(client, CEC_RXSHPDINTENA, 0x00) < 0) return -1;
 
-	if (tda19988_mode_set_720p(client) < 0) {
+	if (tda19988_mode_set_800x480(client) < 0) {
 		printk("[TDA19988] mode set failed\n");
 		return -1;
 	}
@@ -450,7 +485,7 @@ static int tda19988_probe(struct i2c_client *client)
 		return -1;
 	}
 
-	printk("[TDA19988] HDMI 720p@60Hz ready\n");
+	printk("[TDA19988] HDMI 800x480@60Hz ready\n");
 	return 0;
 }
 

@@ -59,7 +59,7 @@ void boot_create(lv_obj_t *parent, void *arg)
 	lv_anim_init(&a);
 	lv_anim_set_var(&a, bar);
 	lv_anim_set_values(&a, 0, 100);
-	lv_anim_set_time(&a, BAR_FILL_MS);
+	lv_anim_set_duration(&a, BAR_FILL_MS);
 	lv_anim_set_exec_cb(&a, bar_set_cb);
 	lv_anim_start(&a);
 }

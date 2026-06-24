@@ -184,7 +184,7 @@ void sms_list_create(lv_obj_t *screen, void *arg)
 	int list_bottom = NAV_BAR_HEIGHT + 8;
 	list_obj = lv_obj_create(screen);
 	lv_obj_remove_style_all(list_obj);
-	lv_obj_set_size(list_obj, lv_pct(100), 640 - list_top - list_bottom);
+	lv_obj_set_size(list_obj, lv_pct(100), SCREEN_H - list_top - list_bottom);
 	lv_obj_align(list_obj, LV_ALIGN_TOP_MID, 0, list_top);
 	lv_obj_set_style_pad_hor(list_obj, 12, 0);
 	lv_obj_set_scroll_dir(list_obj, LV_DIR_VER);

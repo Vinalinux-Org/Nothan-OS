@@ -42,9 +42,21 @@ SECTIONS
 	.bss (NOLOAD) : {
 		__bss_start = .;
 		*(.bss)
-		*(.bss.*)
+		/* Everyone's .bss.* EXCEPT the guarded draw buffer (placed last). */
+		*(EXCLUDE_FILE(*lv_port_disp.o) .bss.*)
 		*(COMMON)
-		. = ALIGN(4);
+		/*
+		 * Diagnostic guard: the LVGL flush draw buffer (.bss.guarded) is
+		 * pinned LAST in .bss on a fresh page, and .bss ends on a page
+		 * boundary right after it. The kernel maps exactly ceil(bss_size)
+		 * pages, so the page above __bss_end is unmapped — a forward
+		 * over-run of the draw buffer faults cleanly (Data Abort, DFAR ≈
+		 * __bss_end) instead of silently corrupting the TLSF pool, which
+		 * now sits well below it. See lv_port_disp.c.
+		 */
+		. = ALIGN(4096);
+		*(.bss.guarded)
+		. = ALIGN(4096);
 		__bss_end = .;
 	}
 	__bss_size = __bss_end - __bss_start;

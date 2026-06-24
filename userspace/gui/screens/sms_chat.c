@@ -180,7 +180,7 @@ void sms_chat_create(lv_obj_t *screen, void *arg)
 	int list_bottom = NAV_BAR_HEIGHT + INPUT_H;
 	chat_list = lv_obj_create(screen);
 	lv_obj_remove_style_all(chat_list);
-	lv_obj_set_size(chat_list, lv_pct(100), 640 - list_top - list_bottom);
+	lv_obj_set_size(chat_list, lv_pct(100), SCREEN_H - list_top - list_bottom);
 	lv_obj_align(chat_list, LV_ALIGN_TOP_MID, 0, list_top);
 	lv_obj_set_style_pad_hor(chat_list, 12, 0);
 	lv_obj_set_style_pad_ver(chat_list, 8, 0);

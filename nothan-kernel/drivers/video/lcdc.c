@@ -367,23 +367,19 @@ static int __init lcdc_init(void)
 #define LCDC_TEST_PATTERN 1
 #if LCDC_TEST_PATTERN
 	/*
-	 * DEBUG: paint 8 vertical colour bars straight into the FB (no GUI) and
-	 * hold for ~3 s. If a seam appears in THIS, it is the LCDC/monitor, not
-	 * the GUI/rotate/copy. Bars across the 800-wide FB: any mid-line break
-	 * shows immediately.
+	 * DEBUG: fill the whole framebuffer solid red straight from the kernel
+	 * (no GUI). Confirms the LCDC + TDA19988 + 800x480 path works on its own.
+	 * The panel is mounted rotated 90°, so a full red fill covers the entire
+	 * physical screen regardless of orientation. Spawn of the GUI is gated off
+	 * in init/main.c (BOOT_GUI) so nothing overwrites this.
 	 */
 	{
-		static const u16 bars[8] = {
-			0xF800, 0x07E0, 0x001F, 0xFFE0,
-			0xF81F, 0x07FF, 0xFFFF, 0x4208,
-		};
 		u16 *tp = (u16 *)((u8 *)fb_va[front_idx] + PALETTE_SZ);
-		for (unsigned int y = 0; y < FB_H; y++)
-			for (unsigned int x = 0; x < FB_W; x++)
-				tp[y * FB_W + x] = bars[(x * 8u) / FB_W];
+		for (unsigned int i = 0; i < FB_W * FB_H; i++)
+			tp[i] = 0xF800;		/* RGB565 red */
 		clean_dcache_range((unsigned long)fb_va[front_idx],
 				   (unsigned long)fb_va[front_idx] + FB_SZ);
-		printk("[LCDC] TEST PATTERN: 8 colour bars — check for seam before GUI starts\n");
+		printk("[LCDC] TEST: full red screen (800x480, panel rotated 90)\n");
 	}
 #endif
 	return 0;

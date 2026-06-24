@@ -46,6 +46,7 @@ static uint32_t        active_since;              /* lv_tick when ACTIVE began *
 static uint32_t        next_incoming_at;          /* lv_tick to inject next ring */
 
 static tel_observer_fn observer;
+static int             mock_on = 1;   /* auto-inject incoming calls */
 
 /* Call log: append-only ring, newest at the end. */
 static struct call_log_entry log_buf[CALLLOG_MAX];
@@ -217,7 +218,7 @@ static void telephony_tick(lv_timer_t *t)
 		}
 		break;
 	case TEL_IDLE:
-		if ((int32_t)(now - next_incoming_at) >= 0)
+		if (mock_on && (int32_t)(now - next_incoming_at) >= 0)
 			inject_incoming();
 		break;
 	case TEL_ACTIVE:
@@ -249,6 +250,8 @@ unsigned int telephony_duration_sec(void)
 int telephony_muted(void) { return muted; }
 
 void telephony_set_observer(tel_observer_fn cb) { observer = cb; }
+
+void telephony_set_mock(int on) { mock_on = on; }
 
 int telephony_log_count(void) { return log_n; }
 

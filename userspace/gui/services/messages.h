@@ -32,6 +32,10 @@ struct sms_conversation {
 /* Load persisted threads (else seed a mock) and start the mock receiver. */
 void messages_init(void);
 
+/* Enable/disable the mock inbound-SMS injector (on by default). Turn off
+ * to isolate pure-GUI testing (no receive, no background FAT write). */
+void messages_set_mock(int on);
+
 int  sms_conversation_count(void);
 const struct sms_conversation *sms_conversation_get(int index);
 

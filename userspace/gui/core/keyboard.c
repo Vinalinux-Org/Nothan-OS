@@ -110,7 +110,7 @@ static void ta_gone_cb(lv_event_t *e)
 void gui_keyboard_init(void)
 {
 	kb = lv_keyboard_create(lv_layer_top());
-	lv_obj_set_size(kb, 360, KB_HEIGHT);
+	lv_obj_set_size(kb, SCREEN_W, KB_HEIGHT);
 	lv_obj_align(kb, LV_ALIGN_BOTTOM_MID, 0, 0);
 	lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
 

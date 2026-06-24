@@ -163,6 +163,7 @@ void __free_pages(struct page *page, unsigned int order)
 {
 	struct zone *zone = &mem_zone;
 	unsigned long pfn = page - zone->page_array;
+	unsigned long nr_freed = 1UL << order;	/* pages actually being freed */
 
 	while (order < MAX_ORDER) {
 		unsigned long buddy_pfn = __find_buddy_pfn(pfn, order);
@@ -187,6 +188,9 @@ void __free_pages(struct page *page, unsigned int order)
 	set_page_flag(page, PG_BUDDY);
 	set_page_order(page, order);
 	__add_to_free_list(page, zone, order);
-	zone->free_pages += (1UL << order);
+	/* Add only the pages actually freed. The buddies merged in during
+	 * coalescing above were already counted in free_pages when they were
+	 * freed, so adding the full (1<<order) coalesced size double-counts. */
+	zone->free_pages += nr_freed;
 	page->_refcount = 0;
 }

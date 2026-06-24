@@ -11,7 +11,9 @@
 #include "status_bar.h"
 #include "../theme/theme.h"
 
-#define BAR_H        28
+#define BAR_H        STATUS_BAR_HEIGHT
+#define BAR_PAD      16		/* side margin so content isn't on the edge */
+#define ICON_GAP     26		/* spacing between the right-cluster icons */
 #define SIGNAL_W     11
 #define SIGNAL_H     12
 
@@ -44,8 +46,13 @@ lv_obj_t *status_bar_create(lv_obj_t *parent)
 	lv_obj_align(bar, LV_ALIGN_TOP_MID, 0, 0);
 	lv_obj_set_style_bg_color(bar, theme_color(THEME_SURFACE), 0);
 	lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
-	lv_obj_set_style_pad_hor(bar, 12, 0);
+	lv_obj_set_style_pad_hor(bar, BAR_PAD, 0);
 	lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+
+	/* DEBUG: outline the status-bar frame in RED. */
+	lv_obj_set_style_border_width(bar, 2, 0);
+	lv_obj_set_style_border_color(bar, lv_color_hex(0xFF0000), 0);
+	lv_obj_set_style_border_opa(bar, LV_OPA_COVER, 0);
 
 	lv_obj_t *clock = lv_label_create(bar);
 	lv_label_set_text(clock, "12:00");
@@ -69,10 +76,10 @@ lv_obj_t *status_bar_create(lv_obj_t *parent)
 	lv_label_set_text(wifi, LV_SYMBOL_WIFI);
 	lv_obj_set_style_text_color(wifi, theme_color(THEME_TEXT), 0);
 	lv_obj_set_style_text_font(wifi, &lv_font_montserrat_14, 0);
-	lv_obj_align(wifi, LV_ALIGN_RIGHT_MID, -22, 0);
+	lv_obj_align(wifi, LV_ALIGN_RIGHT_MID, -ICON_GAP, 0);
 
 	lv_obj_t *signal = signal_widget_create(bar);
-	lv_obj_align(signal, LV_ALIGN_RIGHT_MID, -44, 0);
+	lv_obj_align(signal, LV_ALIGN_RIGHT_MID, -2 * ICON_GAP, 0);
 
 	return bar;
 }

@@ -1,11 +1,11 @@
 /*
- * gui/main.c - NothanOS GUI demo
+ * gui/main.c - NothanOS GUI entry point
  *
- * Boots into the MiNuong splash, then runs a guided tour through the
- * navigation stack: home launcher -> Contacts list -> a contact's detail
- * -> back -> add-contact form -> home, looping. There is no input device
- * yet (HDMI output), so the tour drives nav_push/nav_pop on a timer in
- * place of taps; the same calls fire from the UI once input lands.
+ * Boots into the MiNuong splash, holds it while the progress bar fills, then
+ * swaps to the home launcher. After that the LVGL task loop keeps running so
+ * animations settle and a future touch driver can drive nav_push/nav_pop from
+ * the home app tiles. There is no input device on hardware yet, so nothing
+ * mutates the UI on its own once home is up.
  *
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
@@ -17,222 +17,59 @@
 #include "core/log.h"
 #include "screens/boot.h"
 #include "screens/home.h"
-#include "screens/contacts_list.h"
-#include "screens/contact_detail.h"
-#include "screens/contacts_add.h"
-#include "screens/sms_list.h"
-#include "screens/sms_chat.h"
-#include "screens/dialer.h"
-#include "screens/call_log.h"
 #include "core/call_ui.h"
 #include "services/contacts.h"
 #include "services/messages.h"
 #include "services/telephony.h"
 #include "../lib/syscall.h"
 
-enum demo_phase {
-	PHASE_BOOT,
-	PHASE_HOME,			/* home settled, about to sweep the grid */
-	PHASE_HOME_SCROLL_DOWN,
-	PHASE_HOME_SCROLL_UP,
-	PHASE_LIST,			/* Contacts list shown */
-	PHASE_DETAIL,		/* a contact's detail shown */
-	PHASE_LIST_RETURN,	/* popped back to the list */
-	PHASE_ADD,			/* add-contact form shown */
-	PHASE_SMS_HOME,		/* back on home, about to open Messages */
-	PHASE_SMS_LIST,		/* SMS conversation list shown */
-	PHASE_SMS_CHAT,		/* a conversation thread shown */
-	PHASE_PHONE_HOME,	/* back on home, about to open Phone */
-	PHASE_RECENTS,		/* recent-calls list shown */
-};
+#define BOOT_MS   7000		/* splash dwell; matches the bar fill in boot.c */
 
-#define BOOT_MS   7000
-#define SWEEP_MS  1800		/* full top<->bottom grid scroll */
-#define DWELL_MS  1000		/* pause before the next step */
-
-/* Full guided tour (set to 1 to loop only the home scroll for debugging). */
-#define DEMO_STATIC  0
-
-static enum demo_phase phase   = PHASE_BOOT;
-static unsigned long   phase_t = 0;
-
-/*
- * Periodically dump LVGL heap stats over UART. There is no other way to
- * see memory pressure on hardware (no JTAG). A steadily climbing used%
- * across tour cycles means a leak; a high plateau means the pool is
- * merely small for the peak. max_used is the high-water mark.
- */
-static unsigned long mem_log_t = 0;
-#define MEM_LOG_MS  2000
-
-static void mem_log(unsigned long now)
+/* Route LVGL's own logs (incl. assert file:line) out over UART. */
+static void gui_lvgl_log_cb(lv_log_level_t level, const char *buf)
 {
-	if (now - mem_log_t < MEM_LOG_MS)
-		return;
-	mem_log_t = now;
-
-	lv_mem_monitor_t mon;
-	lv_mem_monitor(&mon);
-
-	gui_logf("mem used=%u%% free=%uB biggest=%uB frag=%u%% peak=%uB\n",
-		 (unsigned)mon.used_pct, (unsigned)mon.free_size,
-		 (unsigned)mon.free_biggest_size, (unsigned)mon.frag_pct,
-		 (unsigned)mon.max_used);
-}
-
-static void enter_home(void)
-{
-	gui_log("tour: boot done -> home\n");
-	nav_set_root(home_create, NULL);
-	nav_show_chrome(true);
-}
-
-static void demo_tick(unsigned long now)
-{
-	unsigned long dt = now - phase_t;
-
-	switch (phase) {
-	case PHASE_BOOT:
-		if (dt >= BOOT_MS) {
-			enter_home();
-			phase = PHASE_HOME;
-			phase_t = now;
-		}
-		break;
-	case PHASE_HOME:
-		if (dt >= DWELL_MS) {
-			gui_log("tour: scroll grid down\n");
-			home_scroll_to_end(1, SWEEP_MS);
-			phase = PHASE_HOME_SCROLL_DOWN;
-			phase_t = now;
-		}
-		break;
-	case PHASE_HOME_SCROLL_DOWN:
-		if (dt >= SWEEP_MS + DWELL_MS) {
-			gui_log("tour: scroll grid up\n");
-			home_scroll_to_end(0, SWEEP_MS);
-			phase = PHASE_HOME_SCROLL_UP;
-			phase_t = now;
-		}
-		break;
-	case PHASE_HOME_SCROLL_UP:
-		if (dt >= SWEEP_MS + DWELL_MS) {
-#if DEMO_STATIC
-			/* Isolation: loop the home scroll forever (keeps the
-			 * renderer + shadow/layer allocs busy) but never open
-			 * an app — no screen create/delete churn. */
-			phase = PHASE_HOME;
-#else
-			gui_log("tour: open Contacts app\n");
-			nav_push(contacts_list_create, NULL);
-			phase = PHASE_LIST;
-#endif
-			phase_t = now;
-		}
-		break;
-#if !DEMO_STATIC
-	case PHASE_LIST:
-		if (dt >= DWELL_MS + 600) {
-			gui_log("tour: open first contact\n");
-			nav_push(contact_detail_create, (void *)(long)0);
-			phase = PHASE_DETAIL;
-			phase_t = now;
-		}
-		break;
-	case PHASE_DETAIL:
-		if (dt >= SWEEP_MS) {
-			gui_log("tour: back from detail\n");
-			nav_pop();		/* back to the list */
-			phase = PHASE_LIST_RETURN;
-			phase_t = now;
-		}
-		break;
-	case PHASE_LIST_RETURN:
-		if (dt >= DWELL_MS) {
-			gui_log("tour: open Add contact\n");
-			nav_push(contacts_add_create, NULL);
-			phase = PHASE_ADD;
-			phase_t = now;
-		}
-		break;
-	case PHASE_ADD:
-		if (dt >= SWEEP_MS) {
-			gui_log("tour: back to home\n");
-			nav_to_root();		/* collapse back to home */
-			phase = PHASE_SMS_HOME;
-			phase_t = now;
-		}
-		break;
-	case PHASE_SMS_HOME:
-		if (dt >= DWELL_MS) {
-			gui_log("tour: open Messages app\n");
-			nav_push(sms_list_create, NULL);
-			phase = PHASE_SMS_LIST;
-			phase_t = now;
-		}
-		break;
-	case PHASE_SMS_LIST:
-		if (dt >= DWELL_MS + 600) {
-			gui_log("tour: open first chat\n");
-			nav_push(sms_chat_create, (void *)(long)0);
-			phase = PHASE_SMS_CHAT;
-			phase_t = now;
-		}
-		break;
-	case PHASE_SMS_CHAT:
-		if (dt >= SWEEP_MS) {
-			gui_log("tour: back to home\n");
-			nav_to_root();		/* collapse back to home */
-			phase = PHASE_PHONE_HOME;
-			phase_t = now;
-		}
-		break;
-	case PHASE_PHONE_HOME:
-		if (dt >= DWELL_MS) {
-			gui_log("tour: open Phone app\n");
-			nav_push(call_log_create, NULL);
-			phase = PHASE_RECENTS;
-			phase_t = now;
-		}
-		break;
-	case PHASE_RECENTS:
-		/* The mock radio injects incoming calls on its own timer, so the
-		 * call overlay demos itself; just dwell, then loop home. */
-		if (dt >= SWEEP_MS) {
-			gui_log("tour: return to home (loop)\n");
-			nav_to_root();		/* collapse back to home */
-			phase = PHASE_HOME;	/* loop the tour */
-			phase_t = now;
-		}
-		break;
-#endif /* !DEMO_STATIC */
-	}
+	(void)level;
+	write(buf);
 }
 
 void main(void)
 {
 	lv_init();
+	lv_log_register_print_cb(gui_lvgl_log_cb);
 	lv_port_disp_init();
 	lv_port_indev_init();
 
 	nav_init();
 	contacts_init();	/* load persisted contacts before any screen reads them */
-	messages_init();	/* SMS threads + mock receiver */
-	telephony_init();	/* call log + mock radio timer */
+	messages_init();	/* SMS threads */
+	telephony_init();	/* call log + radio */
 	call_ui_init();		/* call overlay on the top layer */
+
+	/* No input device yet — keep the mock radio/SMS injectors off so nothing
+	 * mutates the UI after the initial render. */
+	telephony_set_mock(0);
+	messages_set_mock(0);
+
+	/* Show the splash first; home takes over once the bar has filled. */
 	nav_set_root(boot_create, NULL);
 	gui_log("ready\n");
 
 	unsigned long last_tick = getticks();
-	phase_t = last_tick;
+	unsigned long boot_t    = last_tick;
+	int           on_home   = 0;
 
 	while (1) {
 		unsigned long now = getticks();
 		lv_tick_inc((uint32_t)(now - last_tick));
 		last_tick = now;
 
-		demo_tick(now);
-		mem_log(now);
+		if (!on_home && (now - boot_t) >= BOOT_MS) {
+			gui_log("boot done -> home\n");
+			nav_set_root(home_create, NULL);
+			nav_show_chrome(true);
+			on_home = 1;
+		}
+
 		lv_task_handler();
 		yield();
 	}

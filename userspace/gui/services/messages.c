@@ -36,6 +36,7 @@ static const char *mock_texts[] = {
 };
 static int      mock_text_idx;
 static uint32_t next_recv_at;
+static int      recv_on = 1;   /* auto-inject inbound SMS */
 
 static void copy_str(char *dst, const char *src, int max)
 {
@@ -198,8 +199,10 @@ static void mock_receive(void)
 static void messages_tick(lv_timer_t *t)
 {
 	(void)t;
-	if ((int32_t)(lv_tick_get() - next_recv_at) >= 0) {
+	if (recv_on && (int32_t)(lv_tick_get() - next_recv_at) >= 0) {
 		mock_receive();
 		next_recv_at = lv_tick_get() + RECV_EVERY_MS;
 	}
 }
+
+void messages_set_mock(int on) { recv_on = on; }

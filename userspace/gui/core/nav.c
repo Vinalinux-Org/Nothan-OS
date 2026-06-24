@@ -29,6 +29,7 @@ static void screen_bg(lv_obj_t *scr)
 	lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
 }
 
+
 static void on_back(lv_event_t *e)  { (void)e; gui_log("event: nav-bar back\n"); nav_pop(); }
 static void on_home(lv_event_t *e)  { (void)e; gui_log("event: nav-bar home\n"); nav_to_root(); }
 

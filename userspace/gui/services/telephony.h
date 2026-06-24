@@ -49,6 +49,10 @@ typedef void (*tel_observer_fn)(enum tel_state state);
 /* Load the call log and start the mock event timer. Call once at startup. */
 void telephony_init(void);
 
+/* Enable/disable the mock radio's auto-injected incoming calls (on by
+ * default). Turn off to isolate pure-GUI testing. */
+void telephony_set_mock(int on);
+
 /* Actions. */
 void telephony_dial(const char *number);   /* IDLE -> DIALING */
 void telephony_answer(void);               /* INCOMING -> ACTIVE */

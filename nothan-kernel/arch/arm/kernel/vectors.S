@@ -104,6 +104,7 @@ vector_dabt:
 	mov	r1, lr			@ arg1 = faulting PC
 	mrs	r0, spsr		@ arg0 = SPSR
 	push	{r0}
+	add	r2, sp, #4		@ arg2 = &saved {r0..r12} (skip pushed SPSR)
 	bl	dabt_handler
 	pop	{r0}
 	msr	spsr_cxsf, r0

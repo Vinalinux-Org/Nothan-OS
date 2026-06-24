@@ -168,7 +168,37 @@ static int mmc_send_cmd(uint32_t cmd, uint32_t arg, uint32_t flags)
 	return 0;
 }
 
-static int omap_hsmmc_read_block(struct gendisk *disk, u64 block, void *buf)
+/*
+ * The HSMMC controller is a single shared resource with no per-request
+ * queue: a transfer is driven register-by-register (issue command, drain
+ * or fill the 512-byte data FIFO, wait for Transfer Complete). If a task
+ * is preempted mid-transfer and another task starts its own command, the
+ * second mmc_send_cmd() clears STAT (0xFFFFFFFF) and reprograms the FIFO,
+ * destroying the first task's in-flight state — the first task then reads
+ * garbage or times out, and the controller is left wedged (cascading
+ * "[MMC] Read block N failed").
+ *
+ * Userspace storage (the GUI loading CONTACTS/SMS/CALLLOG) and the shell
+ * (ls) both hit this path, so the race is real. Make each block transfer
+ * atomic by masking IRQs around it: with no timer IRQ there is no
+ * preemption, so a transfer always runs to completion. Transfers are
+ * polled (they wait on STAT bits the hardware sets, not on any IRQ), so
+ * masking IRQs cannot deadlock, and a healthy transfer is only ~tens of
+ * microseconds.
+ */
+static inline unsigned long mmc_irq_save(void)
+{
+	unsigned long flags;
+	__asm__ __volatile__("mrs %0, cpsr\n\tcpsid i" : "=r"(flags) : : "memory");
+	return flags;
+}
+
+static inline void mmc_irq_restore(unsigned long flags)
+{
+	__asm__ __volatile__("msr cpsr_c, %0" : : "r"(flags) : "memory");
+}
+
+static int omap_hsmmc_read_block_inner(struct gendisk *disk, u64 block, void *buf)
 {
 	int timeout;
 
@@ -217,7 +247,7 @@ static int omap_hsmmc_read_block(struct gendisk *disk, u64 block, void *buf)
 	return 0;
 }
 
-static int omap_hsmmc_write_block(struct gendisk *disk, u64 block, const void *buf)
+static int omap_hsmmc_write_block_inner(struct gendisk *disk, u64 block, const void *buf)
 {
 	int timeout;
 
@@ -268,6 +298,23 @@ static int omap_hsmmc_write_block(struct gendisk *disk, u64 block, const void *b
 	mmc_write(MMCHS_STAT, STAT_TC);
 
 	return 0;
+}
+
+/* IRQ-masked wrappers — serialize the controller against preemption. */
+static int omap_hsmmc_read_block(struct gendisk *disk, u64 block, void *buf)
+{
+	unsigned long flags = mmc_irq_save();
+	int ret = omap_hsmmc_read_block_inner(disk, block, buf);
+	mmc_irq_restore(flags);
+	return ret;
+}
+
+static int omap_hsmmc_write_block(struct gendisk *disk, u64 block, const void *buf)
+{
+	unsigned long flags = mmc_irq_save();
+	int ret = omap_hsmmc_write_block_inner(disk, block, buf);
+	mmc_irq_restore(flags);
+	return ret;
 }
 
 static const struct block_device_operations omap_hsmmc_ops = {

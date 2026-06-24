@@ -18,8 +18,8 @@
 #include "lvgl/lvgl.h"
 #include "port/lv_port_disp.h"   /* found via -I$(ROOT)/gui */
 
-#define DISP_W      360
-#define DISP_H      640
+#define DISP_W      480
+#define DISP_H      800
 #define BUG_REPRO   0   /* 1 = small buffer → reproduces the strip-clip crash */
 
 static SDL_Window   *window;

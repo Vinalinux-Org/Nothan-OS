@@ -15,7 +15,7 @@
 #include "sms_list.h"
 #include "contacts_list.h"
 
-#define STATUS_H   28
+#define STATUS_H   STATUS_BAR_HEIGHT
 #define SEARCH_H   40
 #define DOCK_H     76
 #define DOCK_FLOAT 8	/* gap between the floating dock and the nav bar */
@@ -88,7 +88,10 @@ static void build_search_bar(lv_obj_t *parent)
 	lv_obj_set_style_bg_color(search, theme_color(THEME_SURFACE), 0);
 	lv_obj_set_style_bg_opa(search, LV_OPA_COVER, 0);
 	lv_obj_set_style_radius(search, SEARCH_H / 2, 0);
-	lv_obj_set_style_border_width(search, 0, 0);
+	/* DEBUG: outline the search (middle) frame in CYAN. */
+	lv_obj_set_style_border_width(search, 2, 0);
+	lv_obj_set_style_border_color(search, lv_color_hex(0x00FFFF), 0);
+	lv_obj_set_style_border_opa(search, LV_OPA_COVER, 0);
 	lv_obj_set_style_text_color(search, theme_color(THEME_TEXT), 0);
 	lv_obj_set_style_text_font(search, &lv_font_montserrat_14, 0);
 	lv_obj_set_style_text_align(search, LV_TEXT_ALIGN_CENTER, 0);
@@ -108,21 +111,27 @@ static void build_dock(lv_obj_t *parent)
 	lv_obj_set_style_bg_color(dock, theme_color(THEME_SURFACE), 0);
 	lv_obj_set_style_bg_opa(dock, LV_OPA_COVER, 0);
 	lv_obj_set_style_radius(dock, RADIUS_LG, 0);
-	lv_obj_set_style_shadow_color(dock, lv_color_black(), 0);
-	lv_obj_set_style_shadow_opa(dock, LV_OPA_30, 0);
-	lv_obj_set_style_shadow_width(dock, 16, 0);
-	lv_obj_set_style_shadow_offset_y(dock, 2, 0);
+	/* Dock shadow OFF — same LVGL SW shadow-blur overrun as the app tiles
+	 * (see widgets/app_tile.c). The lighter surface alone separates the
+	 * dock from the wallpaper well enough. */
 	lv_obj_clear_flag(dock, LV_OBJ_FLAG_SCROLLABLE);
 
-	/* Flex row + SPACE_EVENLY spreads the four icons with equal gaps. */
-	lv_obj_set_flex_flow(dock, LV_FLEX_FLOW_ROW);
-	lv_obj_set_flex_align(dock, LV_FLEX_ALIGN_SPACE_EVENLY,
-			      LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+	/* Same 4-column grid as the app grid (and same 92% width), so each dock
+	 * icon sits exactly under its column above. One full-height row centers
+	 * the icons vertically in the tray. */
+	static const int32_t dock_col[] = {
+		LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1),
+		LV_GRID_TEMPLATE_LAST
+	};
+	static const int32_t dock_row[] = { LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST };
+	lv_obj_set_grid_dsc_array(dock, dock_col, dock_row);
 
 	for (int i = 0; i < 4; i++) {
 		lv_obj_t *t = app_tile_create(dock, dock_apps[i].symbol,
 					      dock_apps[i].label,
 					      dock_apps[i].color);
+		lv_obj_set_grid_cell(t, LV_GRID_ALIGN_CENTER, i, 1,
+				     LV_GRID_ALIGN_CENTER, 0, 1);
 		if (dock_apps[i].builder) {
 			lv_obj_t *badge = lv_obj_get_child(t, 0);
 			lv_obj_add_event_cb(badge, on_app_tile, LV_EVENT_CLICKED,
@@ -138,6 +147,11 @@ void home_create(lv_obj_t *parent, void *arg)
 	lv_obj_set_style_bg_color(parent, theme_color(THEME_BG), 0);
 	lv_obj_clear_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
 
+	/* DEBUG: outline the big screen frame in WHITE. */
+	lv_obj_set_style_border_width(parent, 3, 0);
+	lv_obj_set_style_border_color(parent, lv_color_hex(0xFFFFFF), 0);
+	lv_obj_set_style_border_opa(parent, LV_OPA_COVER, 0);
+
 	status_bar_create(parent);
 	build_search_bar(parent);
 
@@ -148,10 +162,11 @@ void home_create(lv_obj_t *parent, void *arg)
 	int grid_bottom = DOCK_H + DOCK_FLOAT + NAV_BAR_HEIGHT + 8;
 	lv_obj_t *grid = lv_obj_create(parent);
 	lv_obj_remove_style_all(grid);
-	lv_obj_set_size(grid, lv_pct(100), 640 - grid_top - grid_bottom);
+	/* 92% wide, same as the dock, so both share identical 4-column geometry
+	 * and the dock icons line up under the grid columns. */
+	lv_obj_set_size(grid, lv_pct(92), SCREEN_H - grid_top - grid_bottom);
 	lv_obj_align(grid, LV_ALIGN_TOP_MID, 0, grid_top);
 	lv_obj_set_style_pad_ver(grid, 8, 0);
-	lv_obj_set_style_pad_row(grid, 32, 0);	/* breathing room between rows */
 	lv_obj_set_scroll_dir(grid, LV_DIR_VER);
 	/* AUTO: shown whenever the list overflows. MODE_ACTIVE would only
 	 * draw while a touch indev is actively scrolling — and there is no
@@ -165,17 +180,32 @@ void home_create(lv_obj_t *parent, void *arg)
 	lv_obj_set_style_radius(grid, 2, LV_PART_SCROLLBAR);
 	lv_obj_set_style_pad_right(grid, 2, LV_PART_SCROLLBAR);
 
-	/* Flex wrap + SPACE_EVENLY: LVGL hands out equal horizontal gaps,
-	 * including the left and right edges, so columns are symmetric by
-	 * construction — no manual pad_hor math that can drift one side.
-	 * 4 fixed-width tiles per row, matching the dock. */
-	lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
-	lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_SPACE_EVENLY,
-			      LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
+	/* Fixed 4-column grid: each column is an equal fraction of the width,
+	 * so tiles never reflow into extra columns when the screen resolution
+	 * changes (the flex-wrap version packed 6 columns at 480px). Rows are
+	 * CONTENT-sized; APP_COUNT/4 = 6 rows for the current app set. */
+	static const int32_t col_dsc[] = {
+		LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1),
+		LV_GRID_TEMPLATE_LAST
+	};
+	static const int32_t row_dsc[] = {
+		LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_CONTENT,
+		LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_CONTENT,
+		LV_GRID_TEMPLATE_LAST
+	};
+	lv_obj_set_grid_dsc_array(grid, col_dsc, row_dsc);
+	lv_obj_set_style_pad_row(grid, 18, 0);	/* breathing room between rows */
+
+	/* DEBUG: outline the app-grid frame in GREEN. */
+	lv_obj_set_style_border_width(grid, 2, 0);
+	lv_obj_set_style_border_color(grid, lv_color_hex(0x00FF00), 0);
+	lv_obj_set_style_border_opa(grid, LV_OPA_COVER, 0);
 
 	for (int i = 0; i < APP_COUNT; i++) {
 		lv_obj_t *t = app_tile_create(grid, apps[i].symbol,
 					      apps[i].label, apps[i].color);
+		lv_obj_set_grid_cell(t, LV_GRID_ALIGN_CENTER, i % 4, 1,
+				     LV_GRID_ALIGN_START, i / 4, 1);
 		if (apps[i].builder) {
 			lv_obj_t *badge = lv_obj_get_child(t, 0);
 			lv_obj_add_event_cb(badge, on_app_tile, LV_EVENT_CLICKED,
@@ -209,7 +239,7 @@ void home_scroll_to_end(int to_bottom, int duration_ms)
 	lv_anim_init(&a);
 	lv_anim_set_var(&a, grid);
 	lv_anim_set_values(&a, cur, target);
-	lv_anim_set_time(&a, duration_ms);
+	lv_anim_set_duration(&a, duration_ms);
 	lv_anim_set_exec_cb(&a, scroll_exec_cb);
 	lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
 	lv_anim_start(&a);

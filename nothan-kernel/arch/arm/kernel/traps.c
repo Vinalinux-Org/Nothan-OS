@@ -82,7 +82,7 @@ void pabt_handler(unsigned int spsr, unsigned int lr_usr)
  * Reads DFAR (Data Fault Address) and DFSR (Data Fault Status)
  * from CP15 to determine the fault address and reason.
  */
-void dabt_handler(unsigned int spsr, unsigned int pc)
+void dabt_handler(unsigned int spsr, unsigned int pc, unsigned int *regs)
 {
 	unsigned int dfar, dfsr;
 	__asm__ __volatile__(
@@ -93,6 +93,14 @@ void dabt_handler(unsigned int spsr, unsigned int pc)
 	printk("\nException: Data Abort!\n");
 	printk("  DFAR=0x%08x, DFSR=0x%08x\n", dfar, dfsr);
 	printk("  PC=0x%08x  SPSR=0x%08x\n", pc, spsr);
+	/* User register frame at the fault (regs[n] = rN). For the LVGL blend
+	 * runaway hunt: r8 = row counter, r7/r9 = dest, r4/r6/r11 = mask. */
+	printk("  r0=%08x r1=%08x r2=%08x r3=%08x\n",
+	       regs[0], regs[1], regs[2], regs[3]);
+	printk("  r4=%08x r5=%08x r6=%08x r7=%08x\n",
+	       regs[4], regs[5], regs[6], regs[7]);
+	printk("  r8=%08x r9=%08x r10=%08x r11=%08x r12=%08x\n",
+	       regs[8], regs[9], regs[10], regs[11], regs[12]);
 
 	const char *reason;
 	switch (dfsr & 0xF) {
