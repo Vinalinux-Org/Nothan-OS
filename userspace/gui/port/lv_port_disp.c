@@ -17,18 +17,21 @@
 #define LOG_W    480		/* logical portrait (after 90° rotation) */
 #define LOG_H    800
 
+/*
+ * LVGL asserts both the draw buffer and any buffer it rotates into are aligned
+ * to LV_DRAW_BUF_ALIGN (lv_display_set_buffers); a plain uint8_t[] is only
+ * byte-aligned, so request it explicitly — the SW renderer/rotator do word
+ * accesses that assume it.
+ */
 /* Full-logical-screen render buffer: every object renders in one piece. */
-static uint8_t draw_buf_1[LOG_W * LOG_H * 2];
+static uint8_t draw_buf_1[LOG_W * LOG_H * 2] __attribute__((aligned(LV_DRAW_BUF_ALIGN)));
 /* Landscape scratch buffer holding the rotated output sent to the panel. */
-static uint8_t rotated_buf[PHYS_W * PHYS_H * 2];
+static uint8_t rotated_buf[PHYS_W * PHYS_H * 2] __attribute__((aligned(LV_DRAW_BUF_ALIGN)));
 
 static int fb_fd = -1;
 
 static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
-	static int first_flush = 1;
-	static int first_flip  = 1;
-
 	lv_display_rotation_t rot = lv_display_get_rotation(disp);
 	lv_color_format_t     cf  = lv_display_get_color_format(disp);
 
@@ -41,28 +44,9 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 	lv_display_rotate_area(disp, &rarea);	/* logical → physical coords */
 	uint32_t dest_stride = lv_draw_buf_width_to_stride(lv_area_get_width(&rarea), cf);
 
-	/* DEBUG: log each flush so we can see how the screen is tiled. */
-	{
-		static int fl;
-		if (fl < 12) {
-			char m[128];
-			lv_snprintf(m, sizeof(m),
-				"[FLUSH] #%d src[%d,%d,%d,%d] %dx%d -> rot[%d,%d,%d,%d] sstr=%u dstr=%u last=%d\n",
-				fl, (int)area->x1, (int)area->y1, (int)area->x2, (int)area->y2,
-				(int)src_w, (int)src_h,
-				(int)rarea.x1, (int)rarea.y1, (int)rarea.x2, (int)rarea.y2,
-				(unsigned)src_stride, (unsigned)dest_stride,
-				(int)lv_display_flush_is_last(disp));
-			write(m);
-			fl++;
-		}
-	}
-
 	lv_draw_sw_rotate(px_map, rotated_buf, src_w, src_h, src_stride, dest_stride, rot, cf);
 
 	if (fb_fd >= 0) {
-		if (first_flush) { write("[GUI] first flush\n"); first_flush = 0; }
-
 		struct fb_flush f = {
 			.x1   = rarea.x1,
 			.y1   = rarea.y1,
@@ -74,10 +58,8 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 		};
 		ioctl(fb_fd, FB_FLUSH, (unsigned long)&f);
 
-		if (lv_display_flush_is_last(disp)) {
-			if (first_flip) { write("[GUI] first flip\n"); first_flip = 0; }
+		if (lv_display_flush_is_last(disp))
 			ioctl(fb_fd, FB_FLIP, 0);
-		}
 	}
 	lv_display_flush_ready(disp);
 }
@@ -86,10 +68,44 @@ void lv_port_disp_init(void)
 {
 	fb_fd = open("/dev/fb0", 0);
 
+	/*
+	 * The kernel framebuffer is the single source of truth for panel
+	 * geometry: it reports its native LANDSCAPE surface (e.g. 800x480). We
+	 * create the display at that physical size and rotate 270° below so
+	 * widgets lay out in portrait. The static buffers above hold exactly one
+	 * physical frame, so fall back to the compiled-in size if the query
+	 * fails and refuse a panel that would overrun them.
+	 */
+	int phys_w = PHYS_W, phys_h = PHYS_H;
+	struct fb_info info;
+	if (fb_fd >= 0 && ioctl(fb_fd, FB_GET_INFO, (unsigned long)&info) == 0 &&
+	    info.width > 0 && info.height > 0) {
+		phys_w = info.width;
+		phys_h = info.height;
+	} else {
+		write("[GUI] FB_GET_INFO failed, using built-in 800x480\n");
+	}
+
+	if ((unsigned)(phys_w * phys_h * 2) > sizeof(rotated_buf)) {
+		write("[GUI] panel exceeds buffer budget, clamping to 800x480\n");
+		phys_w = PHYS_W;
+		phys_h = PHYS_H;
+	}
+
 	/* Create at the native landscape size, then rotate 90° to portrait. */
-	lv_display_t *disp = lv_display_create(PHYS_W, PHYS_H);
+	lv_display_t *disp = lv_display_create(phys_w, phys_h);
 	lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_270);
 	lv_display_set_flush_cb(disp, flush_cb);
 	lv_display_set_buffers(disp, draw_buf_1, NULL,
 			       sizeof(draw_buf_1), LV_DISPLAY_RENDER_MODE_PARTIAL);
+
+	{
+		char m[96];
+		lv_snprintf(m, sizeof(m),
+			    "[GUI] disp phys=%dx%d logical=%dx%d\n",
+			    (int)phys_w, (int)phys_h,
+			    (int)lv_display_get_horizontal_resolution(disp),
+			    (int)lv_display_get_vertical_resolution(disp));
+		write(m);
+	}
 }

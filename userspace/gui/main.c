@@ -14,7 +14,6 @@
 #include "port/lv_port_disp.h"
 #include "port/lv_port_indev.h"
 #include "core/nav.h"
-#include "core/log.h"
 #include "screens/boot.h"
 #include "screens/home.h"
 #include "core/call_ui.h"
@@ -52,7 +51,6 @@ void main(void)
 
 	/* Show the splash first; home takes over once the bar has filled. */
 	nav_set_root(boot_create, NULL);
-	gui_log("ready\n");
 
 	unsigned long last_tick = getticks();
 	unsigned long boot_t    = last_tick;
@@ -64,7 +62,6 @@ void main(void)
 		last_tick = now;
 
 		if (!on_home && (now - boot_t) >= BOOT_MS) {
-			gui_log("boot done -> home\n");
 			nav_set_root(home_create, NULL);
 			nav_show_chrome(true);
 			on_home = 1;

@@ -54,11 +54,6 @@ lv_obj_t *app_tile_create(lv_obj_t *parent, const char *symbol,
 		lv_obj_set_size(tile, badge_size, badge_size);
 	lv_obj_clear_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
 
-	/* DEBUG: outline each app-tile frame in MAGENTA. */
-	lv_obj_set_style_border_width(tile, 1, 0);
-	lv_obj_set_style_border_color(tile, lv_color_hex(0xFF00FF), 0);
-	lv_obj_set_style_border_opa(tile, LV_OPA_COVER, 0);
-
 	/* The badge IS the interactive widget — a real lv_button, so it
 	 * carries CLICKABLE + the PRESSED state styling below for free.
 	 * The tile around it is just a layout holder (badge + label). */

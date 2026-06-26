@@ -75,28 +75,25 @@ static void on_app_tile(lv_event_t *e)
 
 static void build_search_bar(lv_obj_t *parent)
 {
-	/* A real one-line lv_textarea — focusable and tappable, with a
-	 * proper placeholder, instead of a faux box with a centered label.
-	 * Typing needs an input device + keyboard (LV_USE_KEYBOARD is off
-	 * for now), but the widget tree is already correct. */
-	lv_obj_t *search = lv_textarea_create(parent);
-	lv_textarea_set_one_line(search, true);
-	lv_textarea_set_placeholder_text(search, "Search");
+	/* Faux search field: no input device yet, so a styled pill + centered
+	 * "Search" label instead of a real lv_textarea. A textarea here always
+	 * drew its cursor (a left-border line) that the default theme restyles
+	 * regardless of our overrides, and could show a scrollbar — none of which
+	 * is wanted with no keyboard. Swap to lv_textarea when touch + KB land. */
+	lv_obj_t *search = lv_obj_create(parent);
+	lv_obj_remove_style_all(search);
 	lv_obj_set_size(search, lv_pct(92), SEARCH_H);
 	lv_obj_align(search, LV_ALIGN_TOP_MID, 0, STATUS_H + 12);
-
 	lv_obj_set_style_bg_color(search, theme_color(THEME_SURFACE), 0);
 	lv_obj_set_style_bg_opa(search, LV_OPA_COVER, 0);
 	lv_obj_set_style_radius(search, SEARCH_H / 2, 0);
-	/* DEBUG: outline the search (middle) frame in CYAN. */
-	lv_obj_set_style_border_width(search, 2, 0);
-	lv_obj_set_style_border_color(search, lv_color_hex(0x00FFFF), 0);
-	lv_obj_set_style_border_opa(search, LV_OPA_COVER, 0);
-	lv_obj_set_style_text_color(search, theme_color(THEME_TEXT), 0);
-	lv_obj_set_style_text_font(search, &lv_font_montserrat_14, 0);
-	lv_obj_set_style_text_align(search, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_style_text_color(search, theme_color(THEME_SUBTEXT),
-				    LV_PART_TEXTAREA_PLACEHOLDER);
+	lv_obj_clear_flag(search, LV_OBJ_FLAG_SCROLLABLE);
+
+	lv_obj_t *ph = lv_label_create(search);
+	lv_label_set_text(ph, "Search");
+	lv_obj_set_style_text_color(ph, theme_color(THEME_SUBTEXT), 0);
+	lv_obj_set_style_text_font(ph, &lv_font_montserrat_14, 0);
+	lv_obj_center(ph);
 }
 
 static void build_dock(lv_obj_t *parent)
@@ -147,11 +144,6 @@ void home_create(lv_obj_t *parent, void *arg)
 	lv_obj_set_style_bg_color(parent, theme_color(THEME_BG), 0);
 	lv_obj_clear_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
 
-	/* DEBUG: outline the big screen frame in WHITE. */
-	lv_obj_set_style_border_width(parent, 3, 0);
-	lv_obj_set_style_border_color(parent, lv_color_hex(0xFFFFFF), 0);
-	lv_obj_set_style_border_opa(parent, LV_OPA_COVER, 0);
-
 	status_bar_create(parent);
 	build_search_bar(parent);
 
@@ -195,11 +187,6 @@ void home_create(lv_obj_t *parent, void *arg)
 	};
 	lv_obj_set_grid_dsc_array(grid, col_dsc, row_dsc);
 	lv_obj_set_style_pad_row(grid, 18, 0);	/* breathing room between rows */
-
-	/* DEBUG: outline the app-grid frame in GREEN. */
-	lv_obj_set_style_border_width(grid, 2, 0);
-	lv_obj_set_style_border_color(grid, lv_color_hex(0x00FF00), 0);
-	lv_obj_set_style_border_opa(grid, LV_OPA_COVER, 0);
 
 	for (int i = 0; i < APP_COUNT; i++) {
 		lv_obj_t *t = app_tile_create(grid, apps[i].symbol,

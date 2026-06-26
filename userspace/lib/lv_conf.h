@@ -167,7 +167,7 @@
 #define LV_FONT_MONTSERRAT_42   1
 #define LV_FONT_MONTSERRAT_44   0
 #define LV_FONT_MONTSERRAT_46   0
-#define LV_FONT_MONTSERRAT_48   0
+#define LV_FONT_MONTSERRAT_48   1
 
 #define LV_FONT_DEFAULT         &lv_font_montserrat_14
 #define LV_FONT_FMT_TXT_LARGE   0
