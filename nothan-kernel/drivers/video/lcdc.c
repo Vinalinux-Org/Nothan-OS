@@ -1,23 +1,22 @@
 /*
  * drivers/video/lcdc.c - AM335x LCD Controller driver
  *
- * Drives the LCDC in raster TFT mode for 800x480@60Hz HDMI output
- * via TDA19988. Implements double buffering with IRQ-driven VSYNC:
- *   - front buffer: LCDC DMA reads from here
- *   - back buffer:  CPU writes here (never touches front during scan)
- *   - FB_FLIP ioctl: waits for EOF0 IRQ, swaps buffers, copies front→back
+ * Drives the LCDC in raster TFT mode for 800x480@60Hz HDMI output via TDA19988.
+ * Single framebuffer: the GUI renders straight into the one buffer the DMA
+ * scans; FB_FLIP cleans the D-cache and paces to the frame-done IRQ to limit
+ * tearing (swapping the DMA base per update raced the raster scan).
  *
  * The panel is run at native 800×480 landscape but mounted physically
- * rotated 90°, so the user sees a 480×800 portrait screen. The GUI renders
- * portrait (480×800); lcdc_flush() transposes each flushed region into the
- * 800×480 landscape framebuffer (see the rotation note there).
+ * rotated 90°, so the user sees a 480×800 portrait screen. Rotation is done in
+ * userspace (lv_draw_sw_rotate); lcdc_flush() just blits the already-landscape
+ * region 1:1 into the framebuffer.
  *
- * Framebuffer layout (each buffer):
+ * Framebuffer layout:
  *   [0..31]       palette (entry 0 = 0x4000 → 16bpp indicator)
  *   [32..768031]  800×480 RGB565 pixel data
  *
- * Pixel clock: DPLL_DISP M=118 N=7 → 354 MHz, M2=6 → 59 MHz,
- *              LCDC CLKDIV=2 → 29.5 MHz (CVT 800×480@60).
+ * Pixel clock: DPLL_DISP M=113 N=7 → 339 MHz, M2=5 → 67.8 MHz,
+ *              LCDC CLKDIV=2 → 33.9 MHz (panel EDID mode, htotal 1056×535).
  *
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
@@ -77,7 +76,16 @@
 /* DMA + interrupts */
 #define DMA_BURST_16        (4 << 4)
 #define DMA_TH_FIFO_512     (6 << 8)   /* 512-word refill threshold */
-#define IRQBIT_EOF0         (1 << 1)
+/*
+ * Frame-pacing IRQ. Per the AM335x TRM (Ch.13, IRQSTATUS_RAW 0x58) bit 1 is
+ * "recurrent_raster_done" — fires when a frame has been scanned OUT to the
+ * panel pins, which is exactly the boundary we want to pace flips to (EOF0/bit8
+ * only signals the DMA finished filling the FIFO, before scanout). Despite the
+ * name this is NOT EOF0.
+ */
+#define IRQBIT_FRAME_DONE   (1 << 1)   /* recurrent_raster_done */
+#define IRQBIT_FUF          (1 << 5)   /* FIFO underflow (DMA starved) */
+#define IRQBIT_SYNC_LOST    (1 << 2)   /* frame sync lost */
 
 /* CM_PER / DPLL_DISP clock registers */
 #define CM_PER_LCDC_CLKCTRL     0xF0E00018
@@ -87,13 +95,16 @@
 #define CM_IDLEST_DPLL_DISP     0xF0E00448
 #define CLKSEL_LCDC_PIXEL_CLK   0xF0E00534
 
-/* DPLL_DISP for 29.5 MHz pixel clock (CVT 800×480@60):
- *   DCO = SYS_CLKIN(24) × M / (N+1) = 24 × 118 / 8 = 354 MHz
- *   M2 = 6 → 59 MHz, LCDC CLKDIV = 2 → 29.5 MHz.
- * DCO 354 MHz sits close to the known-good 720p config (297 MHz). */
-#define DPLL_DISP_M     118U
+/* DPLL_DISP for 33.9 MHz pixel clock — the panel's EDID preferred DTD
+ * (800×480, htotal 1056, vtotal 535, +hsync +vsync). This frames cleanest
+ * through our LCDC→TDA19988 chain (kernel-direct test = clean bar a ~46px
+ * stripe). NOTE: a Linux PC drives this panel at CVT 29.5MHz/-hsync, but the PC
+ * goes GPU→HDMI directly; through OUR TDA framer, CVT/-hsync wraps the image, so
+ * we use the EDID DTD here.
+ *   DCO = 24 × 113 / 8 = 339 MHz, M2 = 5 → 67.8 MHz, CLKDIV = 2 → 33.9 MHz. */
+#define DPLL_DISP_M     113U
 #define DPLL_DISP_N     7U
-#define DPLL_DISP_M2    6U
+#define DPLL_DISP_M2    5U
 #define LCDC_CLKDIV     2U
 
 /* Framebuffer geometry — native panel orientation (landscape).
@@ -109,35 +120,38 @@
 #define PORT_H      800U    /* = FB_W */
 
 /*
- * RASTER_TIMING_0 for 800×480 CVT (htotal 992):
- *   PPL=800: HORLSB(800)=0x310, HORMSB=0 (bit10 of 799 clear)
- *   HSW=72:  (HSW-1=71)&0x3F=7 → 0x1C00; high bit → TIMING2 HSWMSB
- *   HFP=24:  (HFP-1=23)=0x17 → 0x00170000
- *   HBP=96:  (HBP-1=95)=0x5F → 0x5F000000
+ * RASTER_TIMING_0 for panel EDID mode (800 active, htotal 1056):
+ *   PPL=800: (800/16-1)=49=0x31 → bits[9:4]
+ *   HSW=88:  (HSW-1=87)&0x3F=23  → bits[15:10]; high bit (0x40) → TIMING2 HSWMSB
+ *   HFP=44:  (HFP-1=43)=0x2B     → bits[23:16]
+ *   HBP=124: (HBP-1=123)=0x7B    → bits[31:24]
  */
-#define TIMING0_VAL     0x5F171F10U
+#define TIMING0_VAL     0x7B2B5F10U
 
 /*
- * RASTER_TIMING_1 for 480 lines, VFP=3, VSW=10, VBP=3:
- *   VERLSB(480)=0x1DF, VSW(10)=(10-1)<<10=0x2400,
- *   VFP(3)=0x00030000, VBP(3)=0x03000000
+ * RASTER_TIMING_1 for 480 lines EDID, VFP=3, VSW=6, VBP=46 (vtotal 535).
+ * Confirmed by dumping the live tilcdc regs on a stock BBB Debian driving this
+ * exact panel cleanly: RASTER_TIMING_1 = 0x2e0315df.
+ *   LPP=(480-1)=0x1DF, VSW=(6-1)<<10=0x1400,
+ *   VFP(raw 3)=0x00030000, VBP(raw 46)=0x2E000000
  */
-#define TIMING1_VAL     0x030325DFU
+#define TIMING1_VAL     0x2E0315DFU
 
 /* RASTER_TIMING_2: data driven on falling PCLK edge, TDA19988 samples on rising.
- * IHS active low (CVT -hsync), VSYNC active high (no invert), AC bias 0xFF,
- * PHSVS controlled by bit 24. HSWMSB carries HSW=72's high bit. */
+ * INVERT_HSYNC is SET — confirmed from a stock BBB Debian driving this panel
+ * cleanly: RASTER_TIMING_2 = 0x0b60ff00. The LCDC drives HSYNC active-low and
+ * the TDA takes it as-is (VIP_CNTRL_3 = SYNC_HS, no H_TGL). VSYNC stays active
+ * high. AC bias 0xFF, PHSVS on falling edge, HSWMSB carries HSW=88's high bit.
+ * (= 0x0b60ff00) */
 #define TIMING2_VAL     (TIMING2_PHSVS_ON | TIMING2_PHSVS_FALL | \
 			 TIMING2_PCLK_INV | TIMING2_HSYNC_INV | \
 			 TIMING2_HSWMSB | TIMING2_ACB_DEFAULT)
 
-/* Double buffer state */
-static u32  fb_pa[2];
-static void *fb_va[2];
-static int   front_idx;     /* buffer LCDC is reading */
-static int   back_idx;      /* buffer CPU writes to */
+/* Single framebuffer the LCDC DMA scans; the GUI renders straight into it. */
+static u32   fb_pa;
+static void *fb_va;
 
-/* Set by EOF0 IRQ handler */
+/* Set by the frame-done IRQ handler */
 static volatile int eof_flag;
 
 static void dpll_disp_configure(void)
@@ -157,15 +171,16 @@ static void dpll_disp_configure(void)
 		printk("[LCDC] DPLL_DISP lock timeout\n");
 }
 
-/* EOF0 IRQ handler — fires when LCDC finishes scanning a frame */
+/* Frame-done IRQ handler — fires once per frame scanned out to the panel
+ * (recurrent_raster_done). Used by wait_eof() to pace flips to the frame
+ * boundary. Clears the underflow/sync-lost error latches too so they don't
+ * stay asserted. */
 static void lcdc_eof_handler(unsigned int irq)
 {
-	static int eof_count;
 	(void)irq;
-	mmio_write32(LCDC_BASE + LCDC_IRQSTATUS, IRQBIT_EOF0);
+	mmio_write32(LCDC_BASE + LCDC_IRQSTATUS,
+		     IRQBIT_FRAME_DONE | IRQBIT_FUF | IRQBIT_SYNC_LOST);
 	eof_flag = 1;
-	if (++eof_count <= 3)
-		printk("[LCDC] EOF0 IRQ fired (#%d)\n", eof_count);
 }
 
 /* Block until EOF0 fires (max 30 ms = 2 frames at 60 Hz) */
@@ -182,17 +197,6 @@ static void wait_eof(void)
 			return;
 		}
 	}
-}
-
-/* Word-at-a-time copy — no memcpy in kernel */
-static void copy_buf(u8 *dst, const u8 *src, unsigned int bytes)
-{
-	while (bytes >= 4) {
-		*(u32 *)dst = *(const u32 *)src;
-		dst += 4; src += 4; bytes -= 4;
-	}
-	while (bytes--)
-		*dst++ = *src++;
 }
 
 /*
@@ -223,7 +227,7 @@ static void lcdc_flush(int x1, int y1, int x2, int y2,
 	if (len != (unsigned int)width * (unsigned int)rows * FB_BPP)
 		return;
 
-	u16       *pixels = (u16 *)((u8 *)fb_va[back_idx] + PALETTE_SZ);
+	u16       *pixels = (u16 *)((u8 *)fb_va + PALETTE_SZ);
 	const u16 *src    = (const u16 *)data;
 
 	for (int row = 0; row < rows; row++) {
@@ -235,25 +239,16 @@ static void lcdc_flush(int x1, int y1, int x2, int y2,
 
 static void lcdc_flip(void)
 {
-	int new_front = back_idx;
-	int new_back  = front_idx;
-
-	/* Clean D-cache so LCDC DMA reads the CPU's writes from DRAM */
-	clean_dcache_range((unsigned long)fb_va[new_front],
-			   (unsigned long)fb_va[new_front] + FB_SZ);
-
-	/* Wait for current frame scan to finish */
+	/*
+	 * Single buffer: the GUI renders straight into the one displayed buffer.
+	 * We do NOT swap the DMA base — swapping it per flush while content updates
+	 * many times/sec raced the raster scan and rolled the whole image. Here we
+	 * just push the CPU's writes to DRAM and pace to the frame boundary to
+	 * limit tearing.
+	 */
+	clean_dcache_range((unsigned long)fb_va,
+			   (unsigned long)fb_va + FB_SZ);
 	wait_eof();
-
-	/* Point LCDC DMA at the new front buffer — skip palette, pixel-only range */
-	mmio_write32(LCDC_BASE + LCDC_FB0_BASE,    fb_pa[new_front] + PALETTE_SZ);
-	mmio_write32(LCDC_BASE + LCDC_FB0_CEILING, fb_pa[new_front] + FB_SZ - 4);
-
-	front_idx = new_front;
-	back_idx  = new_back;
-
-	/* Sync new back buffer with displayed content so partial updates work */
-	copy_buf((u8 *)fb_va[back_idx], (u8 *)fb_va[front_idx], FB_SZ);
 }
 
 /*
@@ -288,7 +283,7 @@ static struct fb_ops lcdc_fb_ops = {
 static int __init lcdc_init(void)
 {
 	struct zone *zone;
-	struct page *pg0, *pg1;
+	struct page *pg0;
 	u8          *p;
 	u32          rctrl;
 
@@ -304,39 +299,30 @@ static int __init lcdc_init(void)
 	mmio_write32(LCDC_BASE + LCDC_CTRL,
 		     CTRL_CLKDIV(LCDC_CLKDIV) | CTRL_AUTO_UFLOW | CTRL_RASTER_MODE);
 
-	/* Allocate two 2 MB framebuffers (order 9 = 512 pages each) */
+	/* Allocate one 2 MB framebuffer (order 9 = 512 pages) */
 	zone = get_zone();
 	pg0  = alloc_pages(GFP_KERNEL, 9);
-	pg1  = alloc_pages(GFP_KERNEL, 9);
-	if (!pg0 || !pg1) {
+	if (!pg0) {
 		printk("[LCDC] framebuffer alloc failed\n");
 		return -1;
 	}
 
-	fb_pa[0] = (u32)page_to_phys(zone, pg0);
-	fb_pa[1] = (u32)page_to_phys(zone, pg1);
-	fb_va[0] = phys_to_kva(fb_pa[0]);
-	fb_va[1] = phys_to_kva(fb_pa[1]);
+	fb_pa = (u32)page_to_phys(zone, pg0);
+	fb_va = phys_to_kva(fb_pa);
 
-	/* Zero both buffers; palette entry 0 = 0x4000 (16bpp indicator).
+	/* Zero the buffer; palette entry 0 = 0x4000 (16bpp indicator).
 	 * Clean D-cache so LCDC DMA sees zeroed DRAM from the first frame. */
-	for (int b = 0; b < 2; b++) {
-		p = (u8 *)fb_va[b];
-		for (unsigned int i = 0; i < FB_SZ; i++)
-			p[i] = 0;
-		*(u16 *)fb_va[b] = 0x4000;
-		clean_dcache_range((unsigned long)fb_va[b],
-				   (unsigned long)fb_va[b] + FB_SZ);
-	}
-
-	front_idx = 0;
-	back_idx  = 1;
+	p = (u8 *)fb_va;
+	for (unsigned int i = 0; i < FB_SZ; i++)
+		p[i] = 0;
+	*(u16 *)fb_va = 0x4000;
+	clean_dcache_range((unsigned long)fb_va, (unsigned long)fb_va + FB_SZ);
 
 	mmio_write32(LCDC_BASE + LCDC_DMA_CTRL,    DMA_BURST_16 | DMA_TH_FIFO_512);
 	/* BASE points at first pixel (skip 32-byte palette); CEILING = last byte of pixel data.
 	 * DMA reads exactly 800×480×2 = 768000 bytes — no stray palette pixels. */
-	mmio_write32(LCDC_BASE + LCDC_FB0_BASE,    fb_pa[front_idx] + PALETTE_SZ);
-	mmio_write32(LCDC_BASE + LCDC_FB0_CEILING, fb_pa[front_idx] + FB_SZ - 4);
+	mmio_write32(LCDC_BASE + LCDC_FB0_BASE,    fb_pa + PALETTE_SZ);
+	mmio_write32(LCDC_BASE + LCDC_FB0_CEILING, fb_pa + FB_SZ - 4);
 	mmio_write32(LCDC_BASE + LCDC_TIMING0,     TIMING0_VAL);
 	mmio_write32(LCDC_BASE + LCDC_TIMING1,     TIMING1_VAL);
 	mmio_write32(LCDC_BASE + LCDC_TIMING2,     TIMING2_VAL);
@@ -354,34 +340,18 @@ static int __init lcdc_init(void)
 	rctrl = mmio_read32(LCDC_BASE + LCDC_RASTER_CTRL);
 	mmio_write32(LCDC_BASE + LCDC_RASTER_CTRL, rctrl | RASTER_ENABLE);
 
-	/* Enable EOF0 interrupt and register handler */
-	mmio_write32(LCDC_BASE + LCDC_IRQENABLE_SET, IRQBIT_EOF0);
+	/* Enable the frame-done pacing IRQ + the underflow/sync-lost error
+	 * interrupts so the handler can sample and report them. */
+	mmio_write32(LCDC_BASE + LCDC_IRQENABLE_SET,
+		     IRQBIT_FRAME_DONE | IRQBIT_FUF | IRQBIT_SYNC_LOST);
 	request_irq(LCDC_IRQ, lcdc_eof_handler);
 	intc_enable_irq(LCDC_IRQ);
 
 	fb_register_ops(&lcdc_fb_ops);
 
-	printk("[LCDC] 800x480 RGB565 double-buffer, front=PA 0x%08lx back=PA 0x%08lx\n",
-	       (unsigned long)fb_pa[front_idx], (unsigned long)fb_pa[back_idx]);
+	printk("[LCDC] 800x480 RGB565 single-buffer, fb=PA 0x%08lx\n",
+	       (unsigned long)fb_pa);
 
-#define LCDC_TEST_PATTERN 1
-#if LCDC_TEST_PATTERN
-	/*
-	 * DEBUG: fill the whole framebuffer solid red straight from the kernel
-	 * (no GUI). Confirms the LCDC + TDA19988 + 800x480 path works on its own.
-	 * The panel is mounted rotated 90°, so a full red fill covers the entire
-	 * physical screen regardless of orientation. Spawn of the GUI is gated off
-	 * in init/main.c (BOOT_GUI) so nothing overwrites this.
-	 */
-	{
-		u16 *tp = (u16 *)((u8 *)fb_va[front_idx] + PALETTE_SZ);
-		for (unsigned int i = 0; i < FB_W * FB_H; i++)
-			tp[i] = 0xF800;		/* RGB565 red */
-		clean_dcache_range((unsigned long)fb_va[front_idx],
-				   (unsigned long)fb_va[front_idx] + FB_SZ);
-		printk("[LCDC] TEST: full red screen (800x480, panel rotated 90)\n");
-	}
-#endif
 	return 0;
 }
 device_initcall(lcdc_init);

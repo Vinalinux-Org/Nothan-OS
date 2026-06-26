@@ -24,9 +24,15 @@ void fb_register_ops(struct fb_ops *ops)
 	printk("[FB] display backend registered\n");
 }
 
+/*
+ * Report the framebuffer's RAW scanout geometry — the native landscape surface
+ * the LCDC actually drives (matches FB_W/FB_H and the flush bounds in lcdc.c).
+ * Rotation to portrait is the GUI's concern, not the framebuffer's, so the
+ * userspace port queries this and applies LVGL's 270° rotation itself.
+ */
 static const struct fb_info fb0_info = {
-	.width  = 480,
-	.height = 800,
+	.width  = 800,
+	.height = 480,
 	.bpp    = 16,   /* RGB565 */
 };
 
@@ -79,7 +85,7 @@ static struct cdev fb0_cdev = {
 static int __init fb_init(void)
 {
 	cdev_register(&fb0_cdev);
-	printk("[FB] /dev/fb0 registered (480x800 RGB565)\n");
+	printk("[FB] /dev/fb0 registered (800x480 RGB565, native landscape)\n");
 	return 0;
 }
 device_initcall(fb_init);

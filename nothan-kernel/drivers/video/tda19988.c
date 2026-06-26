@@ -122,7 +122,21 @@
 
 /* Page 12h: HDCP/OTP */
 #define REG_TX3             REG(0x12, 0x9A)
+#define REG_TX4             REG(0x12, 0x9B)
+# define TX4_PD_RAM         (1 << 1)   /* 1 = EDID RAM powered down */
 #define REG_TX33            REG(0x12, 0xB8)
+
+/* Interrupt flags (page 00h). No TDA IRQ wired on BBB, so we poll these. */
+#define REG_INT_FLAGS_2     REG(0x00, 0x11)
+# define INT_FLAGS_2_EDID_BLK_RD  (1 << 1)
+
+/* Page 09h: EDID/DDC. A read drops one 128-byte block at EDID_DATA_0.. */
+#define REG_EDID_DATA_0     REG(0x09, 0x00)
+#define REG_EDID_CTRL       REG(0x09, 0xFA)
+#define REG_DDC_ADDR        REG(0x09, 0xFB)
+#define REG_DDC_OFFS        REG(0x09, 0xFC)
+#define REG_DDC_SEGM_ADDR   REG(0x09, 0xFD)
+#define REG_DDC_SEGM        REG(0x09, 0xFE)
 # define TX33_HDMI              (1 << 1)
 
 /* CEC registers (unpagedwrite to TDA_CEC_ADDR) */
@@ -138,25 +152,36 @@
 #define TDA19988_REV        0x0301
 
 /*
- * 800×480@60Hz CVT timing (pixel clock 29.5 MHz), per Waveshare
- * `hdmi_cvt 800 480 60`:
- *   H: 800 active + HFP=24 + HSW=72 + HBP=96 = htotal 992
- *   V: 480 active + VFP=3  + VSW=10 + VBP=3  = vtotal 496
- *   Sync: -HSYNC, +VSYNC
+ * Timing from the Waveshare 5" panel's EDID preferred DTD (read at boot via
+ * DDC). Frames cleanest through our LCDC→TDA19988 chain. Pixel clock 33.9 MHz:
+ *   H: 800 active + HFP=44 + HSW=88 + HBP=124 = htotal 1056
+ *   V: 480 active + VFP=3  + VSW=6  + VBP=46  = vtotal 535
+ *   Sync: +HSYNC, +VSYNC (digital separate)
+ * (A PC drives this panel at CVT 29.5MHz/-hsync, but that goes GPU→HDMI
+ * directly; through our TDA framer -hsync wraps the image, so we use the EDID
+ * DTD.) Values follow the canonical tda998x mode_set formulas.
  */
-#define N_PIX            992U
-#define N_LINE           496U
-#define HS_PIX_S          24U   /* hsync_start - hdisplay = hfp */
-#define HS_PIX_E          96U   /* hsync_end   - hdisplay = hfp + hsw */
-#define DE_PIX_S         192U   /* htotal - hdisplay */
-#define DE_PIX_E         992U   /* htotal */
-#define REF_PIX           27U   /* 3 + hs_pix_s */
-#define REF_LINE           4U   /* 1 + (vsync_start - vdisplay) */
-#define VWIN1_LINE_S      15U   /* vtotal - vdisplay - 1 */
-#define VWIN1_LINE_E     495U   /* vtotal - 1 */
+/*
+ * EDID DTD timing (33.9MHz, htotal 1056, vtotal 535, +hsync). ALL values below
+ * verified against the LIVE TDA19988 registers on a stock BBB Debian driving
+ * THIS panel cleanly through the same LCDC→TDA998x path (read over I2C).
+ * The one non-obvious value is REF_PIX = 135: the canonical tda998x formula
+ * gives 3 + hs_pix_s = 47, but the real driver programs 135 (= 47 + hsw 88).
+ * That mismatch was the long-standing residual offset — use the hardware value.
+ */
+#define N_PIX           1056U
+#define N_LINE           535U
+#define HS_PIX_S          44U   /* hsync_start - hdisplay = hfp */
+#define HS_PIX_E         132U   /* hsync_end   - hdisplay = hfp + hsw */
+#define DE_PIX_S         256U   /* htotal - hdisplay */
+#define DE_PIX_E        1056U   /* htotal */
+#define REF_PIX          135U   /* BBB live value (canonical 3+hs_pix_s=47 is wrong here) */
+#define REF_LINE           4U   /* 1 + (vsync_start - vdisplay) = 1 + vfp(3) */
+#define VWIN1_LINE_S      54U   /* vtotal - vdisplay - 1 */
+#define VWIN1_LINE_E     534U   /* vwin1_line_s + vdisplay */
 #define VS1_LINE_S         3U   /* vsync_start - vdisplay = vfp */
-#define VS1_LINE_E        13U   /* vs1_line_s + vsw */
-#define VS1_PIX           24U   /* = hs_pix_s */
+#define VS1_LINE_E         9U   /* vs1_line_s + vsw (vsw=6) */
+#define VS1_PIX           44U   /* = hs_pix_s */
 
 /*
  * PLL divisor for 29.5 MHz TMDS: div = 148.5MHz / pixclk = 5, div-- = 4,
@@ -186,15 +211,6 @@ static int cec_write(struct i2c_client *hdmi, u8 reg, u8 val)
 		.buf   = buf,
 	};
 	return hdmi->adapter->xfer(hdmi->adapter, &msg, 1);
-}
-
-static int cec_read(struct i2c_client *hdmi, u8 reg, u8 *val)
-{
-	struct i2c_msg msgs[2] = {
-		{ .addr = TDA_CEC_ADDR, .flags = 0,          .len = 1, .buf = &reg  },
-		{ .addr = TDA_CEC_ADDR, .flags = I2C_M_RD,   .len = 1, .buf = val   },
-	};
-	return hdmi->adapter->xfer(hdmi->adapter, msgs, 2);
 }
 
 static int page_select(struct i2c_client *c, u8 page)
@@ -328,11 +344,9 @@ static int tda19988_mode_set_800x480(struct i2c_client *c)
 	/* BIAS for TMDS */
 	if (reg_write(c, REG_ANA_GENERAL, 0x09) < 0) return -1;
 
-	/* Sync at input: SYNC_HS base; CVT 800×480 has active-low HSYNC, so
-	 * toggle H to present high-active sync to the TDA. VSYNC is high-active
-	 * (no V toggle). */
-	if (reg_write(c, REG_VIP_CNTRL_3,
-		      VIP_CNTRL_3_SYNC_HS | VIP_CNTRL_3_H_TGL) < 0) return -1;
+	/* Sync at input: SYNC_HS base. Panel EDID is +HSYNC +VSYNC, so no H/V
+	 * toggle (H_TGL/V_TGL are only set for active-low sync). */
+	if (reg_write(c, REG_VIP_CNTRL_3, VIP_CNTRL_3_SYNC_HS) < 0) return -1;
 
 	if (reg_write(c, REG_VIDFORMAT, 0x00) < 0) return -1;
 
@@ -361,19 +375,17 @@ static int tda19988_mode_set_800x480(struct i2c_client *c)
 	/* TDA19988-specific: fill active space */
 	if (reg_write(c, REG_ENABLE_SPACE, 0x00) < 0) return -1;
 
-	/* Output sync polarity: regenerate from input, toggle enabled.
-	 * H_TGL reverts the input-stage HSYNC toggle so output matches CVT. */
+	/* Output sync: regenerate from input, toggle enabled. Panel is +HSYNC,
+	 * so no H_TGL (output stays active-high to match EDID). */
 	if (reg_write(c, REG_TBG_CNTRL_1,
-		      TBG_CNTRL_1_DWIN_DIS | TBG_CNTRL_1_TGL_EN |
-		      TBG_CNTRL_1_H_TGL) < 0) return -1;
+		      TBG_CNTRL_1_DWIN_DIS | TBG_CNTRL_1_TGL_EN) < 0) return -1;
 
 	/*
 	 * Enable HDMI mode (TX33_HDMI + ENC_CNTRL CTL_CODE=1).
 	 * Clear DWIN_DIS to allow data islands through.
 	 * Must happen before TBG_CNTRL_0 is written.
 	 */
-	if (reg_write(c, REG_TBG_CNTRL_1,
-		      TBG_CNTRL_1_TGL_EN | TBG_CNTRL_1_H_TGL) < 0) return -1;
+	if (reg_write(c, REG_TBG_CNTRL_1, TBG_CNTRL_1_TGL_EN) < 0) return -1;
 	if (reg_write(c, REG_ENC_CNTRL, ENC_CNTRL_CTL_CODE(1)) < 0) return -1;
 	if (reg_set(c,   REG_TX33, TX33_HDMI) < 0) return -1;
 
