@@ -50,6 +50,20 @@ $(BUILD)/$(LVGL_DIR)/%.o: $(LVGL_DIR)/%.c | $(LVGL_LIB_DIRS)
 	mkdir -p $(dir $@)
 	$(CC) $(LVGL_CFLAGS) -c -o $@ $<
 
+# SW blend at -O1 (correctness override). ARM GCC 13 -O2 miscompiles the
+# masked-fill fast path in lv_draw_sw_blend_to_rgb565.c: the inner loop is
+# emitted with a pointer-comparison terminator (cmp mask_ptr, mask_end; bne)
+# guarded only by a SIGNED bound check, so a large/negative span makes the
+# loop walk the mask & dest pointers hundreds of KB past the small pool
+# buffer into the first unmapped page above __bss_end — Data Abort
+# (DFAR=0x2d6000) while scrolling the home grid. -fno-strict-aliasing alone
+# does NOT fix it; -O1 emits a safe COUNTED loop (x < w) that always
+# terminates. This rule is more specific than the generic one above, so make
+# prefers it for everything under draw/sw/blend/.
+$(BUILD)/$(LVGL_DIR)/src/draw/sw/blend/%.o: $(LVGL_DIR)/src/draw/sw/blend/%.c | $(LVGL_LIB_DIRS)
+	mkdir -p $(dir $@)
+	$(CC) $(LVGL_CFLAGS) -O1 -c -o $@ $<
+
 $(LVGL_LIB): $(LVGL_OBJS)
 	$(AR) rcs $@ $^
 
