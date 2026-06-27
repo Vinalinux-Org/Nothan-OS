@@ -65,6 +65,12 @@ void mmu_init(void)
 			    MT_DEVICE | PMD_SECT_DOMAIN(DOMAIN_IO) |
 			    PMD_SECT_AP_RW | PMD_SECT_XN);
 
+	/* MMIO: USB subsystem (1 MB: 0x47400000-0x474FFFFF) — USBSS + usb0/usb1
+	 * MUSB cores + PHYs. Sits below L4_PER, so it needs its own window. */
+	map_section(pgd, 0xF3000000, 0x47400000,
+		    MT_DEVICE | PMD_SECT_DOMAIN(DOMAIN_IO) |
+		    PMD_SECT_AP_RW | PMD_SECT_XN);
+
 	/* Identity map for .idmap.text -- use phys addresses. */
 	unsigned int i = ((u32)&__idmap_start - MMU_OFFSET) >> 20;
 	while (i <= (((u32)&__idmap_end - MMU_OFFSET) >> 20)) {
@@ -86,6 +92,7 @@ void mmu_log_config(void)
 	printk("[MMU] L4_PER  VA 0xF0000000 -> PA 0x48000000 (32 MB, Device)\n");
 	printk("[MMU] L4_WKUP VA 0xF0E00000 -> PA 0x44E00000 (16 MB, Device)\n");
 	printk("[MMU] L4_FAST VA 0xF2000000 -> PA 0x4A000000 (2 MB, Device)\n");
+	printk("[MMU] USB     VA 0xF3000000 -> PA 0x47400000 (1 MB, Device)\n");
 	printk("[MMU] DACR=0x%x (D%d=Mgr D%d=Client D%d=Client)\n",
 	       DACR_INIT, DOMAIN_KERNEL, DOMAIN_USER, DOMAIN_IO);
 	printk("[MMU] enabled\n");

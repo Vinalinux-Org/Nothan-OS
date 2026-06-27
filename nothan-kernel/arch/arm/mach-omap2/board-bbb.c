@@ -14,6 +14,10 @@
 #define DMTIMER2_BASE		(L4_PER_BASE + 0x40000)	/* 0x48040000 */
 #define INTC_BASE		0x48200000
 
+/* USB subsystem (USBSS base; usb1 = BBB Type-A host port, IRQ 19) */
+#define USBSS_BASE		0x47400000
+#define USB1_IRQ		19
+
 /* L4_WKUP peripherals */
 #define L4_WKUP_BASE		0x44E00000
 #define UART0_BASE		(L4_WKUP_BASE + 0x9000)		/* 0x44E09000 */
@@ -90,6 +94,7 @@ static struct platform_device bbb_devices[] = {
 	{ .name = "omap_gpio",  .base = GPIO1_BASE,   .irq = 0  },
 	{ .name = "omap_gpio",  .base = GPIO2_BASE,   .irq = 0  },
 	{ .name = "omap_gpio",  .base = GPIO3_BASE,   .irq = 0  },
+	{ .name = "musb_hcd",   .base = USBSS_BASE,   .irq = USB1_IRQ },
 };
 
 static const struct i2c_board_info i2c0_devices[] = {

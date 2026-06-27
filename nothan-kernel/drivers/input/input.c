@@ -28,7 +28,24 @@ static int input0_read(struct file *file, char *buf, size_t count)
 	(void)file;
 	size_t i = 0;
 
-	if (!registered_ops || !registered_ops->read_key)
+	if (!registered_ops)
+		return -1;
+
+	/* Pointer (touch) backend: return one raw pointer-state record. */
+	if (registered_ops->get_pointer) {
+		int x = 0, y = 0, pressed = 0;
+		if (count < INPUT_POINTER_RECORD)
+			return -1;
+		registered_ops->get_pointer(&x, &y, &pressed);
+		buf[0] = (char)(x & 0xFF);
+		buf[1] = (char)((x >> 8) & 0xFF);
+		buf[2] = (char)(y & 0xFF);
+		buf[3] = (char)((y >> 8) & 0xFF);
+		buf[4] = (char)(pressed ? 1 : 0);
+		return INPUT_POINTER_RECORD;
+	}
+
+	if (!registered_ops->read_key)
 		return -1;
 
 	while (i < count) {
