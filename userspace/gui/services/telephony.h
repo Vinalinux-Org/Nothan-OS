@@ -53,6 +53,10 @@ void telephony_init(void);
  * default). Turn off to isolate pure-GUI testing. */
 void telephony_set_mock(int on);
 
+/* Wipe the call log and persist the empty state. Used by the soak build so
+ * every run starts from an identical, clean call log (deterministic repro). */
+void telephony_calllog_clear(void);
+
 /* Actions. */
 void telephony_dial(const char *number);   /* IDLE -> DIALING */
 void telephony_answer(void);               /* INCOMING -> ACTIVE */

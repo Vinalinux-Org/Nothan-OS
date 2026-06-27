@@ -4,6 +4,7 @@
  * The state machine and call log are real; only the radio is mocked. An
  * lv_timer (telephony_tick) advances the call lifecycle on its own:
  *   - DIALING  -> ACTIVE   after DIAL_CONNECT_MS  (remote "answers")
+ *   - ACTIVE   -> IDLE     after ACTIVE_HANGUP_MS (remote "hangs up")
  *   - INCOMING -> MISSED   after RING_TIMEOUT_MS  (nobody picks up)
  *   - IDLE     -> INCOMING every INCOMING_EVERY_MS (a call arrives)
  * Swapping in the SIM7600CE means replacing the actions with AT commands
@@ -24,6 +25,7 @@
 
 /* Mock timing (milliseconds). */
 #define DIAL_CONNECT_MS    2500
+#define ACTIVE_HANGUP_MS   8000		/* mock remote ends the call after this */
 #define RING_TIMEOUT_MS    12000
 #define INCOMING_EVERY_MS  30000
 #define TICK_PERIOD_MS     500
@@ -222,6 +224,14 @@ static void telephony_tick(lv_timer_t *t)
 			inject_incoming();
 		break;
 	case TEL_ACTIVE:
+		/* Mock radio: the remote ends the call on its own so a soak run
+		 * (or an unattended demo) is never stuck on the call screen. A
+		 * real call only ends when the user hangs up (mock_on == 0). */
+		if (mock_on && now - active_since >= ACTIVE_HANGUP_MS) {
+			gui_log("telephony: remote hung up\n");
+			telephony_hangup();
+		}
+		break;
 	default:
 		break;
 	}
@@ -252,6 +262,12 @@ int telephony_muted(void) { return muted; }
 void telephony_set_observer(tel_observer_fn cb) { observer = cb; }
 
 void telephony_set_mock(int on) { mock_on = on; }
+
+void telephony_calllog_clear(void)
+{
+	log_n = 0;
+	calllog_save();		/* persist empty so the next boot also starts clean */
+}
 
 int telephony_log_count(void) { return log_n; }
 
