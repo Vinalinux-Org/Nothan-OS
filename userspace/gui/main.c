@@ -22,7 +22,11 @@
 #include "services/telephony.h"
 #include "../lib/syscall.h"
 
+#ifdef GUI_MONKEY
+#define BOOT_MS   800		/* soak test: skip most of the splash, get to home */
+#else
 #define BOOT_MS   7000		/* splash dwell; matches the bar fill in boot.c */
+#endif
 
 /* Route LVGL's own logs (incl. assert file:line) out over UART. */
 static void gui_lvgl_log_cb(lv_log_level_t level, const char *buf)
@@ -44,10 +48,28 @@ void main(void)
 	telephony_init();	/* call log + radio */
 	call_ui_init();		/* call overlay on the top layer */
 
-	/* No input device yet — keep the mock radio/SMS injectors off so nothing
-	 * mutates the UI after the initial render. */
+#ifdef GUI_MONKEY
+	/* Soak test mirrors the DEMO: the mock radio/SMS injectors stay OFF so the
+	 * monkey exercises exactly the demo paths (home scroll + the three apps),
+	 * all driven synchronously by input. The injectors fire from lv_timers on
+	 * wall-clock time and rebuild the active screen (SCREEN_LOADED) underneath
+	 * the finger — an async-event-vs-interaction race that the demo (mock off)
+	 * never hits. Build with -DMONKEY_MOCK to soak that path separately. */
+#ifdef MONKEY_MOCK
+	telephony_set_mock(1);
+	messages_set_mock(1);
+#else
 	telephony_set_mock(0);
 	messages_set_mock(0);
+#endif
+	/* Start every soak from an identical, clean call log (deterministic). */
+	telephony_calllog_clear();
+#else
+	/* No real input is needed to render, so keep the mock radio/SMS injectors
+	 * off — nothing should mutate the UI on its own behind the user. */
+	telephony_set_mock(0);
+	messages_set_mock(0);
+#endif
 
 	/* Show the splash first; home takes over once the bar has filled. */
 	nav_set_root(boot_create, NULL);

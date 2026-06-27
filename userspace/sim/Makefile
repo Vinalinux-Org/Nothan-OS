@@ -54,7 +54,7 @@ ALL_OBJS := $(SIM_OBJS) $(GUI_OBJS) $(LVGL_OBJS)
 # Rules
 # -----------------------------------------------------------------------
 
-.PHONY: all clean asan builtin guard stacktest m32 plain arm
+.PHONY: all clean asan builtin guard stacktest m32 plain arm monkey
 
 all: $(TARGET)
 
@@ -342,6 +342,44 @@ $(RBUILD)/lvgl/%.o: $(ROOT)/lib/lvgl/src/%.c
 	@mkdir -p $(dir $@)
 	$(ARMCC) $(ARM_CFLAGS) -c $< -o $@
 
+# -----------------------------------------------------------------------
+# Monkey repro (`make monkey`) — drives the REAL target monkey generator
+# (gui/core/monkey.c, same seed 0x1234abcd) through the sim indev under ASan,
+# headless. If the deterministic on-target crash is an allocator-independent
+# LOGIC bug (use-after-free / overflow) the same gesture stream trips ASan here
+# with a full backtrace; if the host stays clean the fault is target-only -O2
+# codegen. CLIB malloc + redzones (no SIM_BUILTIN) so any over-run surfaces.
+#
+#   make monkey && ASAN_OPTIONS=detect_leaks=0 ./nothan-sim-monkey
+# -----------------------------------------------------------------------
+
+KBUILD      := build-monkey
+KTARGET     := nothan-sim-monkey
+KSAN_FLAGS  := -fsanitize=address -fno-omit-frame-pointer \
+               -DSIM_AUTOTAP -DSIM_MONKEY -DGUI_MONKEY -DSIM_HEADLESS
+
+K_SIM_OBJS  := $(patsubst %.c,              $(KBUILD)/sim/%.o,  $(SIM_SRC))
+K_GUI_OBJS  := $(patsubst $(ROOT)/gui/%.c,  $(KBUILD)/gui/%.o,  $(GUI_SRC))
+K_LVGL_OBJS := $(patsubst $(ROOT)/lib/lvgl/src/%.c, $(KBUILD)/lvgl/%.o, $(LVGL_SRC))
+K_OBJS := $(K_SIM_OBJS) $(K_GUI_OBJS) $(K_LVGL_OBJS)
+
+monkey: $(KTARGET)
+
+$(KTARGET): $(K_OBJS)
+	$(CC) $^ -fsanitize=address -lm -lrt -o $@
+
+$(KBUILD)/sim/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(KSAN_FLAGS) -c $< -o $@
+
+$(KBUILD)/gui/%.o: $(ROOT)/gui/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(KSAN_FLAGS) -c $< -o $@
+
+$(KBUILD)/lvgl/%.o: $(ROOT)/lib/lvgl/src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(KSAN_FLAGS) -c $< -o $@
+
 clean:
-	rm -rf $(BUILD) $(ABUILD) $(BBUILD) $(GBUILD) $(SBUILD) $(MBUILD) $(PBUILD) $(RBUILD) \
-	       $(TARGET) $(ATARGET) $(BTARGET) $(GTARGET) $(STARGET) $(MTARGET) $(PTARGET) $(RTARGET)
+	rm -rf $(BUILD) $(ABUILD) $(BBUILD) $(GBUILD) $(SBUILD) $(MBUILD) $(PBUILD) $(RBUILD) $(KBUILD) \
+	       $(TARGET) $(ATARGET) $(BTARGET) $(GTARGET) $(STARGET) $(MTARGET) $(PTARGET) $(RTARGET) $(KTARGET)

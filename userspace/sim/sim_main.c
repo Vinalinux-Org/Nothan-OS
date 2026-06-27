@@ -97,6 +97,20 @@ static void at_tap(int x, int y)
 	at_check("tap");
 }
 
+/* A bare press/release with NO nav_to_root afterwards: whatever the touched
+ * widget's CLICKED handler does (nav_push, nav_pop, …) is left in place. This
+ * is how the on-screen back button is exercised — its handler deletes the
+ * current screen from inside its own event, the hardware use-after-free. */
+static void at_click(int x, int y)
+{
+	gui_logf("autotap: click (%d,%d)\n", x, y);
+	at_press(x, y, true);
+	at_pump(3);
+	at_press(x, y, false);
+	at_pump(3);
+	at_check("click");
+}
+
 /* Press and HOLD on a tile for a while — exercises the PRESSED state plus
  * long-press handling, the state the hardware Data Abort fires in. */
 static void at_hold(int x, int y, int frames)
@@ -200,6 +214,18 @@ static int run_autotap(void)
 	for (int c = 0; c < 4; c++)
 		at_tap(col_x[c], 690);
 
+	/* 7) Open each app from the dock, then leave via the on-screen header
+	 *    BACK chevron (logical ~43,54) — a real CLICKED event whose handler
+	 *    calls nav_pop(), deleting the screen that owns the chevron from
+	 *    inside its own event. Repeat across screens: this is the exact
+	 *    hardware Data Abort (get_prop_core walking a freed obj's styles). */
+	for (int rep = 0; rep < 4; rep++) {
+		for (int c = 0; c < 4; c++) {
+			at_click(col_x[c], 695);	/* dock tile → nav_push */
+			at_click(43, 54);		/* header back → nav_pop (in-event) */
+		}
+	}
+
 #ifdef NOTHAN_MEM_TRACE
 	{
 		extern size_t nothan_mem_biggest;
@@ -210,6 +236,56 @@ static int run_autotap(void)
 	gui_log("autotap: done — no host-side over-run detected\n");
 	return 0;
 }
+
+#ifdef SIM_MONKEY
+#include "core/monkey.h"
+#include "services/telephony.h"
+#include "services/messages.h"
+
+/*
+ * Drive the REAL target monkey generator (gui/core/monkey.c, same seed) through
+ * the sim indev under ASan. The target build crashes deterministically at a
+ * given gesture #; if the same gesture stream trips ASan here, the fault is an
+ * allocator-independent LOGIC bug (use-after-free / overflow) with a full host
+ * backtrace. If the host sails past it clean, the fault is target-only codegen
+ * (the arm-none-eabi -O2 miscompile) — exactly what -O1 fixes.
+ *
+ * monkey_read() yields one input sample per call, like the on-target indev read
+ * cb; we call it once per frame so the gesture sequence matches bit-for-bit.
+ */
+#ifndef SIM_MONKEY_FRAMES
+#define SIM_MONKEY_FRAMES  6000
+#endif
+static int run_monkey(void)
+{
+	gui_log("monkey-sim: begin (driving target monkey gen under ASan)\n");
+	monkey_init(0x1234abcd);		/* same seed as the target default */
+
+	at_pump(4);
+	nav_set_root(home_create, NULL);
+	nav_show_chrome(true);
+#ifdef MONKEY_MOCK
+	telephony_set_mock(1);			/* mirror the GUI_MONKEY build */
+	messages_set_mock(1);
+#else
+	telephony_set_mock(0);			/* demo-faithful: no async radio events */
+	messages_set_mock(0);
+#endif
+	telephony_calllog_clear();		/* identical clean start as the target */
+	at_pump(4);
+
+	for (int f = 0; f < SIM_MONKEY_FRAMES; f++) {
+		int lx, ly, pressed;
+		monkey_read(&lx, &ly, &pressed);
+		at_press(lx, ly, pressed);
+		at_pump(1);
+		if ((f & 31) == 0)
+			at_check("monkey");
+	}
+	gui_log("monkey-sim: done — no host-side fault over the gesture stream\n");
+	return 0;
+}
+#endif /* SIM_MONKEY */
 
 #ifdef SIM_STACKTEST
 /*
@@ -242,7 +318,11 @@ static void *autotap_stack_thread(void *arg)
 	for (unsigned char *p = meas_lo + 64; p < sp_now - 512; p++)
 		*p = MEAS_SENTINEL;
 
+#ifdef SIM_MONKEY
+	run_monkey();		/* measure the monkey's deep paths, not just the scripted sweep */
+#else
 	run_autotap();
+#endif
 
 	/* Deepest touched = lowest address whose sentinel got overwritten. */
 	unsigned char *p = meas_lo + 64;
@@ -307,7 +387,9 @@ int main(void)
 	gui_log("ready\n");
 
 #ifdef SIM_STACKTEST
-	return run_autotap_measured();
+	return run_autotap_measured();	/* wraps run_monkey/run_autotap on a measured stack */
+#elif defined(SIM_MONKEY)
+	return run_monkey();
 #elif defined(SIM_AUTOTAP)
 	return run_autotap();
 #endif
