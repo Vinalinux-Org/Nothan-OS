@@ -19,7 +19,7 @@ static lv_obj_t *icon_button(lv_obj_t *parent, const char *symbol)
 {
 	lv_obj_t *btn = lv_button_create(parent);
 	lv_obj_remove_style_all(btn);
-	lv_obj_set_size(btn, 40, 40);
+	lv_obj_set_size(btn, 52, 52);
 	lv_obj_set_style_radius(btn, RADIUS_SM, 0);
 	lv_obj_set_style_bg_color(btn, theme_color(THEME_TEXT), LV_STATE_PRESSED);
 	lv_obj_set_style_bg_opa(btn, LV_OPA_20, LV_STATE_PRESSED);
@@ -28,7 +28,7 @@ static lv_obj_t *icon_button(lv_obj_t *parent, const char *symbol)
 	lv_obj_t *glyph = lv_label_create(btn);
 	lv_label_set_text(glyph, symbol);
 	lv_obj_set_style_text_color(glyph, theme_color(THEME_TEXT), 0);
-	lv_obj_set_style_text_font(glyph, &lv_font_montserrat_18, 0);
+	lv_obj_set_style_text_font(glyph, &lv_font_montserrat_24, 0);
 	lv_obj_center(glyph);
 	return btn;
 }
@@ -53,7 +53,7 @@ lv_obj_t *app_header_create(lv_obj_t *parent, const char *title,
 		lv_obj_t *lbl = lv_label_create(bar);
 		lv_label_set_text(lbl, title);
 		lv_obj_set_style_text_color(lbl, theme_color(THEME_TEXT), 0);
-		lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
+		lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
 		lv_obj_center(lbl);
 	}
 

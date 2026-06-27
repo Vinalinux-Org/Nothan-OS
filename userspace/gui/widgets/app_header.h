@@ -3,7 +3,7 @@
 
 #include "lvgl/lvgl.h"
 
-#define APP_HEADER_HEIGHT  48
+#define APP_HEADER_HEIGHT  60
 
 /*
  * app_header_create() - Top bar for an app screen: a back chevron on the

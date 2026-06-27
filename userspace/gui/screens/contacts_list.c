@@ -16,9 +16,9 @@
 #include "../widgets/avatar.h"
 #include "../services/contacts.h"
 
-#define SEARCH_H   40
-#define ROW_H      60
-#define AVATAR_SZ  40
+#define SEARCH_H   48
+#define ROW_H      84
+#define AVATAR_SZ  60
 
 /* The scrollable list + its search box, rebuilt whenever the contacts
  * change (search edit, or returning here after an add/edit/delete). */
@@ -80,7 +80,7 @@ static void add_group_header(lv_obj_t *list, char letter)
 	lv_obj_t *lbl = lv_label_create(list);
 	lv_label_set_text(lbl, s);
 	lv_obj_set_style_text_color(lbl, theme_color(THEME_ACCENT_2), 0);
-	lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+	lv_obj_set_style_text_font(lbl, &lv_font_montserrat_18, 0);
 	lv_obj_set_style_pad_left(lbl, 8, 0);
 	lv_obj_set_style_pad_top(lbl, 8, 0);
 }
@@ -101,7 +101,7 @@ static void add_row(lv_obj_t *list, const struct contact *c, int idx)
 	lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 	lv_obj_add_event_cb(row, on_row, LV_EVENT_CLICKED, (void *)(long)idx);
 
-	avatar_create(row, c->name[0], AVATAR_SZ, &lv_font_montserrat_18);
+	avatar_create(row, c->name[0], AVATAR_SZ, &lv_font_montserrat_28);
 
 	/* Name over phone, stacked, taking the remaining width. */
 	lv_obj_t *col = lv_obj_create(row);
@@ -111,18 +111,19 @@ static void add_row(lv_obj_t *list, const struct contact *c, int idx)
 	lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START,
 			      LV_FLEX_ALIGN_START);
+	lv_obj_set_style_pad_row(col, 4, 0);	/* gap between name and phone */
 	lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
 	lv_obj_clear_flag(col, LV_OBJ_FLAG_CLICKABLE);
 
 	lv_obj_t *name = lv_label_create(col);
 	lv_label_set_text(name, c->name);
 	lv_obj_set_style_text_color(name, theme_color(THEME_TEXT), 0);
-	lv_obj_set_style_text_font(name, &lv_font_montserrat_16, 0);
+	lv_obj_set_style_text_font(name, &lv_font_montserrat_20, 0);
 
 	lv_obj_t *phone = lv_label_create(col);
 	lv_label_set_text(phone, c->phone);
 	lv_obj_set_style_text_color(phone, theme_color(THEME_SUBTEXT), 0);
-	lv_obj_set_style_text_font(phone, &lv_font_montserrat_12, 0);
+	lv_obj_set_style_text_font(phone, &lv_font_montserrat_16, 0);
 }
 
 /* (Re)fill the list with contacts whose name or phone matches @filter,
@@ -191,7 +192,7 @@ static void build_search(lv_obj_t *parent)
 	lv_obj_set_style_radius(search, SEARCH_H / 2, 0);
 	lv_obj_set_style_border_width(search, 0, 0);
 	lv_obj_set_style_text_color(search, theme_color(THEME_TEXT), 0);
-	lv_obj_set_style_text_font(search, &lv_font_montserrat_14, 0);
+	lv_obj_set_style_text_font(search, &lv_font_montserrat_18, 0);
 	lv_obj_set_style_text_color(search, theme_color(THEME_SUBTEXT),
 				    LV_PART_TEXTAREA_PLACEHOLDER);
 	lv_obj_add_event_cb(search, on_search_changed, LV_EVENT_VALUE_CHANGED, NULL);
@@ -218,7 +219,15 @@ void contacts_list_create(lv_obj_t *screen, void *arg)
 	lv_obj_align(list_obj, LV_ALIGN_TOP_MID, 0, list_top);
 	lv_obj_set_style_pad_hor(list_obj, 12, 0);
 	lv_obj_set_scroll_dir(list_obj, LV_DIR_VER);
+	lv_obj_clear_flag(list_obj, LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM);
 	lv_obj_set_scrollbar_mode(list_obj, LV_SCROLLBAR_MODE_AUTO);
+	/* remove_style_all() stripped the default scrollbar style — restyle it so
+	 * the bar is visible (otherwise it scrolls with no indicator). */
+	lv_obj_set_style_bg_color(list_obj, theme_color(THEME_SUBTEXT), LV_PART_SCROLLBAR);
+	lv_obj_set_style_bg_opa(list_obj, LV_OPA_70, LV_PART_SCROLLBAR);
+	lv_obj_set_style_width(list_obj, 4, LV_PART_SCROLLBAR);
+	lv_obj_set_style_radius(list_obj, 2, LV_PART_SCROLLBAR);
+	lv_obj_set_style_pad_right(list_obj, 2, LV_PART_SCROLLBAR);
 	lv_obj_set_flex_flow(list_obj, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(list_obj, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
 			      LV_FLEX_ALIGN_START);

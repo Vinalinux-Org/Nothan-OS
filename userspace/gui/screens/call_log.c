@@ -20,8 +20,8 @@
 #include "../widgets/avatar.h"
 #include "../services/telephony.h"
 
-#define ROW_H      60
-#define AVATAR_SZ  40
+#define ROW_H      84
+#define AVATAR_SZ  60
 
 static lv_obj_t *list_obj;
 
@@ -76,7 +76,7 @@ static void add_row(lv_obj_t *list, const struct call_log_entry *en, int idx)
 	lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 	lv_obj_add_event_cb(row, on_row, LV_EVENT_CLICKED, (void *)(long)idx);
 
-	avatar_create(row, title[0], AVATAR_SZ, &lv_font_montserrat_18);
+	avatar_create(row, title[0], AVATAR_SZ, &lv_font_montserrat_28);
 
 	lv_obj_t *col = lv_obj_create(row);
 	lv_obj_remove_style_all(col);
@@ -85,6 +85,7 @@ static void add_row(lv_obj_t *list, const struct call_log_entry *en, int idx)
 	lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START,
 			      LV_FLEX_ALIGN_START);
+	lv_obj_set_style_pad_row(col, 4, 0);	/* gap between name and subtitle */
 	lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
 	lv_obj_clear_flag(col, LV_OBJ_FLAG_CLICKABLE);
 
@@ -92,20 +93,20 @@ static void add_row(lv_obj_t *list, const struct call_log_entry *en, int idx)
 	lv_label_set_text(name, title);
 	lv_obj_set_style_text_color(name, theme_color(missed ? THEME_DANGER
 							     : THEME_TEXT), 0);
-	lv_obj_set_style_text_font(name, &lv_font_montserrat_16, 0);
+	lv_obj_set_style_text_font(name, &lv_font_montserrat_20, 0);
 
 	char sub[40];
 	fmt_subtitle(en, sub, sizeof(sub));
 	lv_obj_t *subl = lv_label_create(col);
 	lv_label_set_text(subl, sub);
 	lv_obj_set_style_text_color(subl, theme_color(THEME_SUBTEXT), 0);
-	lv_obj_set_style_text_font(subl, &lv_font_montserrat_12, 0);
+	lv_obj_set_style_text_font(subl, &lv_font_montserrat_16, 0);
 
 	/* A small call glyph on the right hints "tap to call back". */
 	lv_obj_t *cg = lv_label_create(row);
 	lv_label_set_text(cg, LV_SYMBOL_CALL);
 	lv_obj_set_style_text_color(cg, theme_color(THEME_ACCENT_2), 0);
-	lv_obj_set_style_text_font(cg, &lv_font_montserrat_16, 0);
+	lv_obj_set_style_text_font(cg, &lv_font_montserrat_24, 0);
 }
 
 static void populate(void)
@@ -119,7 +120,7 @@ static void populate(void)
 		lv_obj_t *empty = lv_label_create(list_obj);
 		lv_label_set_text(empty, "No recent calls");
 		lv_obj_set_style_text_color(empty, theme_color(THEME_SUBTEXT), 0);
-		lv_obj_set_style_text_font(empty, &lv_font_montserrat_16, 0);
+		lv_obj_set_style_text_font(empty, &lv_font_montserrat_18, 0);
 		lv_obj_set_style_pad_top(empty, 24, 0);
 		return;
 	}
@@ -150,7 +151,13 @@ void call_log_create(lv_obj_t *screen, void *arg)
 	lv_obj_align(list_obj, LV_ALIGN_TOP_MID, 0, list_top);
 	lv_obj_set_style_pad_hor(list_obj, 12, 0);
 	lv_obj_set_scroll_dir(list_obj, LV_DIR_VER);
+	lv_obj_clear_flag(list_obj, LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM);
 	lv_obj_set_scrollbar_mode(list_obj, LV_SCROLLBAR_MODE_AUTO);
+	lv_obj_set_style_bg_color(list_obj, theme_color(THEME_SUBTEXT), LV_PART_SCROLLBAR);
+	lv_obj_set_style_bg_opa(list_obj, LV_OPA_70, LV_PART_SCROLLBAR);
+	lv_obj_set_style_width(list_obj, 4, LV_PART_SCROLLBAR);
+	lv_obj_set_style_radius(list_obj, 2, LV_PART_SCROLLBAR);
+	lv_obj_set_style_pad_right(list_obj, 2, LV_PART_SCROLLBAR);
 	lv_obj_set_flex_flow(list_obj, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(list_obj, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
 			      LV_FLEX_ALIGN_START);

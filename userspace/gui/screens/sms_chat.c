@@ -19,7 +19,7 @@
 #include "../widgets/nav_bar.h"
 #include "../services/messages.h"
 
-#define INPUT_H     56
+#define INPUT_H     68
 #define BUBBLE_MAXW 240
 
 static int        chat_idx;
@@ -73,7 +73,7 @@ static void add_bubble(lv_obj_t *list, const struct sms_message *m)
 	lv_obj_set_style_max_width(txt, BUBBLE_MAXW, 0);
 	lv_label_set_text(txt, m->text);
 	lv_obj_set_style_text_color(txt, theme_color(THEME_TEXT), 0);
-	lv_obj_set_style_text_font(txt, &lv_font_montserrat_14, 0);
+	lv_obj_set_style_text_font(txt, &lv_font_montserrat_20, 0);
 }
 
 /* Rebuild every bubble from the store and scroll to the newest. */
@@ -113,6 +113,25 @@ static void on_screen_loaded(lv_event_t *e)
 	rebuild_thread();          /* show anything received while away */
 }
 
+/* Keyboard opening: shrink the thread so its bottom sits above the lifted
+ * input bar (which floats just over the keyboard), then pin to the newest
+ * message so it isn't hidden behind the keyboard. */
+static void on_input_focus(lv_event_t *e)
+{
+	(void)e;
+	lv_obj_set_height(chat_list,
+			  SCREEN_H - APP_HEADER_HEIGHT - GUI_KEYBOARD_HEIGHT - INPUT_H);
+	lv_obj_update_layout(chat_list);
+	lv_obj_scroll_by(chat_list, 0, -lv_obj_get_scroll_bottom(chat_list), LV_ANIM_OFF);
+}
+
+static void on_input_blur(lv_event_t *e)
+{
+	(void)e;
+	lv_obj_set_height(chat_list,
+			  SCREEN_H - APP_HEADER_HEIGHT - NAV_BAR_HEIGHT - INPUT_H);
+}
+
 static lv_obj_t *build_input_bar(lv_obj_t *parent)
 {
 	lv_obj_t *bar = lv_obj_create(parent);
@@ -131,14 +150,17 @@ static lv_obj_t *build_input_bar(lv_obj_t *parent)
 	chat_input = lv_textarea_create(bar);
 	lv_textarea_set_one_line(chat_input, true);
 	lv_textarea_set_placeholder_text(chat_input, "Message");
-	lv_obj_set_height(chat_input, 40);
+	lv_obj_set_height(chat_input, 52);
 	lv_obj_set_flex_grow(chat_input, 1);
+	/* Keep the caret solid (no blink) so the bigger font's caret doesn't
+	 * jitter the line vertically on each blink frame. */
+	lv_obj_set_style_anim_duration(chat_input, 0, LV_PART_CURSOR);
 	lv_obj_set_style_bg_color(chat_input, theme_color(THEME_BG), 0);
 	lv_obj_set_style_bg_opa(chat_input, LV_OPA_COVER, 0);
 	lv_obj_set_style_radius(chat_input, 20, 0);
 	lv_obj_set_style_border_width(chat_input, 0, 0);
 	lv_obj_set_style_text_color(chat_input, theme_color(THEME_TEXT), 0);
-	lv_obj_set_style_text_font(chat_input, &lv_font_montserrat_14, 0);
+	lv_obj_set_style_text_font(chat_input, &lv_font_montserrat_20, 0);
 	lv_obj_set_style_text_color(chat_input, theme_color(THEME_SUBTEXT),
 				    LV_PART_TEXTAREA_PLACEHOLDER);
 
@@ -155,10 +177,12 @@ static lv_obj_t *build_input_bar(lv_obj_t *parent)
 	lv_obj_t *glyph = lv_label_create(send);
 	lv_label_set_text(glyph, LV_SYMBOL_UPLOAD);
 	lv_obj_set_style_text_color(glyph, theme_color(THEME_TEXT), 0);
-	lv_obj_set_style_text_font(glyph, &lv_font_montserrat_16, 0);
+	lv_obj_set_style_text_font(glyph, &lv_font_montserrat_20, 0);
 	lv_obj_center(glyph);
 
 	gui_keyboard_attach(chat_input, LV_KEYBOARD_MODE_TEXT_LOWER);
+	lv_obj_add_event_cb(chat_input, on_input_focus, LV_EVENT_FOCUSED, NULL);
+	lv_obj_add_event_cb(chat_input, on_input_blur, LV_EVENT_DEFOCUSED, NULL);
 	return bar;
 }
 
@@ -186,7 +210,13 @@ void sms_chat_create(lv_obj_t *screen, void *arg)
 	lv_obj_set_style_pad_ver(chat_list, 8, 0);
 	lv_obj_set_style_pad_row(chat_list, 10, 0);
 	lv_obj_set_scroll_dir(chat_list, LV_DIR_VER);
+	lv_obj_clear_flag(chat_list, LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM);
 	lv_obj_set_scrollbar_mode(chat_list, LV_SCROLLBAR_MODE_AUTO);
+	lv_obj_set_style_bg_color(chat_list, theme_color(THEME_SUBTEXT), LV_PART_SCROLLBAR);
+	lv_obj_set_style_bg_opa(chat_list, LV_OPA_70, LV_PART_SCROLLBAR);
+	lv_obj_set_style_width(chat_list, 4, LV_PART_SCROLLBAR);
+	lv_obj_set_style_radius(chat_list, 2, LV_PART_SCROLLBAR);
+	lv_obj_set_style_pad_right(chat_list, 2, LV_PART_SCROLLBAR);
 	lv_obj_set_flex_flow(chat_list, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(chat_list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
 			      LV_FLEX_ALIGN_START);

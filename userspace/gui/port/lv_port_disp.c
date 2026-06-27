@@ -96,8 +96,12 @@ void lv_port_disp_init(void)
 	lv_display_t *disp = lv_display_create(phys_w, phys_h);
 	lv_display_set_rotation(disp, LV_DISPLAY_ROTATION_270);
 	lv_display_set_flush_cb(disp, flush_cb);
+	/* Tell LVGL the EXACT one-frame size (NOT sizeof, which includes the
+	 * guard slack) — otherwise LVGL renders a taller-than-screen area to
+	 * fill the bigger buffer and the rotate reads past the frame. The slack
+	 * beyond this size stays a pure guard for the boundary access. */
 	lv_display_set_buffers(disp, draw_buf_1, NULL,
-			       sizeof(draw_buf_1), LV_DISPLAY_RENDER_MODE_PARTIAL);
+			       LOG_W * LOG_H * 2, LV_DISPLAY_RENDER_MODE_PARTIAL);
 
 	{
 		char m[96];

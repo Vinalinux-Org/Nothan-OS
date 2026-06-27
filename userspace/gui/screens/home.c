@@ -18,7 +18,7 @@
 #define STATUS_H   STATUS_BAR_HEIGHT
 #define SEARCH_H   40
 #define DOCK_H     76
-#define DOCK_FLOAT 8	/* gap between the floating dock and the nav bar */
+#define DOCK_FLOAT 18	/* gap between the floating dock and the nav bar */
 
 /* The scrollable app grid, kept so the demo sweep can reach it without
  * threading a handle back through the nav builder signature. */
@@ -160,6 +160,10 @@ void home_create(lv_obj_t *parent, void *arg)
 	lv_obj_align(grid, LV_ALIGN_TOP_MID, 0, grid_top);
 	lv_obj_set_style_pad_ver(grid, 8, 0);
 	lv_obj_set_scroll_dir(grid, LV_DIR_VER);
+	/* No elastic over-scroll / momentum fling: the over-scroll path trips a
+	 * NULL deref in this LVGL build when dragged past the end. Plain clamped
+	 * scrolling is fine for a launcher grid. */
+	lv_obj_clear_flag(grid, LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM);
 	/* AUTO: shown whenever the list overflows. MODE_ACTIVE would only
 	 * draw while a touch indev is actively scrolling — and there is no
 	 * touch yet (HDMI output), nor does code-driven scrolling count, so

@@ -3,7 +3,7 @@
 
 #include "lvgl/lvgl.h"
 
-#define NAV_BAR_HEIGHT  40
+#define NAV_BAR_HEIGHT  56
 
 /*
  * nav_bar_create() - System-wide Android-style 3-button nav at the

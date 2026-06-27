@@ -12,7 +12,7 @@
 #include "../widgets/nav_bar.h"
 #include "../services/telephony.h"
 
-#define KEY_SZ  66	/* circular dial-key diameter */
+#define KEY_SZ  80	/* circular dial-key diameter */
 
 /* Even 3-column × 4-row grid (iPhone-style dial pad). */
 static int32_t kp_col_dsc[] = { LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_FR(1),
@@ -96,13 +96,13 @@ static void keypad_btn(lv_obj_t *grid, const char *digit, const char *letters,
 	lv_obj_t *d = lv_label_create(key);
 	lv_label_set_text(d, digit);
 	lv_obj_set_style_text_color(d, theme_color(THEME_TEXT), 0);
-	lv_obj_set_style_text_font(d, &lv_font_montserrat_24, 0);
+	lv_obj_set_style_text_font(d, &lv_font_montserrat_28, 0);
 
 	if (letters && letters[0]) {
 		lv_obj_t *l = lv_label_create(key);
 		lv_label_set_text(l, letters);
 		lv_obj_set_style_text_color(l, theme_color(THEME_SUBTEXT), 0);
-		lv_obj_set_style_text_font(l, &lv_font_montserrat_12, 0);
+		lv_obj_set_style_text_font(l, &lv_font_montserrat_14, 0);
 	}
 }
 
@@ -110,7 +110,7 @@ static lv_obj_t *round_button(lv_obj_t *parent, const char *symbol, uint32_t col
 {
 	lv_obj_t *btn = lv_button_create(parent);
 	lv_obj_remove_style_all(btn);
-	lv_obj_set_size(btn, 64, 64);
+	lv_obj_set_size(btn, 84, 84);
 	lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0);
 	lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
 	lv_obj_set_style_bg_color(btn, theme_color(color), 0);
@@ -118,7 +118,7 @@ static lv_obj_t *round_button(lv_obj_t *parent, const char *symbol, uint32_t col
 	lv_obj_t *glyph = lv_label_create(btn);
 	lv_label_set_text(glyph, symbol);
 	lv_obj_set_style_text_color(glyph, theme_color(THEME_TEXT), 0);
-	lv_obj_set_style_text_font(glyph, &lv_font_montserrat_24, 0);
+	lv_obj_set_style_text_font(glyph, &lv_font_montserrat_28, 0);
 	lv_obj_center(glyph);
 	return btn;
 }
@@ -146,29 +146,30 @@ void dialer_create(lv_obj_t *screen, void *arg)
 	num_label = lv_label_create(screen);
 	lv_label_set_text(num_label, num_buf);
 	lv_obj_set_style_text_color(num_label, theme_color(THEME_TEXT), 0);
-	lv_obj_set_style_text_font(num_label, &lv_font_montserrat_24, 0);
+	lv_obj_set_style_text_font(num_label, &lv_font_montserrat_28, 0);
 	lv_obj_align(num_label, LV_ALIGN_TOP_MID, 0, APP_HEADER_HEIGHT + 36);
 
-	/* Even 4-row × 3-column dial grid, shifted lower for iPhone-style layout. */
+	/* Even 4-row × 3-column dial grid, wider rows so the bigger keys fill the
+	 * space and the pad reaches lower toward the call button. */
 	lv_obj_t *grid = lv_obj_create(screen);
 	lv_obj_remove_style_all(grid);
-	lv_obj_set_size(grid, lv_pct(84), 4 * KEY_SZ + 36);
-	lv_obj_align(grid, LV_ALIGN_TOP_MID, 0, APP_HEADER_HEIGHT + 120);
+	lv_obj_set_size(grid, lv_pct(90), 4 * KEY_SZ + 48);
+	lv_obj_align(grid, LV_ALIGN_TOP_MID, 0, APP_HEADER_HEIGHT + 100);
 	lv_obj_set_grid_dsc_array(grid, kp_col_dsc, kp_row_dsc);
 	lv_obj_clear_flag(grid, LV_OBJ_FLAG_SCROLLABLE);
 
 	for (int i = 0; i < (int)(sizeof(keys) / sizeof(keys[0])); i++)
 		keypad_btn(grid, keys[i].digit, keys[i].letters, i / 3, i % 3);
 
-	/* Call button centered above the nav bar, backspace to its right. */
+	/* Call button centered, lifted well above the nav bar; backspace beside. */
 	lv_obj_t *call = round_button(screen, LV_SYMBOL_CALL, THEME_SUCCESS);
-	lv_obj_align(call, LV_ALIGN_BOTTOM_MID, 0, -(NAV_BAR_HEIGHT + 20));
+	lv_obj_align(call, LV_ALIGN_BOTTOM_MID, 0, -(NAV_BAR_HEIGHT + 52));
 	lv_obj_add_event_cb(call, on_call, LV_EVENT_CLICKED, NULL);
 
 	lv_obj_t *back = lv_button_create(screen);
 	lv_obj_remove_style_all(back);
-	lv_obj_set_size(back, 48, 48);
-	lv_obj_align(back, LV_ALIGN_BOTTOM_MID, 96, -(NAV_BAR_HEIGHT + 28));
+	lv_obj_set_size(back, 56, 56);
+	lv_obj_align(back, LV_ALIGN_BOTTOM_MID, 110, -(NAV_BAR_HEIGHT + 66));
 	lv_obj_set_style_bg_color(back, theme_color(THEME_TEXT), LV_STATE_PRESSED);
 	lv_obj_set_style_bg_opa(back, LV_OPA_10, LV_STATE_PRESSED);
 	lv_obj_set_style_radius(back, LV_RADIUS_CIRCLE, 0);

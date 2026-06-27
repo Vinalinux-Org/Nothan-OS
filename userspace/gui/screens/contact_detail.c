@@ -90,7 +90,7 @@ static lv_obj_t *action_button(lv_obj_t *parent, const char *symbol,
 	lv_obj_t *lbl = lv_label_create(btn);
 	lv_label_set_text_fmt(lbl, "%s  %s", symbol, text);
 	lv_obj_set_style_text_color(lbl, theme_color(THEME_TEXT), 0);
-	lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
+	lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
 	lv_obj_center(lbl);
 	return btn;
 }
@@ -119,7 +119,7 @@ static void rebuild(lv_obj_t *screen)
 	lv_label_set_text_fmt(phone, "%s  %s", LV_SYMBOL_CALL,
 			      c ? c->phone : "--");
 	lv_obj_set_style_text_color(phone, theme_color(THEME_SUBTEXT), 0);
-	lv_obj_set_style_text_font(phone, &lv_font_montserrat_16, 0);
+	lv_obj_set_style_text_font(phone, &lv_font_montserrat_20, 0);
 	lv_obj_align_to(phone, name, LV_ALIGN_OUT_BOTTOM_MID, 0, 12);
 
 	/* Call / SMS row, centered above the Delete button. */
@@ -152,7 +152,7 @@ static void rebuild(lv_obj_t *screen)
 	lv_obj_t *dlbl = lv_label_create(del);
 	lv_label_set_text_fmt(dlbl, "%s  Delete contact", LV_SYMBOL_TRASH);
 	lv_obj_set_style_text_color(dlbl, theme_color(THEME_TEXT), 0);
-	lv_obj_set_style_text_font(dlbl, &lv_font_montserrat_16, 0);
+	lv_obj_set_style_text_font(dlbl, &lv_font_montserrat_20, 0);
 	lv_obj_center(dlbl);
 }
 

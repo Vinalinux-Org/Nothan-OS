@@ -7,8 +7,8 @@
 #include "nav_bar.h"
 #include "../theme/theme.h"
 
-#define HOME_SIZE     14
-#define RECENTS_SIZE  14
+#define HOME_SIZE     18
+#define RECENTS_SIZE  18
 
 static lv_obj_t *make_button_slot(lv_obj_t *parent, lv_event_cb_t cb)
 {
@@ -18,7 +18,7 @@ static lv_obj_t *make_button_slot(lv_obj_t *parent, lv_event_cb_t cb)
 	 * then Back/Home drive the navigation stack with no further change. */
 	lv_obj_t *slot = lv_button_create(parent);
 	lv_obj_remove_style_all(slot);
-	lv_obj_set_size(slot, 48, NAV_BAR_HEIGHT - 8);
+	lv_obj_set_size(slot, 72, NAV_BAR_HEIGHT - 6);
 	lv_obj_set_style_radius(slot, RADIUS_SM, 0);
 	lv_obj_set_style_bg_color(slot, theme_color(THEME_TEXT), LV_STATE_PRESSED);
 	lv_obj_set_style_bg_opa(slot, LV_OPA_20, LV_STATE_PRESSED);
@@ -50,7 +50,7 @@ lv_obj_t *nav_bar_create(lv_obj_t *parent, lv_event_cb_t on_back,
 	lv_obj_t *back = lv_label_create(back_slot);
 	lv_label_set_text(back, LV_SYMBOL_LEFT);
 	lv_obj_set_style_text_color(back, theme_color(THEME_TEXT), 0);
-	lv_obj_set_style_text_font(back, &lv_font_montserrat_18, 0);
+	lv_obj_set_style_text_font(back, &lv_font_montserrat_24, 0);
 	lv_obj_center(back);
 
 	/* Home: circle outline */

@@ -17,7 +17,7 @@
 #include "../theme/theme.h"
 #include "../port/lv_port_indev.h"
 
-#define KB_HEIGHT  260
+#define KB_HEIGHT  GUI_KEYBOARD_HEIGHT
 
 /*
  * iOS-style maps. LVGL 9 has no LV_SYMBOL_SHIFT — mode switch is done via
@@ -98,13 +98,21 @@ static void ta_focused_cb(lv_event_t *e)
 static void ta_gone_cb(lv_event_t *e)
 {
 	lv_event_code_t code = lv_event_get_code(e);
+	lv_obj_t       *ta   = lv_event_get_target(e);
+
 	/* DEFOCUSED: keyboard dismissed by losing focus — restore bar. */
 	if (code == LV_EVENT_DEFOCUSED && lift_obj)
 		lv_obj_align(lift_obj, LV_ALIGN_BOTTOM_MID, 0, lift_y_closed);
 	lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
-	/* DELETE: screen tearing down — clear pointer, don't move dying widget. */
-	if (code == LV_EVENT_DELETE)
+	/* DELETE: the textarea's screen is tearing down. Drop every dangling
+	 * reference to it — the keyboard keeps a textarea pointer internally and
+	 * would use-after-free it on the next focus/keypress (set_textarea even
+	 * touches the OLD textarea), and lift_obj may point into this screen. */
+	if (code == LV_EVENT_DELETE) {
 		lift_obj = NULL;
+		if (kb && lv_keyboard_get_textarea(kb) == ta)
+			lv_keyboard_set_textarea(kb, NULL);
+	}
 }
 
 void gui_keyboard_init(void)

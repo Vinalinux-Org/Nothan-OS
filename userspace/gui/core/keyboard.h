@@ -3,6 +3,10 @@
 
 #include "lvgl/lvgl.h"
 
+/* On-screen keyboard height (lv_layer_top, bottom-aligned). Screens that must
+ * keep content visible above it use this to size/scroll when it opens. */
+#define GUI_KEYBOARD_HEIGHT  260
+
 /*
  * gui_keyboard_init() — create the singleton on-screen keyboard on
  * lv_layer_top(). Call once from nav_init().
