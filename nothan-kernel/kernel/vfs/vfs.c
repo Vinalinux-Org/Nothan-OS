@@ -217,6 +217,13 @@ static struct inode *vfs_create_path(const char *pathname)
  * preventing two concurrent vfs_open calls from picking the same fd. */
 #define FD_RESERVED  ((struct file *)(uintptr_t)0x1)
 
+/* fd 0/1/2 are stdin/stdout/stderr — the UART, special-cased by NUMBER in
+ * sys_read (fd 0) and sys_writefile (fd 1). Never hand those numbers to a real
+ * file: if we did, a write to that file would silently go to the UART instead
+ * (it does, in the monkey build where /dev/input0 is not opened, so fd 1 is
+ * free and a persistence save lands on it). Allocate file fds from 3 up. */
+#define FD_FIRST  3
+
 int vfs_open(const char *pathname, int flags)
 {
 	/*
@@ -227,7 +234,7 @@ int vfs_open(const char *pathname, int flags)
 	unsigned long cpsr;
 	int fd = -1;
 	__asm__ __volatile__ ("mrs %0, cpsr\n\tcpsid i" : "=r"(cpsr) : : "memory");
-	for (int i = 0; i < MAX_FDS; i++) {
+	for (int i = FD_FIRST; i < MAX_FDS; i++) {
 		if (!fd_table[i]) {
 			fd_table[i] = FD_RESERVED;
 			fd = i;
