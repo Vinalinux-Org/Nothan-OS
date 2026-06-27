@@ -14,8 +14,21 @@
 /*=========================
  * STDLIB
  *=========================*/
-/* Use LVGL built-in allocator — no need for userspace malloc */
+/* Use LVGL built-in allocator — no need for userspace malloc.
+ * On the host simulator (LV_SIM_HOST) use the C library malloc instead, so
+ * each LVGL allocation is a distinct heap block and ASan/Valgrind can catch
+ * layer/draw-buffer over-runs that the built-in pool (one static array) hides. */
+/* SIM_BUILTIN forces the host to use the SAME built-in TLSF pool as hardware
+ * (one static work_mem array), not CLIB malloc. Built with -fsanitize=address
+ * this is the most HW-faithful host test there is: ASan red-zones the work_mem
+ * global, so a write past the pool — the exact Data Abort signature (DFAR =
+ * __bss_end) — is reported as a global-buffer-overflow with file:line, while
+ * LV_USE_ASSERT_MEM_INTEGRITY catches TLSF metadata corruption CLIB can't. */
+#if defined(LV_SIM_HOST) && !defined(SIM_BUILTIN)
+#define LV_USE_STDLIB_MALLOC    LV_STDLIB_CLIB
+#else
 #define LV_USE_STDLIB_MALLOC    LV_STDLIB_BUILTIN
+#endif
 #define LV_USE_STDLIB_STRING    LV_STDLIB_BUILTIN
 #define LV_USE_STDLIB_SPRINTF   LV_STDLIB_BUILTIN
 
@@ -38,6 +51,13 @@
 #define LV_MEM_SIZE (512 * 1024U)
 #define LV_MEM_POOL_EXPAND_SIZE 0
 #define LV_MEM_ADR 0
+/* SIM_GUARD: back the TLSF pool with a guard-paged mmap so a write past the
+ * pool top faults exactly like hardware's first unmapped page above __bss_end
+ * — catches FAR over-runs that ASan's small redzones miss. (Host repro only.) */
+#ifdef SIM_GUARD
+#define LV_MEM_POOL_INCLUDE "nothan_guard.h"
+#define LV_MEM_POOL_ALLOC   nothan_guarded_alloc
+#endif
 
 /*=========================
  * HAL
@@ -113,16 +133,28 @@
 #define LV_USE_ASSERT_NULL          1
 #define LV_USE_ASSERT_MALLOC        1
 #define LV_USE_ASSERT_STYLE         0	/* DIAG (off): catch corrupted style metadata */
+#ifdef SIM_BUILTIN
+#define LV_USE_ASSERT_MEM_INTEGRITY 1	/* host TLSF check on every alloc (SIM_BUILTIN repro) */
+#else
 #define LV_USE_ASSERT_MEM_INTEGRITY 0	/* DIAG (off): TLSF check on alloc → catch pool overrun */
+#endif
 #define LV_USE_ASSERT_OBJ           0	/* DIAG (off): validate obj sentinel on access */
 #define LV_ASSERT_HANDLER_INCLUDE   <stdint.h>
 /* Print a loud marker instead of spinning silently. The [Error] file:line
  * logged by LVGL just above this (LV_LOG_USE_FILE_LINE) names the exact
  * assert — style/mem-integrity/obj/null/malloc — so corruption is pinned at
  * its source instead of crashing later in get_prop_core. */
+#ifdef SIM_BUILTIN
+/* On the host repro, abort() instead of spinning so ASan/the core dump give a
+ * symbolised backtrace pinpointing the alloc that tripped the integrity check. */
+#define LV_ASSERT_HANDLER  { extern void gui_logf(const char *, ...); extern void abort(void); \
+                             gui_logf("\n*** LVGL ASSERT FIRED — see [Error] file:line above ***\n"); \
+                             abort(); }
+#else
 #define LV_ASSERT_HANDLER  { extern void gui_logf(const char *, ...); \
                              gui_logf("\n*** LVGL ASSERT FIRED — see [Error] file:line above ***\n"); \
                              for(;;); }
+#endif
 
 #define LV_USE_REFR_DEBUG           0
 #define LV_USE_LAYER_DEBUG          0

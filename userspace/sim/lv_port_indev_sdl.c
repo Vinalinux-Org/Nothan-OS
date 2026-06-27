@@ -9,7 +9,9 @@
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 
-#include <SDL2/SDL.h>
+#ifndef SIM_HEADLESS
+#include <SDL2/SDL.h>		/* SIM_HEADLESS (-m32 repro): driven by sim_indev_inject, no SDL */
+#endif
 #include "lvgl/lvgl.h"
 #include "port/lv_port_indev.h"   /* found via -I$(ROOT)/gui */
 
@@ -46,6 +48,20 @@ void sim_register_ta(lv_obj_t *ta)
 	lv_obj_add_event_cb(ta, ta_event_cb, LV_EVENT_DELETE,    NULL);
 }
 
+/*
+ * Programmatic pointer injection for the headless auto-tap harness
+ * (sim_main.c, SIM_AUTOTAP build). Writes the same state a real SDL mouse
+ * event would, so the next mouse_read_cb hands LVGL exactly that press —
+ * letting an ASan build drive a deterministic press sequence with no GUI.
+ */
+void sim_indev_inject(int32_t x, int32_t y, bool down)
+{
+	last_x  = x;
+	last_y  = y;
+	pressed = down;
+}
+
+#ifndef SIM_HEADLESS
 /* Called from the main loop's SDL_PollEvent block */
 void sim_indev_feed(const SDL_Event *e)
 {
@@ -65,10 +81,13 @@ void sim_indev_feed(const SDL_Event *e)
 			lv_textarea_delete_char(active_ta);
 	}
 }
+#endif /* SIM_HEADLESS */
 
 void lv_port_indev_init(void)
 {
+#ifndef SIM_HEADLESS
 	SDL_StartTextInput();
+#endif
 
 	mouse_indev = lv_indev_create();
 	lv_indev_set_type(mouse_indev, LV_INDEV_TYPE_POINTER);
