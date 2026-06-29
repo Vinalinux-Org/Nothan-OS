@@ -1,5 +1,7 @@
 /*
  * phone_daemon.c — SIM7600CE ↔ RPi4 relay service for NothanOS (CANONICAL)
+
+ * Written by Bui Dinh Hien <buihien29112002@gmail.com>
  *
  * Hardware:
  *   /dev/uart1  UART1  → SIM7600CE AT command port
@@ -158,7 +160,7 @@ static void pd_sleep_us(unsigned us)
 #endif
 }
 
-static int open_uart(const char *dev)
+int open_uart(const char *dev)
 {
     int fd = open(dev, O_RDWR | O_NOCTTY | O_NONBLOCK);
     return fd;   /* baud/8N1 already set by the kernel UART driver */
@@ -166,7 +168,7 @@ static int open_uart(const char *dev)
 
 /* Blocking-ish write with bounded retry (handles transient EAGAIN on a busy
  * tx FIFO). Returns 0 on full write, -1 on hard error. */
-static int write_all(int fd, const char *buf, size_t len)
+int write_all(int fd, const char *buf, size_t len)
 {
     size_t done = 0;
     int    spins = 0;
@@ -194,7 +196,7 @@ static int write_all(int fd, const char *buf, size_t len)
 
 /* SECTION 1 — String helpers + UCS2/UTF-8 codec                      */
 
-static void extract_quoted(const char *p, char *out, int out_size)
+void extract_quoted(const char *p, char *out, int out_size)
 {
     const char *q;
     int i;
@@ -233,7 +235,7 @@ static const char *parse_int(const char *p, int *out)
     return p;
 }
 
-static int is_imei_line(const char *s)
+int is_imei_line(const char *s)
 {
     int i;
 
@@ -248,7 +250,7 @@ static int is_imei_line(const char *s)
     return (s[15] == '\0');
 }
 
-static int parse_err_code(const char *p)
+int parse_err_code(const char *p)
 {
     if (p == NULL) {
         return -1;
@@ -262,7 +264,7 @@ static int parse_err_code(const char *p)
     return atoi(p);
 }
 
-static int hexv(char c)
+int hexv(char c)
 {
     if (c >= '0' && c <= '9') {
         return c - '0';
@@ -276,7 +278,7 @@ static int hexv(char c)
     return -1;
 }
 
-static int utf8_to_ucs2_hex(const char *in, char *out, int out_size)
+int utf8_to_ucs2_hex(const char *in, char *out, int out_size)
 {
     static const char H[] = "0123456789ABCDEF";
     const unsigned char *p = (const unsigned char *)in;
@@ -319,7 +321,7 @@ static int utf8_to_ucs2_hex(const char *in, char *out, int out_size)
     return o;
 }
 
-static int ucs2_hex_to_utf8(const char *in, char *out, int out_size)
+int ucs2_hex_to_utf8(const char *in, char *out, int out_size)
 {
     int o = 0;
 
@@ -372,7 +374,7 @@ static int ucs2_hex_to_utf8(const char *in, char *out, int out_size)
     return o;
 }
 
-static int looks_like_ucs2_hex(const char *s)
+int looks_like_ucs2_hex(const char *s)
 {
     int len;
 
@@ -453,7 +455,7 @@ static int parse_fixed_1dec(const char *s)
 
 /* SECTION 2 — RPi4 frame raw writer */
 
-static void fe_raw_write(const char *json)
+void fe_raw_write(const char *json)
 {
     uint8_t frame[PHONE_FRAME_MAX];
     int total;
@@ -472,7 +474,7 @@ static void fe_raw_write(const char *json)
 }
 
 /* fire-and-forget (telemetry / non-critical) */
-static void fe_send(const char *json)
+void fe_send(const char *json)
 {
     if (json == NULL) {
         return;
@@ -522,7 +524,7 @@ static rel_entry_t *outbox_alloc(void)
 }
 
 /* Inject "seq":<n> into json (before closing '}') and retransmit until ACKed. */
-static void rel_send(const char *json, int json_len)
+void rel_send(const char *json, int json_len)
 {
     unsigned long now = pd_now_ms();
     rel_entry_t  *e   = outbox_alloc();
@@ -554,7 +556,7 @@ static void rel_send(const char *json, int json_len)
     fe_raw_write(e->json);
 }
 
-static void rel_on_ack(int seq)
+void rel_on_ack(int seq)
 {
     int i;
     for (i = 0; i < OUTBOX_CAP; i++) {
@@ -567,7 +569,7 @@ static void rel_on_ack(int seq)
     printf("[pd] ACK seq=%d — no matching entry\n", seq);
 }
 
-static void rel_retransmit_tick(unsigned long now)
+void rel_retransmit_tick(unsigned long now)
 {
     int i;
     for (i = 0; i < OUTBOX_CAP; i++) {
@@ -589,7 +591,7 @@ static void rel_retransmit_tick(unsigned long now)
 }
 
 /* Replay outbox entries with seq > last_seq (on FE reconnect / HELLO). */
-static void rel_replay_after(int last_seq)
+void rel_replay_after(int last_seq)
 {
     int i;
     for (i = 0; i < OUTBOX_CAP; i++) {
@@ -604,7 +606,7 @@ static void rel_replay_after(int last_seq)
     }
 }
 
-static void send_ack(int seq)
+void send_ack(int seq)
 {
     json_builder_t b;
     char json[64];
@@ -632,7 +634,7 @@ static void fe_send_simple(const char *type)
 }
 
 /* READY + state snapshot (also used as the periodic beacon). */
-static void send_ready_snapshot(void)
+void send_ready_snapshot(void)
 {
     json_builder_t b;
     char json[PHONE_JSON_MAX];
@@ -1175,7 +1177,7 @@ static int           at_cur_kind = STEP_PLAIN;
 
 static int g_hb_fail = 0;
 
-static void sim_raw_write(const char *s, int len)
+void sim_raw_write(const char *s, int len)
 {
     if (s == NULL || len <= 0) {
         return;
@@ -1194,7 +1196,7 @@ static void sim_raw_write(const char *s, int len)
 
 /* Enqueue a step. text may be a C-string OR contain embedded NUL/Ctrl-Z, so a
  * length is given explicitly (use -1 for strlen). */
-static int at_enqueue(const char *text, int len, at_wait_t wait,
+int at_enqueue(const char *text, int len, at_wait_t wait,
                       unsigned long timeout, int kind, int ctx)
 {
     at_step_t *s;
@@ -1222,15 +1224,15 @@ static int at_enqueue(const char *text, int len, at_wait_t wait,
     return 0;
 }
 
-static int at_free_slots(void)
+int at_free_slots(void)
 {
     return AT_QUEUE_MAX - at_count;
 }
 
 /* Forward declaration (defined in SECTION 10 — init / recovery). */
-static void trigger_recover(const char *why);
+void trigger_recover(const char *why);
 
-static int at_submit(const char *cmd, unsigned long timeout)
+int at_submit(const char *cmd, unsigned long timeout)
 {
     int rc = at_enqueue(cmd, -1, WAIT_FINAL, timeout, STEP_PLAIN, -1);
     if (rc < 0) {
@@ -1242,7 +1244,7 @@ static int at_submit(const char *cmd, unsigned long timeout)
     return rc;
 }
 
-static void at_pump(void)
+void at_pump(void)
 {
     while (!at_busy && at_count > 0) {
         at_step_t *s = &at_q[at_head];
@@ -1263,15 +1265,15 @@ static void at_pump(void)
     }
 }
 
-static void handle_call_release(const char *reason);    /* fwd */
-static void at_cancel_queued_sms(void);                 /* fwd */
+void handle_call_release(const char *reason);    /* fwd */
+void at_cancel_queued_sms(void);                 /* fwd */
 static int  at_has_more_sms_result(void);               /* fwd */
-static void handle_sms_body(const char *raw);           /* fwd (needed by sms_body_hex_flush) */
+void handle_sms_body(const char *raw);           /* fwd (needed by sms_body_hex_flush) */
 
 /* Drop the next queued step if it matches `kind`. Used to cancel the SMS
  * body after its header failed — otherwise raw hex+Ctrl-Z would be written
  * to the modem as if it were an AT command, causing full pipeline desync. */
-static void at_drop_next_if(int kind)
+void at_drop_next_if(int kind)
 {
     if (at_count > 0 && at_q[at_head].kind == kind) {
         printf("[pd] dropping orphaned step kind=%d (parent failed)\n", kind);
@@ -1280,7 +1282,7 @@ static void at_drop_next_if(int kind)
     }
 }
 
-static void at_finish(int ok)
+void at_finish(int ok)
 {
     int kind = at_cur_kind;
     at_busy = 0; at_wait = WAIT_NONE; at_cur_kind = STEP_PLAIN; at_cur_ctx = -1;
@@ -1321,7 +1323,7 @@ static void at_finish(int ok)
     at_pump();
 }
 
-static int is_final_error(const char *line)
+int is_final_error(const char *line)
 {
     return strcmp(line, "ERROR") == 0 ||
            strncmp(line, "+CME ERROR:", 11) == 0 ||
@@ -1329,7 +1331,7 @@ static int is_final_error(const char *line)
 }
 
 /* Consume an AT result line (OK / ERROR / +CMGS:). Returns nothing. */
-static void at_consume(const char *line)
+void at_consume(const char *line)
 {
     if (!at_busy) {
         return;
@@ -1370,7 +1372,7 @@ static void at_consume(const char *line)
     /* WAIT_PROMPT resolves in the byte-level prompt detector. */
 }
 
-static void at_timers_tick(unsigned long now)
+void at_timers_tick(unsigned long now)
 {
     if (!at_busy || now < at_deadline) {
         return;
@@ -1411,7 +1413,7 @@ static char  g_body_hex_acc[SMS_HEX_MAX + 4];
 static int   g_body_hex_acc_len;
 static unsigned long g_body_hex_flush_ms;
 
-static int is_all_hex_line(const char *s)
+int is_all_hex_line(const char *s)
 {
     int len = 0;
     if (!s || !*s) {
@@ -1428,7 +1430,7 @@ static int is_all_hex_line(const char *s)
 }
 
 /* Flush accumulated hex body (if any) through handle_sms_body(). */
-static void sms_body_hex_flush(void)
+void sms_body_hex_flush(void)
 {
     if (g_body_hex_acc_len > 0 && g_body_pending == BODY_CMT) {
         g_body_hex_acc[g_body_hex_acc_len] = '\0';
@@ -1441,7 +1443,7 @@ static void sms_body_hex_flush(void)
     g_body_hex_flush_ms = 0;
 }
 
-static void handle_ring(void)
+void handle_ring(void)
 {
     /* Ignore RING if already in a call or dialing (call waiting is handled
      * separately via +CCWA — we log a missed call when the active call ends). */
@@ -1456,7 +1458,7 @@ static void handle_ring(void)
     fe_send_call_ring();
 }
 
-static void handle_clip(const char *line)
+void handle_clip(const char *line)
 {
     char num[CALLER_NUM_MAX];
     if (!cs.pending_clip) {
@@ -1474,7 +1476,7 @@ static void handle_clip(const char *line)
 
 /* Fallback: if CLIP never arrived before the deadline, send CALL_IN with
  * whatever number we have (possibly empty — caller withheld or no CLIP). */
-static void clip_timer_tick(unsigned long now)
+void clip_timer_tick(unsigned long now)
 {
     if (!cs.pending_clip || g_call_in_sent) {
         return;
@@ -1488,7 +1490,7 @@ static void clip_timer_tick(unsigned long now)
     fe_send_call_in(cs.caller_num);
 }
 
-static void handle_voice_call_begin(void)
+void handle_voice_call_begin(void)
 {
     cs.in_call = 1; cs.pending_clip = 0; cs.duration[0] = '\0';
     if (cs.outgoing) {
@@ -1503,13 +1505,13 @@ static void handle_voice_call_begin(void)
     }
 }
 
-static void handle_colp(void)
+void handle_colp(void)
 {
     (void)0;
 }
 
 
-static void handle_voice_call_end(const char *line)
+void handle_voice_call_end(const char *line)
 {
     const char *p = line; int i = 0;
     while (*p == ' ') {
@@ -1522,7 +1524,7 @@ static void handle_voice_call_end(const char *line)
     printf("[pd] voice call ended, duration=%s\n", cs.duration);
 }
 
-static void handle_call_release(const char *reason)
+void handle_call_release(const char *reason)
 {
     if (cs.in_call || cs.local_hangup || cs.rejected || cs.outgoing) {
         const char *initiator; const char *r = reason;
@@ -1547,14 +1549,14 @@ static void handle_call_release(const char *reason)
     g_call_in_sent = 0; g_clip_deadline = 0;
 }
 
-static void handle_clcc(const char *line)
+void handle_clcc(const char *line)
 {
     char num[CALLER_NUM_MAX];
     extract_quoted(line + 6, num, sizeof(num));
     fe_send_call_stat(num, line + 6);
 }
 
-static void handle_ccwa(const char *line)
+void handle_ccwa(const char *line)
 {
     char num[CALLER_NUM_MAX];
     extract_quoted(line + 6, num, sizeof(num));
@@ -1565,7 +1567,7 @@ static void handle_ccwa(const char *line)
     printf("[pd] CCWA from %s (will log missed on call-end)\n", num);
 }
 
-static void handle_ceer(const char *line)
+void handle_ceer(const char *line)
 {
     int code = -1;
     parse_int(line + 6, &code);
@@ -1680,7 +1682,7 @@ static void sms_ci_flush(SmsConcatIn *sc)
     sc->text[0]  = '\0';
 }
 
-static void sms_ci_tick(unsigned long now)
+void sms_ci_tick(unsigned long now)
 {
     int i;
     for (i = 0; i < SMS_CONCAT_IN_MAX; i++) {
@@ -1691,7 +1693,7 @@ static void sms_ci_tick(unsigned long now)
 }
 
 /* +CMT header → next non-empty line is the body (set pending). */
-static void handle_cmt_header(const char *line)
+void handle_cmt_header(const char *line)
 {
     /* UCS2 phone number: up to ~21 digits × 4 hex chars = 84 chars */
     char sender_raw[96]; const char *p;
@@ -1718,7 +1720,7 @@ static void handle_cmt_header(const char *line)
 }
 
 /* +CMGL / +CMGR header → next non-empty line is the body. */
-static void handle_cmgl_header(const char *line)
+void handle_cmgl_header(const char *line)
 {
     char from_raw[96]; const char *p = line + 6;
     g_body_index = 0; g_body_stat[0] = '\0'; g_body_ts[0] = '\0';
@@ -1761,7 +1763,7 @@ static void handle_cmgl_header(const char *line)
     g_body_pending = BODY_CMGL;
 }
 
-static void handle_sms_body(const char *raw)
+void handle_sms_body(const char *raw)
 {
     /* raw is the +CMT body or the accumulated UCS2 hex — both bounded by the
      * hex accumulator (SMS_HEX_MAX). Static buffer instead of malloc (no heap). */
@@ -1812,7 +1814,7 @@ static void handle_sms_body(const char *raw)
     }
 }
 
-static void handle_cmti(const char *line)
+void handle_cmti(const char *line)
 {
     char mem[8]; const char *p; int index = 0;
     extract_quoted(line + 6, mem, sizeof(mem));
@@ -1823,7 +1825,7 @@ static void handle_cmti(const char *line)
     fe_send_sms_stored(mem, index);
 }
 
-static void handle_cds(const char *line)
+void handle_cds(const char *line)
 {
     const char *p = line + 4;
     int ref = 0;
@@ -1848,7 +1850,7 @@ static void handle_cds(const char *line)
     fe_send_sms_deliver(ref, status);
 }
 
-static void handle_csq(const char *line)
+void handle_csq(const char *line)
 {
     const char *p, *comma; int rssi, ber = 0;
     p = parse_int(line + 5, &rssi);
@@ -1877,7 +1879,7 @@ static int count_commas(const char *s)
     return n;
 }
 
-static void handle_creg(const char *line)
+void handle_creg(const char *line)
 {
     const char *p = line + 6, *c1, *c2;
     int nc = count_commas(p), v1 = 0, stat = 0;
@@ -1926,7 +1928,7 @@ static void handle_creg(const char *line)
     fe_send_net_reg(stat, lac, ci);
 }
 
-static void handle_cgreg(const char *line)
+void handle_cgreg(const char *line)
 {
     const char *p = line + 7, *c1;
     int nc = count_commas(p), v1 = 0, stat = 0;
@@ -1971,7 +1973,7 @@ static void handle_cops(const char *line)
     fe_send_net_opr(name);
 }
 
-static void handle_cpin(const char *line)
+void handle_cpin(const char *line)
 {
     const char *p = line + 6;
     while (*p == ' ') p++;
@@ -2145,7 +2147,7 @@ static void handle_cgpsinfo(const char *line)
  * Classify + dispatch a SIM line that is a URC or a solicited response datum.
  * Returns 1 if handled here (do NOT feed to the AT machine), 0 otherwise.
  */
-static int dispatch_line(const char *line)
+int dispatch_line(const char *line)
 {
     /* Call lifecycle */
     if (strcmp(line, "RING") == 0)                 { handle_ring(); return 1; }
@@ -2176,7 +2178,7 @@ static int dispatch_line(const char *line)
 }
 
 /* Top-level handler for one assembled SIM line. */
-static void sim_line_handler(const char *line)
+void sim_line_handler(const char *line)
 {
     /* Suppress routine heartbeat to keep the console quiet between events. */
     if (!(at_busy && at_cur_kind == STEP_HEARTBEAT))
@@ -2236,13 +2238,13 @@ static void sim_line_handler(const char *line)
 static char sim_la[SIM_LA_CAP];
 static int  sim_la_len = 0;
 
-static void sim_la_reset(void)
+void sim_la_reset(void)
 {
     sim_la_len = 0;
     sim_la[0]  = '\0';
 }
 
-static void sim_feed(const unsigned char *buf, int n)
+void sim_feed(const unsigned char *buf, int n)
 {
     int i;
     for (i = 0; i < n; i++) {
@@ -2290,7 +2292,7 @@ static void sim_feed(const unsigned char *buf, int n)
     }
 }
 
-static void sim_read_chunk(void)
+void sim_read_chunk(void)
 {
     unsigned char buf[READ_CHUNK];
     ssize_t n;
@@ -2317,9 +2319,9 @@ static void sim_read_chunk(void)
 static unsigned char fe_buf[PHONE_FRAME_MAX * 2];
 static int           fe_buf_len = 0;
 
-static void dispatch_cmd(const char *json);   /* fwd */
+void dispatch_cmd(const char *json);   /* fwd */
 
-static void fe_parse(void)
+void fe_parse(void)
 {
     for (;;) {
         int i, magic = -1, len;
@@ -2370,7 +2372,7 @@ static void fe_parse(void)
     }
 }
 
-static void fe_read_chunk(void)
+void fe_read_chunk(void)
 {
     ssize_t n;
 
@@ -2402,7 +2404,7 @@ static void fe_read_chunk(void)
 
 /* SECTION 9 — RPi4 command handlers */
 
-static void handle_cmd_dial(const char *json)
+void handle_cmd_dial(const char *json)
 {
     char num[CALLER_NUM_MAX];
     char cmd[CALLER_NUM_MAX + 8];
@@ -2429,7 +2431,7 @@ static void handle_cmd_dial(const char *json)
     at_enqueue(cmd, -1, WAIT_FINAL, 60000, STEP_DIAL, -1);
 }
 
-static void handle_cmd_answer(void)
+void handle_cmd_answer(void)
 {
     at_submit("ATA\r", 10000);
 }
@@ -2447,7 +2449,7 @@ static void handle_cmd_answer(void)
  * down the stuck ATD step locally so the queue unblocks and release call state.
  * The VOICE CALL: END / NO CARRIER URC then lands in handle_call_release() as a
  * no-op (state already cleared). */
-static void call_terminate(int reject)
+void call_terminate(int reject)
 {
     cs.local_hangup = 1;
     if (reject) {
@@ -2466,11 +2468,11 @@ static void call_terminate(int reject)
     at_enqueue("AT+CHUP\r", -1, WAIT_FINAL, 5000, STEP_HANGUP, -1);
 }
 
-static void handle_cmd_hangup(void)
+void handle_cmd_hangup(void)
 {
     call_terminate(0);
 }
-static void handle_cmd_reject(void)
+void handle_cmd_reject(void)
 {
     call_terminate(1);
 }
@@ -2625,7 +2627,7 @@ static int sms_build_pdu_ucs2(const char *num,
 /* Drop all consecutive STEP_SMS_HDR / STEP_SMS_RESULT from queue head.
  * Stops at first non-SMS step (e.g. STEP_SMS_MODE_RESTORE / STEP_PLAIN).
  * Safe for single SMS: no-op if no more SMS steps remain. */
-static void at_cancel_queued_sms(void)
+void at_cancel_queued_sms(void)
 {
     while (at_count > 0) {
         int k = at_q[at_head].kind;
@@ -2639,7 +2641,7 @@ static void at_cancel_queued_sms(void)
 }
 
 /* Returns 1 if more STEP_SMS_RESULT are queued (i.e. this is an intermediate part). */
-static int at_has_more_sms_result(void)
+int at_has_more_sms_result(void)
 {
     int i;
     for (i = 0; i < at_count; i++) {
@@ -2650,7 +2652,7 @@ static int at_has_more_sms_result(void)
     return 0;
 }
 
-static int at_has_sms_pending(void)
+int at_has_sms_pending(void)
 {
     int i;
     if (at_busy && (at_cur_kind == STEP_SMS_HDR || at_cur_kind == STEP_SMS_RESULT
@@ -2664,7 +2666,7 @@ static int at_has_sms_pending(void)
     return 0;
 }
 
-static void handle_cmd_sms(const char *json)
+void handle_cmd_sms(const char *json)
 {
     char num[CALLER_NUM_MAX], text[SMS_TEXT_MAX];
     int  cid = -1;
@@ -2954,7 +2956,7 @@ static void handle_cmd_gps_stop(void)
 
 /* HELLO handshake — FE sends this on connect; BE replays missed criticals and
  * sends a state snapshot. */
-static void handle_cmd_hello(const char *json)
+void handle_cmd_hello(const char *json)
 {
     int fe_boot = 0;
     int last_seq = 0;
@@ -2970,7 +2972,7 @@ static void handle_cmd_hello(const char *json)
     send_ready_snapshot();
 }
 
-static void dispatch_cmd(const char *json)
+void dispatch_cmd(const char *json)
 {
     char type[32];
     int  seq = -1;
@@ -3046,7 +3048,7 @@ static unsigned long g_reopen_backoff = REOPEN_BACKOFF_MS;
 static unsigned long g_last_hb = 0;
 static unsigned long g_last_beacon = 0;
 
-static void enqueue_init(void)
+void enqueue_init(void)
 {
     at_submit("ATE0\r", 2000);
     at_submit("ATS0=0\r", 2000);
@@ -3065,14 +3067,14 @@ static void enqueue_init(void)
     cs.ucs2_mode = 0;
 }
 
-static void enqueue_state_queries(void)
+void enqueue_state_queries(void)
 {
     at_submit("AT+CPIN?\r", 3000);
     at_submit("AT+CSQ\r", 3000);
     at_submit("AT+CREG?\r", 3000);
 }
 
-static void trigger_recover(const char *why)
+void trigger_recover(const char *why)
 {
     if (g_modem_state == MODEM_RECOVER) {
         return;
@@ -3090,7 +3092,7 @@ static void trigger_recover(const char *why)
     g_reopen_at = pd_now_ms() + g_reopen_backoff;
 }
 
-static void recovery_tick(unsigned long now)
+void recovery_tick(unsigned long now)
 {
     if (g_modem_state != MODEM_RECOVER) {
         return;
@@ -3115,7 +3117,7 @@ static void recovery_tick(unsigned long now)
 }
 
 /* Detect the INITIALIZING→READY transition (queue drained, modem replied). */
-static void check_init_done(void)
+void check_init_done(void)
 {
     if (g_modem_state != MODEM_INITIALIZING) {
         return;
@@ -3135,7 +3137,7 @@ static void check_init_done(void)
     g_last_beacon = g_last_hb;
 }
 
-static void heartbeat_tick(unsigned long now)
+void heartbeat_tick(unsigned long now)
 {
     if (g_modem_state != MODEM_READY) {
         return;
@@ -3151,7 +3153,7 @@ static void heartbeat_tick(unsigned long now)
     at_enqueue("AT\r", -1, WAIT_FINAL, HB_TIMEOUT_MS, STEP_HEARTBEAT, -1);
 }
 
-static void beacon_tick(unsigned long now)
+void beacon_tick(unsigned long now)
 {
     if (now - g_last_beacon < READY_BEACON_MS) {
         return;

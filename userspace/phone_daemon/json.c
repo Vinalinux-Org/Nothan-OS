@@ -1,5 +1,7 @@
 /*
  * json.c — minimal JSON encoder / decoder for phone_daemon
+
+ * Written by Bui Dinh Hien <buihien29112002@gmail.com>
  *
  * The encoder now escapes ", \, and control chars (\n \r \t) so that an SMS
  * body containing those characters still produces VALID JSON — otherwise the

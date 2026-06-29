@@ -1,5 +1,7 @@
 /*
  * pd_port.h - NothanOS userspace port shim for phone_daemon.
+
+ * Written by Bui Dinh Hien <buihien29112002@gmail.com>
  *
  * Replaces the POSIX/newlib headers (stdio/stdlib/unistd/fcntl/errno/ctype)
  * the daemon was written against. Provides exactly what the daemon uses,

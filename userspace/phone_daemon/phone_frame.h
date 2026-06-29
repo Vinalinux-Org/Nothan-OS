@@ -1,36 +1,3 @@
-/*
- * phone_frame.h — frontend ↔ backend binary frame protocol (CANONICAL)
- *
- * Frame layout (all integers little-endian):
- *   [0xAA][0x55][LEN_LO][LEN_HI][JSON payload...][CRC_LO][CRC_HI]
- *
- * CRC16-CCITT (poly 0x1021, init 0xFFFF) over the JSON payload only.
- *
- * ──────────────────────────────────────────────────────────────────────────
- * RELIABILITY LAYER (seq only — no src_boot / no be_boot)
- * ──────────────────────────────────────────────────────────────────────────
- * Critical events (CALL_IN, SMS_IN, CALL_MISS, CALL_END, MODEM_DOWN, MODEM_UP)
- * carry one extra JSON field:
- *     "seq" : int — BE-side monotonic sequence number
- * The FE ACKs each with:
- *     {"type":"ACK","seq":<n>}
- * The BE retransmits an unACKed critical until the matching ACK arrives.
- * Receivers dedup by seq alone (no boot-id tracking needed).
- *
- * Handshake (startup-order independent):
- *   FE→BE  {"type":"CMD_HELLO","fe_boot":<id>,"last_seq":<n>}
- *   BE→FE  {"type":"READY","seq":<be_seq_high>,
- *           "call":"idle|ringing|active","callnum":"...",
- *           "sim":"READY","net":<stat>,"rssi":<n>,"bcl":<n>,"ucs2":<0|1>}
- *   The daemon emits a periodic READY beacon; if beacon.seq > FE.lastSeq the
- *   FE re-HELLOs so the daemon replays unACKed criticals with seq > last_seq.
- *
- * AT init (before main loop) — comprehensive SIM7600CE feature surface:
- *   ATE0, AT+CMEE=2, AT+CMGF=1, AT+CSCS="GSM", AT+CNMI=2,2,0,0,0,
- *   AT+CLIP=1, AT+COLP=1, AT+CCWA=1,1, AT+CSSN=1,1, AT+CREG=2, AT+CGREG=2,
- *   AT+CUSD=1, AT+CTZU=1, AT+CTZR=1, AT+CSDVC=1
- */
-
 #ifndef PHONE_FRAME_H
 #define PHONE_FRAME_H
 

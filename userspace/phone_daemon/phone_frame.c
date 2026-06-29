@@ -1,5 +1,7 @@
 /*
  * phone_frame.c — frame encode/decode + CRC16-CCITT
+
+ * Written by Bui Dinh Hien <buihien29112002@gmail.com>
  *
  * Frame: [0xAA][0x55][LEN_LO][LEN_HI][JSON...][CRC_LO][CRC_HI]
  * CRC16-CCITT (poly 0x1021, init 0xFFFF) over the JSON payload.

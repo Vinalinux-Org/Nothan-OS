@@ -48,12 +48,15 @@ $(BUILD)/shell.bin: $(BUILD)/shell.elf
 # Phone daemon (modem backend) — links like the shell: crt0 + -lgcc, no newlib.
 # Bare-metal flags: no poll()/clock_gettime()/usleep() (use getticks/yield).
 PD_SRCS   := phone_daemon/phone_daemon.c phone_daemon/phone_frame.c phone_daemon/json.c \
-             phone_daemon/pd_libc.c
+             lib/mem.c
 PD_OBJS   := $(patsubst %.c,$(BUILD)/%.o,$(PD_SRCS))
 PD_CFLAGS := $(CFLAGS) -DPD_NO_POLL -DPD_NO_CLOCK -DPD_NO_USLEEP
 
 $(BUILD)/phone_daemon/%.o: phone_daemon/%.c | $(BUILD)/phone_daemon
 	$(CC) $(PD_CFLAGS) -c -o $@ $<
+
+$(BUILD)/lib/mem.o: lib/mem.c | $(BUILD)/lib
+	$(CC) $(CFLAGS) -c -o $@ $<
 
 $(BUILD)/phone_daemon.elf: $(CRT0) $(PD_OBJS)
 	$(CC) -nostdlib -T $(LDS) -o $@ $^ -lgcc
