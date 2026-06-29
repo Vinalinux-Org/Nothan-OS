@@ -212,7 +212,10 @@ unsigned int __aeabi_uidiv(unsigned int n, unsigned int d)
 
 	for (int i = 31; i >= 0; i--) {
 		r = (r << 1) | ((n >> i) & 1);
-		if (r >= d) { r -= d; q |= (1U << i); }
+		if (r >= d) {
+			r -= d;
+			q |= (1U << i);
+		}
 	}
 	return q;
 }
@@ -223,7 +226,10 @@ unsigned long long __aeabi_uidivmod(unsigned int n, unsigned int d)
 
 	for (int i = 31; i >= 0; i--) {
 		r = (r << 1) | ((n >> i) & 1);
-		if (r >= d) { r -= d; q |= (1U << i); }
+		if (r >= d) {
+			r -= d;
+			q |= (1U << i);
+		}
 	}
 	return ((unsigned long long)r << 32) | q;
 }

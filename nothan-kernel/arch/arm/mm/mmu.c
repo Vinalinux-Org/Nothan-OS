@@ -84,6 +84,12 @@ void mmu_init(void)
 	__turn_mmu_on(pgd_phys);
 }
 
+/**
+ * mmu_log_config() - Print the current MMU mapping configuration
+ *
+ * Logs the virtual-to-physical address mapping layout for kernel,
+ * MMIO regions, and DACR domain configuration to the kernel console.
+ */
 void mmu_log_config(void)
 {
 	printk("[MMU] 3G/1G split: PAGE_OFFSET=0x%lx PHYS_OFFSET=0x%lx\n",

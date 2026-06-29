@@ -17,24 +17,39 @@ static struct gendisk *disk_table[GENDISK_TABLE_SIZE];
 
 static int gd_strcmp(const char *a, const char *b)
 {
-	while (*a && *a == *b) { a++; b++; }
+	while (*a && *a == *b) {
+		a++;
+		b++;
+	}
 	return *a - *b;
 }
 
 static void gd_strcpy(char *dst, const char *src, int max)
 {
 	int i = 0;
-	while (i < max - 1 && src[i]) { dst[i] = src[i]; i++; }
+	while (i < max - 1 && src[i]) {
+		dst[i] = src[i];
+		i++;
+	}
 	dst[i] = '\0';
 }
 
 static void gd_itoa(unsigned int v, char *buf)
 {
-	if (v == 0) { buf[0] = '0'; buf[1] = '\0'; return; }
-	char tmp[12]; int i = 0;
-	while (v) { tmp[i++] = '0' + v % 10; v /= 10; }
+	if (v == 0) {
+		buf[0] = '0';
+		buf[1] = '\0';
+		return;
+	}
+	char tmp[12];
+	int i = 0;
+	while (v) {
+		tmp[i++] = '0' + v % 10;
+		v /= 10;
+	}
 	int j = 0;
-	while (i--) buf[j++] = tmp[i];
+	while (i--)
+		buf[j++] = tmp[i];
 	buf[j] = '\0';
 }
 
@@ -196,7 +211,10 @@ int add_disk(struct gendisk *disk)
 
 	int slot = -1;
 	for (int i = 0; i < GENDISK_TABLE_SIZE; i++) {
-		if (!disk_table[i]) { slot = i; break; }
+		if (!disk_table[i]) {
+			slot = i;
+			break;
+		}
 	}
 	if (slot < 0) {
 		printk("[BLOCK] disk table full\n");

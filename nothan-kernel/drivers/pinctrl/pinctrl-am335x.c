@@ -25,7 +25,10 @@ void pinctrl_register(const struct pin_group *groups, unsigned int ngroups)
 
 static int streq(const char *a, const char *b)
 {
-	while (*a && *a == *b) { a++; b++; }
+	while (*a && *a == *b) {
+		a++;
+		b++;
+	}
 	return *a == *b;
 }
 
