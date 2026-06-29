@@ -3237,13 +3237,13 @@ int main(void)
     fd_sim = open_uart(SIM_DEV);
     if (fd_sim < 0) {
         printf("[pd] cannot open %s\n", SIM_DEV);
-        return;
+        return 1;
     }
     fd_fe = open_uart(RPI_DEV);
     if (fd_fe < 0) {
         printf("[pd] cannot open %s\n", RPI_DEV);
         close(fd_sim);
-        return;
+        return 1;
     }
     printf("[pd] sim=%s fe=%s opened\n", SIM_DEV, RPI_DEV);
 
