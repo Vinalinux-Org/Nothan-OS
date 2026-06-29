@@ -172,13 +172,20 @@ static void dispatch_event(const char *json)
     }
     /* ── SMS events ── */
     if (strcmp(type, "SMS_IN") == 0) {
-        char from[32], text[256];
+        char from[32], text[1024];
         from[0] = text[0] = '\0';
         json_get_str(json, "from", from, sizeof(from));
         fmt_call(from, sizeof(from), from);
         json_get_str(json, "text", text, sizeof(text));
         if (seq > 0) send_ack(seq);
         sms_on_received(from, text);
+        return;
+    }
+    /* SIM state */
+    if (strcmp(type, "SIM_STAT") == 0) {
+        char state[16];
+        if (json_get_str(json, "state", state, sizeof(state)) >= 0)
+            gui_logf("modem_client: SIM state = %s\n", state);
         return;
     }
     /* MODEM_DOWN/UP — log only for now */

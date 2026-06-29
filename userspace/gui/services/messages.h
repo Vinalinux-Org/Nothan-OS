@@ -12,7 +12,7 @@
  * timer becomes +CMTI handling; the screens stay unchanged.
  */
 
-#define SMS_TEXT_MAX   640
+#define SMS_TEXT_MAX   1024
 #define SMS_PEER_MAX   32
 #define SMS_PER_CONV   16
 #define SMS_CONV_MAX   32
@@ -31,6 +31,9 @@ struct sms_conversation {
 
 /* Load persisted threads (else seed a mock) and start the mock receiver. */
 void messages_init(void);
+
+/* Wipe all conversations and persist the empty file. */
+void sms_clear(void);
 
 /* Enable/disable the mock inbound-SMS injector (on by default). Turn off
  * to isolate pure-GUI testing (no receive, no background FAT write). */
