@@ -186,6 +186,13 @@ static void on_screen_loaded(lv_event_t *e)
 	populate(search_box ? lv_textarea_get_text(search_box) : NULL);
 }
 
+static void on_screen_unloaded(lv_event_t *e)
+{
+	(void)e;
+	list_obj   = NULL;
+	search_box = NULL;
+}
+
 static void build_search(lv_obj_t *parent)
 {
 	lv_obj_t *search = lv_textarea_create(parent);
@@ -239,5 +246,6 @@ void contacts_list_create(lv_obj_t *screen, void *arg)
 
 	/* Refresh whenever we land back here (add/edit/delete in a child). */
 	lv_obj_add_event_cb(screen, on_screen_loaded, LV_EVENT_SCREEN_LOADED, NULL);
-	populate(NULL); /* no filter — show everyone */
+	lv_obj_add_event_cb(screen, on_screen_unloaded, LV_EVENT_SCREEN_UNLOAD_START, NULL);
+	populate(NULL);
 }

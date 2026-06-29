@@ -118,8 +118,15 @@ static void on_send(lv_event_t *e)
 static void on_screen_loaded(lv_event_t *e)
 {
 	(void)e;
-	sms_mark_read(chat_idx);   /* seen now */
-	rebuild_thread();          /* show anything received while away */
+	sms_mark_read(chat_idx);
+	rebuild_thread();
+}
+
+static void on_screen_unloaded(lv_event_t *e)
+{
+	(void)e;
+	chat_list  = NULL;
+	chat_input = NULL;
 }
 
 /* Keyboard opening: shrink the thread so its bottom sits above the lifted
@@ -229,6 +236,7 @@ void sms_chat_create(lv_obj_t *screen, void *arg)
 			      LV_FLEX_ALIGN_START);
 
 	lv_obj_add_event_cb(screen, on_screen_loaded, LV_EVENT_SCREEN_LOADED, NULL);
+	lv_obj_add_event_cb(screen, on_screen_unloaded, LV_EVENT_SCREEN_UNLOAD_START, NULL);
 
 	sms_mark_read(chat_idx);
 	rebuild_thread();

@@ -142,6 +142,12 @@ static void on_screen_loaded(lv_event_t *e)
 	populate();
 }
 
+static void on_screen_unloaded(lv_event_t *e)
+{
+	(void)e;
+	list_obj = NULL;
+}
+
 void call_log_create(lv_obj_t *screen, void *arg)
 {
 	(void)arg;
@@ -170,5 +176,6 @@ void call_log_create(lv_obj_t *screen, void *arg)
 			      LV_FLEX_ALIGN_START);
 
 	lv_obj_add_event_cb(screen, on_screen_loaded, LV_EVENT_SCREEN_LOADED, NULL);
+	lv_obj_add_event_cb(screen, on_screen_unloaded, LV_EVENT_SCREEN_UNLOAD_START, NULL);
 	populate();
 }
