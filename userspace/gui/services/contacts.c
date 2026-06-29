@@ -71,6 +71,15 @@ static void contacts_save(void)
 	storage_write(CONTACTS_PATH, &blob, sizeof(blob));
 }
 
+/* Wipe the entire store and persist the empty state so the next boot
+ * also starts clean.  Call before porting to a new display.
+ */
+void contacts_clear(void)
+{
+	count = 0;
+	contacts_save();
+}
+
 /*
  * contacts_init() - Load persisted contacts, if any.
  *

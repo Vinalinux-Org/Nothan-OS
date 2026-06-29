@@ -18,6 +18,7 @@
 #include "services/contacts.h"
 #include "services/messages.h"
 #include "services/telephony.h"
+#include "services/clear.h"
 #include "services/modem_client.h"
 #include "../lib/syscall.h"
 
@@ -38,6 +39,7 @@ void main(void)
 	lv_port_indev_init();
 
 	nav_init();
+
 	contacts_init();
 	messages_init();
 	telephony_init();

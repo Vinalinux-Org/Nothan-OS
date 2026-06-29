@@ -81,6 +81,7 @@ GUI_SRCS := gui/main.c \
             gui/services/contacts.c gui/services/messages.c gui/services/telephony.c \
             gui/services/modem_client.c \
             gui/services/storage.c \
+            gui/services/clear.c \
             gui/widgets/status_bar.c gui/widgets/app_tile.c gui/widgets/nav_bar.c \
             gui/widgets/app_header.c gui/widgets/avatar.c \
             gui/screens/boot.c gui/screens/home.c \

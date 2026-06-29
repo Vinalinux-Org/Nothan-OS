@@ -21,6 +21,9 @@ struct contact {
 /* Load persisted contacts at startup; falls back to the seeded mock. */
 void contacts_init(void);
 
+/* Wipe all contacts and persist the empty file. */
+void contacts_clear(void);
+
 /* Number of stored contacts (kept sorted by name). */
 int contacts_count(void);
 
