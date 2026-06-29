@@ -1,4 +1,3 @@
-#include "string.h"
 /*
  * services/messages.c - SMS store (mutable, persisted) + mock receiver
  *

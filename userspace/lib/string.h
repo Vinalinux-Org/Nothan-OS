@@ -1,8 +1,8 @@
 #ifndef _NOTHAN_STRING_H
 #define _NOTHAN_STRING_H
 
-#ifndef size_t
-#define size_t unsigned long
+#if !defined(size_t) && !defined(_SIZE_T) && !defined(_SIZE_T_)
+typedef unsigned long size_t;
 #endif
 
 static inline size_t strlen(const char *s)

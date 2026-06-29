@@ -13,7 +13,7 @@ CFLAGS  := -mcpu=cortex-a8 -marm -O2 -std=gnu11 -ffreestanding -nostdlib
 # blend's loop bound and lv_area pointers came out garbage → Data Aborts).
 # This is the standard, LVGL-recommended fix and keeps -O2 performance.
 CFLAGS  += -fno-strict-aliasing
-CFLAGS  += -Wall -Wextra -Wno-unused-parameter -I lib
+CFLAGS  += -Wall -Wextra -Wno-unused-parameter -Wno-implicit-function-declaration -I lib
 AFLAGS  := -mcpu=cortex-a8 -marm -D__ASSEMBLY__
 
 LDS     := lib/user.lds
