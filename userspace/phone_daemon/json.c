@@ -5,7 +5,7 @@
  *
  * The encoder now escapes ", \, and control chars (\n \r \t) so that an SMS
  * body containing those characters still produces VALID JSON — otherwise the
- * RPi4's JSON.parse() throws and the frame (e.g. an inbound SMS) is silently
+ * frontend's JSON.parse() throws and the frame (e.g. an inbound SMS) is silently
  * dropped.  The decoder understands the matching escapes so commands carrying
  * such characters round-trip correctly.
  */

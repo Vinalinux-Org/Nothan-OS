@@ -1,42 +1,30 @@
 /*
- * phone_daemon.c — SIM7600CE ↔ RPi4 relay service for NothanOS (CANONICAL)
-
+ * phone_daemon.c — SIM7600CE modem backend for NothanOS
+ *
  * Written by Bui Dinh Hien <buihien29112002@gmail.com>
  *
  * Hardware:
- *   /dev/uart1  UART1  → SIM7600CE AT command port
- *   /dev/uart4  UART4  → RPi4 framed binary JSON protocol
+ *   /dev/uart1       → SIM7600CE AT command/URC port
+ *   /dev/phone_be    → GUI frontend (phonebus loopback, was /dev/uart4→RPi4)
  *
- * ── Architecture: SINGLE-OWNER, NON-BLOCKING EVENT LOOP ──────────────────────
- * One process owns BOTH UARTs (no fork, no shared fd, no IPC pipe). The super
- * loop multiplexes:
- *   • reading SIM URC/response lines (/dev/uart1)
- *   • reading RPi4 command frames     (/dev/uart4)
- *   • driving an AT command/response state machine (queue + per-command timeout)
- * Multiplexing uses poll() when available, else O_NONBLOCK round-robin polling
- * with a short idle sleep — both fds are opened non-blocking either way.
+ * Architecture: SINGLE-OWNER, NON-BLOCKING EVENT LOOP
+ *   One process owns both channels (no fork, no shared fd). Super loop:
+ *     • read SIM URC/response lines  (/dev/uart1)
+ *     • read frontend command frames (/dev/phone_be)
+ *     • drive AT command/response FSM (queue + per-command timeout)
+ *   Non-blocking I/O with yield() — cooperative scheduling on NothanOS.
  *
- * Why: the previous fork model shared the SIM fd (parent read / child wrote),
- * timed the SMS '>' prompt with sleep(), and DIED PERMANENTLY on a single UART
- * read error (every later call/SMS lost). The single-owner loop fixes all three:
- *   • the SMS body is sent only after the real '>' prompt is seen (no sleep race)
- *   • a UART read error triggers close+reopen+re-init recovery — never an exit
- *   • URCs (RING/+CLIP/+CMT…) are dispatched even while a command is in flight,
- *     so an incoming call is never swallowed mid-AT.
+ * Why single-owner:
+ *   • SMS body sent only after real '>' prompt (no sleep race)
+ *   • UART error → close+reopen+re-init recovery, never exit
+ *   • URCs (RING/+CLIP/+CMT…) dispatched even during in-flight command
  *
- * ── Protocol ────────────────────────────────────────────────────────────────
- * Critical events (CALL_IN, SMS_IN, CALL_MISS, CALL_END, MODEM_DOWN, MODEM_UP)
- * carry a monotonic seq and are retransmitted until the FE ACKs them. No
- * src_boot or be_boot — dedup is by seq alone. FE is the sole source of truth
- * for stored messages/call log. A HELLO handshake plus a periodic READY beacon
- * resync state (call/signal/SIM) independently of startup order.
+ * Protocol (framed JSON over phonebus):
+ *   Critical events carry monotonic seq, retransmitted until FE ACKs.
+ *   HELLO handshake + periodic READY beacon resync state independently
+ *   of startup order.
  *
- * Vietnamese SMS: CMD_SMS_UCS2 switches CSCS GSM↔UCS2; the daemon converts
- * UTF-8 ↔ UCS2-BE-hex transparently and uses PDU mode for UCS2 sends.
- *
- * NOTE (NothanOS bare-metal): compile with -DPD_NO_POLL to use the O_NONBLOCK
- * round-robin fallback, and -DPD_NO_CLOCK if clock_gettime() is unavailable
- * (a coarse loop-tick clock is then used). On Linux it builds as-is for tests.
+ * NothanOS bare-metal: compile with -DPD_NO_POLL -DPD_NO_CLOCK -DPD_NO_USLEEP.
  */
 
 #include "pd_port.h"
