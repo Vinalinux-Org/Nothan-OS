@@ -97,14 +97,24 @@ static void calllog_load(void)
 	}
 }
 
-/* Append an entry, dropping the oldest when full, then persist. */
+/* Upsert: one entry per number, newest at the end (displayed newest-first).
+ * If the number exists, remove the old entry before appending the new one
+ * so the list doesn't grow with duplicates and positions stay stable. */
 static void calllog_add(const char *number, const char *name,
 			enum call_type type, unsigned int dur_sec)
 {
-	if (log_n == CALLLOG_MAX) {
-		for (int i = 0; i < CALLLOG_MAX - 1; i++) {
-			log_buf[i] = log_buf[i + 1];
+	/* Remove existing entry for this number (shift left to fill the gap). */
+	for (int i = 0; i < log_n; i++) {
+		if (strncmp(log_buf[i].number, number, CALL_NUM_MAX) == 0) {
+			for (int j = i; j < log_n - 1; j++)
+				log_buf[j] = log_buf[j + 1];
+			log_n--;
+			break;
 		}
+	}
+	if (log_n == CALLLOG_MAX) {
+		for (int i = 0; i < CALLLOG_MAX - 1; i++)
+			log_buf[i] = log_buf[i + 1];
 		log_n--;
 	}
 	struct call_log_entry *e = &log_buf[log_n++];
