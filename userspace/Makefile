@@ -77,7 +77,6 @@ $(LVGL_LIB): $(LVGL_OBJS)
 GUI_SRCS := gui/main.c \
             gui/port/lv_port_disp.c gui/port/lv_port_indev.c \
             gui/core/nav.c gui/core/log.c gui/core/keyboard.c gui/core/call_ui.c \
-            gui/core/monkey.c \
             gui/services/contacts.c gui/services/messages.c gui/services/telephony.c \
             gui/services/modem_client.c \
             gui/services/storage.c \
@@ -93,15 +92,6 @@ GUI_OBJS := $(patsubst gui/%.c,$(BUILD)/gui/%.o,$(GUI_SRCS)) \
             $(BUILD)/gui/phone_daemon/json.o
 GUI_CFLAGS := $(CFLAGS) -I lib/lvgl -I gui -DLV_CONF_INCLUDE_SIMPLE
 
-# Soak test: `make MONKEY=1` builds gui.bin with the synthetic-input monkey
-# (gui/core/monkey.c) driving randomized gestures instead of /dev/input0.
-# Optionally seed it: `make MONKEY=1 MONKEY_SEED=0xdeadbeef`.
-ifdef MONKEY
-GUI_CFLAGS += -DGUI_MONKEY
-ifdef MONKEY_SEED
-GUI_CFLAGS += -DMONKEY_SEED=$(MONKEY_SEED)
-endif
-endif
 
 $(BUILD)/gui/%.o: gui/%.c | $(BUILD)/gui/port
 	mkdir -p $(dir $@)
