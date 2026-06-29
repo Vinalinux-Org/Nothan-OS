@@ -69,6 +69,7 @@ int errno;
 #define HB_TIMEOUT_MS     3000
 #define HB_MAX_FAIL       2     /* consecutive heartbeat misses → recover  */
 #define READY_BEACON_MS   5000  /* periodic READY so a late FE re-syncs     */
+#define SIM_POLL_MS       30000 /* retry AT+CPIN? while SIM is not READY    */
 #define REOPEN_BACKOFF_MS 200
 #define REOPEN_BACKOFF_MAX 5000
 
@@ -91,6 +92,7 @@ static call_state_t cs;
 
 /* Last-known snapshot fields for READY/resync */
 static char g_sim_state[16] = "UNKNOWN";
+static int  g_cpin_pending  = 0;  /* set while AT+CPIN? is in flight */
 static int  g_net_stat = -1;
 static int  g_rssi     = 99;
 static int  g_bcl      = 100;
@@ -375,6 +377,102 @@ int looks_like_ucs2_hex(const char *s)
         }
     }
     return len >= 8 && (len % 4) == 0;
+}
+
+/* Map a Unicode code point (Latin with diacritics) to its ASCII base.
+ * Returns '\0' to silently drop (combining marks), '?' for unknown non-ASCII. */
+static char cp_to_ascii(unsigned int cp)
+{
+    /* Combining diacritical marks (U+0300–U+036F) — NFD decomposed, drop silently. */
+    if (cp >= 0x0300 && cp <= 0x036F) return '\0';
+
+    /* Latin-1 Supplement */
+    if (cp >= 0x00C0 && cp <= 0x00C5) return 'A';
+    if (cp >= 0x00E0 && cp <= 0x00E5) return 'a';
+    if (cp == 0x00C7) return 'C';
+    if (cp == 0x00E7) return 'c';
+    if (cp >= 0x00C8 && cp <= 0x00CB) return 'E';
+    if (cp >= 0x00E8 && cp <= 0x00EB) return 'e';
+    if (cp >= 0x00CC && cp <= 0x00CF) return 'I';
+    if (cp >= 0x00EC && cp <= 0x00EF) return 'i';
+    if (cp == 0x00D0) return 'D';
+    if (cp == 0x00F0) return 'd';
+    if (cp == 0x00D1) return 'N';
+    if (cp == 0x00F1) return 'n';
+    if (cp >= 0x00D2 && cp <= 0x00D6) return 'O';
+    if (cp == 0x00D8) return 'O';
+    if (cp >= 0x00F2 && cp <= 0x00F6) return 'o';
+    if (cp == 0x00F8) return 'o';
+    if (cp >= 0x00D9 && cp <= 0x00DC) return 'U';
+    if (cp >= 0x00F9 && cp <= 0x00FC) return 'u';
+    if (cp == 0x00DD) return 'Y';
+    if (cp == 0x00FD || cp == 0x00FF) return 'y';
+
+    /* Latin Extended-A */
+    if (cp == 0x0102) return 'A';
+    if (cp == 0x0103) return 'a'; /* Ă ă */
+    if (cp == 0x0110) return 'D';
+    if (cp == 0x0111) return 'd'; /* Đ đ */
+
+    /* Latin Extended-B */
+    if (cp == 0x01A0) return 'O';
+    if (cp == 0x01A1) return 'o'; /* Ơ ơ */
+    if (cp == 0x01AF) return 'U';
+    if (cp == 0x01B0) return 'u'; /* Ư ư */
+
+    /* Latin Extended Additional (U+1E00–U+1EFF) — Vietnamese precomposed.
+     * Even code points = uppercase, odd = lowercase, within each vowel range. */
+    if (cp >= 0x1EA0 && cp <= 0x1EB7) return (cp & 1) ? 'a' : 'A'; /* A variants */
+    if (cp >= 0x1EB8 && cp <= 0x1EC7) return (cp & 1) ? 'e' : 'E'; /* E variants */
+    if (cp >= 0x1EC8 && cp <= 0x1ECB) return (cp & 1) ? 'i' : 'I'; /* I variants */
+    if (cp >= 0x1ECC && cp <= 0x1EE3) return (cp & 1) ? 'o' : 'O'; /* O variants */
+    if (cp >= 0x1EE4 && cp <= 0x1EF1) return (cp & 1) ? 'u' : 'U'; /* U variants */
+    if (cp >= 0x1EF2 && cp <= 0x1EF9) return (cp & 1) ? 'y' : 'Y'; /* Y variants */
+
+    return '?';
+}
+
+/* Strip Latin diacritics from UTF-8 → ASCII output.
+ * Combining marks (NFD) are dropped silently. Unknown non-ASCII becomes '?'.
+ * Returns output length, -1 on buffer overflow. */
+static int utf8_strip_diacritics(const char *in, char *out, int out_size)
+{
+    const unsigned char *p = (const unsigned char *)in;
+    int o = 0;
+
+    while (*p) {
+        unsigned int cp;
+        if (*p < 0x80) {
+            cp = *p++;
+        } else if ((*p & 0xE0) == 0xC0) {
+            if ((p[1] & 0xC0) != 0x80) { p++; continue; }
+            cp = ((unsigned int)(p[0] & 0x1F) << 6) | (p[1] & 0x3F);
+            p += 2;
+        } else if ((*p & 0xF0) == 0xE0) {
+            if ((p[1] & 0xC0) != 0x80 || (p[2] & 0xC0) != 0x80) { p++; continue; }
+            cp = ((unsigned int)(p[0] & 0x0F) << 12)
+               | ((unsigned int)(p[1] & 0x3F) << 6)
+               | (p[2] & 0x3F);
+            p += 3;
+        } else {
+            /* 4-byte or invalid sequence — skip */
+            while ((*p & 0xC0) == 0x80) p++;
+            if (*p) p++;
+            continue;
+        }
+
+        if (cp < 0x80) {
+            if (o + 1 >= out_size) return -1;
+            out[o++] = (char)cp;
+        } else {
+            char a = cp_to_ascii(cp);
+            if (a == '\0') continue; /* combining mark — drop */
+            if (o + 1 >= out_size) return -1;
+            out[o++] = a;
+        }
+    }
+    out[o] = '\0';
+    return o;
 }
 
 /* Parse NMEA "DDMM.MMMMM" (or "DDDMM.MMMMM") + hemisphere → signed microdegrees.
@@ -1170,14 +1268,18 @@ void sim_raw_write(const char *s, int len)
     if (s == NULL || len <= 0) {
         return;
     }
-    if (len == 1 && s[0] == '\r') {
-        printf("[pd] sim> <CR>\n");
-    } else if (len == 1 && s[0] == 0x1A) {
-        printf("[pd] sim> <CTRL-Z>\n");
-    } else if (len == 1 && s[0] == 0x1B) {
-        printf("[pd] sim> <ESC>\n");
-    } else if (!(len == 3 && s[0] == 'A' && s[1] == 'T' && s[2] == '\r')) {
-        printf("[pd] sim> %.*s\n", len, s);
+    /* Suppress init/recovery and periodic heartbeat commands — only log
+     * real AT exchanges at READY state (dial, SMS body, etc.). */
+    if (g_modem_state == MODEM_READY && !(at_busy && at_cur_kind == STEP_HEARTBEAT)) {
+        if (len == 1 && s[0] == '\r') {
+            printf("[pd] sim> <CR>\n");
+        } else if (len == 1 && s[0] == 0x1A) {
+            printf("[pd] sim> <CTRL-Z>\n");
+        } else if (len == 1 && s[0] == 0x1B) {
+            printf("[pd] sim> <ESC>\n");
+        } else if (!(len == 3 && s[0] == 'A' && s[1] == 'T' && s[2] == '\r')) {
+            printf("[pd] sim> %.*s\n", len, s);
+        }
     }
     write_all(fd_sim, s, (size_t)len);
 }
@@ -1274,6 +1376,17 @@ void at_finish(int ok)
 {
     int kind = at_cur_kind;
     at_busy = 0; at_wait = WAIT_NONE; at_cur_kind = STEP_PLAIN; at_cur_ctx = -1;
+
+    /* If AT+CPIN? failed (CME ERROR), update state so /SIMSTATE reflects reality. */
+    if (!ok && g_cpin_pending) {
+        g_cpin_pending = 0;
+        strncpy(g_sim_state, "ERROR", sizeof(g_sim_state) - 1);
+        fe_send_sim_stat("ERROR");
+        int sf = open("/SIMSTATE", O_WRONLY | O_CREAT);
+        if (sf >= 0) { writefile(sf, "ERROR", 5); close(sf); }
+    } else {
+        g_cpin_pending = 0;
+    }
 
     if (kind == STEP_HEARTBEAT) {
         if (ok) {
@@ -1782,6 +1895,14 @@ void handle_sms_body(const char *raw)
         strncpy(text, raw, (size_t)(buf_sz - 1)); text[buf_sz - 1] = '\0';
     }
 
+    /* Normalize diacritics → ASCII so LVGL Montserrat can render the text.
+     * Covers both NFC (precomposed, from UCS-2) and NFD (combining marks). */
+    {
+        static char norm[SMS_HEX_MAX + 8];
+        if (utf8_strip_diacritics(text, norm, (int)sizeof(norm)) >= 0)
+            strncpy(text, norm, (size_t)(buf_sz - 1));
+    }
+
     if (kind == BODY_CMT) {
         /* Buffer in concat window so multipart SMS arrive as one message.
          * Single-part SMS is emitted after SMS_CONCAT_COLLECT_MS of silence
@@ -1965,6 +2086,7 @@ void handle_cpin(const char *line)
 {
     const char *p = line + 6;
     while (*p == ' ') p++;
+    g_cpin_pending = 0;
     strncpy(g_sim_state, p, sizeof(g_sim_state) - 1);
     g_sim_state[sizeof(g_sim_state) - 1] = '\0';
     fe_send_sim_stat(p);
@@ -1979,9 +2101,14 @@ void handle_cpin(const char *line)
 
 static void handle_cbc(const char *line)
 {
-    (void)line;
-    g_bcl = 100;
-    fe_send_battery(0, 100);
+    const char *p = line + 5;
+    int bcs = 0, bcl = 100;
+    p = parse_int(p, &bcs);
+    if (*p == ',') { p++; parse_int(p, &bcl); }
+    if (bcl < 0)   bcl = 0;
+    if (bcl > 100) bcl = 100;
+    g_bcl = bcl;
+    fe_send_battery(bcs, bcl);
 }
 
 static void handle_imei(const char *line)
@@ -2175,8 +2302,8 @@ int dispatch_line(const char *line)
 /* Top-level handler for one assembled SIM line. */
 void sim_line_handler(const char *line)
 {
-    /* Suppress routine heartbeat to keep the console quiet between events. */
-    if (!(at_busy && at_cur_kind == STEP_HEARTBEAT))
+    /* Suppress during init/recovery and heartbeat — only log real modem events. */
+    if (g_modem_state == MODEM_READY && !(at_busy && at_cur_kind == STEP_HEARTBEAT))
         printf("[pd] sim< %s\n", line);
     if (g_body_pending != BODY_NONE) {
         /* Guard: OK/ERROR — flush any accumulated body, then let AT machine handle. */
@@ -2222,7 +2349,6 @@ void sim_line_handler(const char *line)
                     return;
                 }
             }
-            /* Non-hex BODY_CMT line (plain-text SMS body — not UCS2 hex): flush
             /* Non-hex BODY_CMT line (plain-text SMS body — not UCS2 hex): flush
              * any previously accumulated hex (shouldn't mix), then pass line as body. */
             if (g_body_hex_acc_len > 0) {
@@ -2420,6 +2546,33 @@ void handle_cmd_dial(const char *json)
 
     if (json_get_str(json, "num", num, sizeof(num)) < 0) {
         return;
+    }
+    /* Strip display-formatting chars (spaces, dashes) — only keep digits, +, *, # */
+    {
+        int i, w = 0;
+        for (i = 0; num[i]; i++) {
+            char c = num[i];
+            if ((c >= '0' && c <= '9') || c == '+' || c == '*' || c == '#')
+                num[w++] = c;
+        }
+        num[w] = '\0';
+    }
+    if (!num[0]) return;
+    /* Convert 0XXXXXXXXX (10-digit VN local) → +84XXXXXXXXX (E.164).
+     * SIM7600CE + VN carriers require E.164 for outgoing; local format
+     * gets NO CARRIER immediately after OK. */
+    if (num[0] == '0') {
+        int n = 0; while (num[n]) n++;
+        if (n == 10) {
+            char e164[CALLER_NUM_MAX];
+            e164[0] = '+'; e164[1] = '8'; e164[2] = '4';
+            int j;
+            for (j = 1; j < n && j + 2 < (int)sizeof(e164) - 1; j++)
+                e164[2 + j] = num[j];
+            e164[2 + j] = '\0';
+            strncpy(num, e164, sizeof(num) - 1);
+            num[sizeof(num) - 1] = '\0';
+        }
     }
     if (cs.in_call || cs.outgoing) {
         printf("[pd] REJECT dial: already in call (in_call=%d outgoing=%d)\n",
@@ -2690,6 +2843,22 @@ void handle_cmd_sms(const char *json)
         printf("[pd] REJECT cid=%d: sms already in flight\n", cid);
         fe_send_sms_err(503, "sms busy", cid);
         return;
+    }
+
+    /* Convert 0XXXXXXXXX → +84XXXXXXXXX — same reason as ATD: VN carriers
+     * require E.164 for AT+CMGS, local format causes send timeout. */
+    if (num[0] == '0') {
+        int n = 0; while (num[n]) n++;
+        if (n == 10) {
+            char e164[CALLER_NUM_MAX];
+            int j;
+            e164[0] = '+'; e164[1] = '8'; e164[2] = '4';
+            for (j = 1; j < n && j + 2 < (int)sizeof(e164) - 1; j++)
+                e164[2 + j] = num[j];
+            e164[2 + j] = '\0';
+            strncpy(num, e164, sizeof(num) - 1);
+            num[sizeof(num) - 1] = '\0';
+        }
     }
 
     if (cs.ucs2_mode) {
@@ -3043,11 +3212,104 @@ void dispatch_cmd(const char *json)
     }
     /* ── Device queries ── */
     else if (!strcmp(type, MSG_CMD_SIM_STAT)) {
-        at_submit("AT+CPIN?\r", 3000);
+        g_cpin_pending = 1; at_submit("AT+CPIN?\r", 3000);
     }
     /* ── SMS ── */
     else if (!strcmp(type, MSG_CMD_SMS)) {
         handle_cmd_sms(json);
+    } else if (!strcmp(type, MSG_CMD_SMS_LIST)) {
+        handle_cmd_sms_list(json);
+    } else if (!strcmp(type, MSG_CMD_SMS_READ)) {
+        handle_cmd_sms_read(json);
+    } else if (!strcmp(type, MSG_CMD_SMS_DELETE)) {
+        handle_cmd_sms_delete(json);
+    } else if (!strcmp(type, MSG_CMD_SMS_UCS2)) {
+        handle_cmd_sms_ucs2(json);
+    }
+    /* ── call extras ── */
+    else if (!strcmp(type, MSG_CMD_HOLD) ||
+             !strcmp(type, MSG_CMD_RESUME) ||
+             !strcmp(type, MSG_CMD_SWAP)) {
+        handle_cmd_hold();
+    } else if (!strcmp(type, MSG_CMD_CONFERENCE)) {
+        handle_cmd_conference();
+    } else if (!strcmp(type, MSG_CMD_TRANSFER)) {
+        handle_cmd_transfer();
+    } else if (!strcmp(type, MSG_CMD_RELEASE_HELD)) {
+        handle_cmd_release_held();
+    } else if (!strcmp(type, MSG_CMD_DTMF)) {
+        handle_cmd_dtmf(json);
+    } else if (!strcmp(type, MSG_CMD_VOL)) {
+        handle_cmd_vol(json);
+    } else if (!strcmp(type, MSG_CMD_RING_VOL)) {
+        handle_cmd_ring_vol(json);
+    } else if (!strcmp(type, MSG_CMD_MIC_GAIN)) {
+        handle_cmd_mic_gain(json);
+    } else if (!strcmp(type, MSG_CMD_AUDIO_ROUTE)) {
+        handle_cmd_audio_route(json);
+    }
+    /* ── network ── */
+    else if (!strcmp(type, MSG_CMD_SIGNAL)) {
+        at_submit("AT+CSQ\r", 3000);
+    } else if (!strcmp(type, MSG_CMD_NET_OPR)) {
+        at_submit("AT+COPS?\r", 5000);
+    } else if (!strcmp(type, MSG_CMD_NET_SELECT)) {
+        handle_cmd_net_select(json);
+    } else if (!strcmp(type, MSG_CMD_NET_AUTO)) {
+        at_submit("AT+COPS=0\r", 60000);
+    } else if (!strcmp(type, MSG_CMD_NET_SCAN)) {
+        at_enqueue("AT+COPS=?\r", -1, WAIT_FINAL, 60000, STEP_NET_SCAN, -1);
+    }
+    /* ── supplementary services ── */
+    else if (!strcmp(type, MSG_CMD_USSD)) {
+        handle_cmd_ussd(json);
+    } else if (!strcmp(type, MSG_CMD_USSD_CANCEL)) {
+        at_submit("AT+CUSD=2\r", 5000);
+    } else if (!strcmp(type, MSG_CMD_TIMEZONE)) {
+        handle_cmd_timezone(json);
+    } else if (!strcmp(type, MSG_CMD_CF_SET)) {
+        handle_cmd_cf_set(json);
+    } else if (!strcmp(type, MSG_CMD_CF_QUERY)) {
+        handle_cmd_cf_query(json);
+    } else if (!strcmp(type, MSG_CMD_CW_ENABLE)) {
+        at_submit("AT+CCWA=1,1\r", 3000);
+    } else if (!strcmp(type, MSG_CMD_CW_DISABLE)) {
+        at_submit("AT+CCWA=0\r", 3000);
+    }
+    /* ── radio ── */
+    else if (!strcmp(type, MSG_CMD_RADIO_ON)) {
+        at_submit("AT+CFUN=1\r", 10000);
+    } else if (!strcmp(type, MSG_CMD_RADIO_OFF) ||
+               !strcmp(type, MSG_CMD_FLIGHT_MODE)) {
+        at_submit("AT+CFUN=4\r", 10000);
+    }
+    /* ── device info ── */
+    else if (!strcmp(type, MSG_CMD_BATTERY)) {
+        at_submit("AT+CBC\r", 3000);
+    } else if (!strcmp(type, MSG_CMD_IMEI)) {
+        at_submit("AT+GSN\r", 3000);
+    } else if (!strcmp(type, MSG_CMD_ICCID)) {
+        at_submit("AT+CCID\r", 3000);
+    } else if (!strcmp(type, MSG_CMD_PHONE_NUM)) {
+        at_submit("AT+CNUM\r", 3000);
+    } else if (!strcmp(type, MSG_CMD_CLOCK)) {
+        at_submit("AT+CCLK?\r", 3000);
+    }
+    /* ── phonebook ── */
+    else if (!strcmp(type, MSG_CMD_PB_READ)) {
+        handle_cmd_pb_read(json);
+    } else if (!strcmp(type, MSG_CMD_PB_WRITE)) {
+        handle_cmd_pb_write(json);
+    } else if (!strcmp(type, MSG_CMD_PB_DELETE)) {
+        handle_cmd_pb_delete(json);
+    }
+    /* ── GPS ── */
+    else if (!strcmp(type, MSG_CMD_GPS_START)) {
+        handle_cmd_gps_start();
+    } else if (!strcmp(type, MSG_CMD_GPS_STOP)) {
+        handle_cmd_gps_stop();
+    } else if (!strcmp(type, MSG_CMD_GPS_LOC)) {
+        at_submit("AT+CGPSINFO\r", 3000);
     } else {
         printf("[pd] unknown cmd: %s\n", type);
     }
@@ -3060,6 +3322,7 @@ static unsigned long g_reopen_at = 0;
 static unsigned long g_reopen_backoff = REOPEN_BACKOFF_MS;
 static unsigned long g_last_hb = 0;
 static unsigned long g_last_beacon = 0;
+static unsigned long g_last_sim_poll = 0;
 
 void enqueue_init(void)
 {
@@ -3082,7 +3345,7 @@ void enqueue_init(void)
 
 void enqueue_state_queries(void)
 {
-    at_submit("AT+CPIN?\r", 3000);
+    g_cpin_pending = 1; at_submit("AT+CPIN?\r", 3000);
     at_submit("AT+CSQ\r", 3000);
     at_submit("AT+CREG?\r", 3000);
 }
@@ -3148,6 +3411,7 @@ void check_init_done(void)
     send_ready_snapshot();
     g_last_hb = pd_now_ms();
     g_last_beacon = g_last_hb;
+    g_last_sim_poll = g_last_hb;  /* CPIN already queued via enqueue_state_queries */
 }
 
 void heartbeat_tick(unsigned long now)
@@ -3173,6 +3437,17 @@ void beacon_tick(unsigned long now)
     }
     g_last_beacon = now;
     send_ready_snapshot();   /* late/restarted FE re-HELLOs off this */
+}
+
+static void sim_poll_tick(unsigned long now)
+{
+    if (g_modem_state != MODEM_READY) return;
+    if (strcmp(g_sim_state, "READY") == 0) return;
+    if (now - g_last_sim_poll < SIM_POLL_MS) return;
+    if (at_busy || at_count > 1) return;
+    g_last_sim_poll = now;
+    printf("[pd] SIM not ready (%s) — retrying CPIN\n", g_sim_state);
+    g_cpin_pending = 1; at_submit("AT+CPIN?\r", 3000);
 }
 
 static void gps_poll_tick(unsigned long now)
@@ -3246,6 +3521,7 @@ static void super_loop(void)
         check_init_done();
         heartbeat_tick(now);
         beacon_tick(now);
+        sim_poll_tick(now);
         gps_poll_tick(now);
     }
 }
@@ -3271,6 +3547,13 @@ int main(void)
         return 1;
     }
     printf("[pd] sim=%s fe=%s opened\n", SIM_DEV, RPI_DEV);
+
+    /* Invalidate stale /SIMSTATE from a previous boot so simstat never
+     * reads an old READY when the current SIM query hasn't finished yet. */
+    {
+        int sf = open("/SIMSTATE", O_WRONLY | O_CREAT);
+        if (sf >= 0) { writefile(sf, "UNKNOWN", 7); close(sf); }
+    }
 
     enqueue_init();
     g_modem_state = MODEM_INITIALIZING;
