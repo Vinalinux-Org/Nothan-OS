@@ -21,6 +21,7 @@
 /* L4_WKUP peripherals */
 #define L4_WKUP_BASE		0x44E00000
 #define UART0_BASE		(L4_WKUP_BASE + 0x9000)		/* 0x44E09000 */
+#define UART1_BASE		(L4_PER_BASE  + 0x22000)	/* 0x48022000 (SIM7600 modem) */
 #define MMC0_BASE		(L4_PER_BASE + 0x60000)		/* 0x48060000 */
 
 /* GPIO banks */
@@ -36,6 +37,12 @@
 static const struct pin_desc uart0_pins[] = {
 	{ CM_REG(0x970), PIN_INPUT_PULLUP  | PIN_MUXMODE(0) },	/* uart0_rxd */
 	{ CM_REG(0x974), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* uart0_txd */
+};
+
+/* UART1 → SIM7600 modem. P9_26 = uart1_rxd, P9_24 = uart1_txd (mode 0). */
+static const struct pin_desc uart1_pins[] = {
+	{ CM_REG(0x980), PIN_INPUT_PULLUP  | PIN_MUXMODE(0) },	/* uart1_rxd (P9_26) */
+	{ CM_REG(0x984), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* uart1_txd (P9_24) */
 };
 
 static const struct pin_desc mmc0_pins[] = {
@@ -80,6 +87,7 @@ static const struct pin_desc lcdc_pins[] = {
 
 static const struct pin_group bbb_pin_groups[] = {
 	{ "uart0", uart0_pins, ARRAY_SIZE(uart0_pins) },
+	{ "uart1", uart1_pins, ARRAY_SIZE(uart1_pins) },
 	{ "mmc0",  mmc0_pins,  ARRAY_SIZE(mmc0_pins)  },
 	{ "i2c0",  i2c0_pins,  ARRAY_SIZE(i2c0_pins)  },
 	{ "lcdc",  lcdc_pins,  ARRAY_SIZE(lcdc_pins)  },
@@ -89,6 +97,7 @@ static struct platform_device bbb_devices[] = {
 	{ .name = "omap_intc",  .base = INTC_BASE,    .irq = 0  },
 	{ .name = "omap_timer", .base = DMTIMER2_BASE, .irq = 68 },
 	{ .name = "omap_uart",  .base = UART0_BASE,   .irq = 72 },
+	{ .name = "omap_uart",  .base = UART1_BASE,   .irq = 73 },
 	{ .name = "omap_mmc",   .base = MMC0_BASE,    .irq = 64 },
 	{ .name = "omap_gpio",  .base = GPIO0_BASE,   .irq = 0  },
 	{ .name = "omap_gpio",  .base = GPIO1_BASE,   .irq = 0  },
