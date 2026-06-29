@@ -11,12 +11,13 @@
  */
 
 #include "messages.h"
+#include "modem_client.h"
 #include "../core/log.h"
 #include "storage.h"
 #include "lvgl/lvgl.h"
 
 #define SMS_PATH        "/SMS.BIN"
-#define SMS_MAGIC       0x534D5331u  /* "SMS1" */
+#define SMS_MAGIC       0x534D5332u  /* "SMS1" */
 #define RECV_EVERY_MS   40000
 #define TICK_PERIOD_MS  1000
 
@@ -41,9 +42,11 @@ static int      recv_on = 1;   /* auto-inject inbound SMS */
 static void copy_str(char *dst, const char *src, int max)
 {
 	int i = 0;
-	if (src)
-		for (; src[i] && i < max - 1; i++)
+	if (src) {
+		for (; src[i] && i < max - 1; i++) {
 			dst[i] = src[i];
+		}
+	}
 	dst[i] = '\0';
 }
 
@@ -64,8 +67,9 @@ static void append_msg(int idx, const char *text, int sent)
 {
 	struct sms_conversation *c = &store.conv[idx];
 	if (c->message_count == SMS_PER_CONV) {
-		for (int i = 0; i < SMS_PER_CONV - 1; i++)
+		for (int i = 0; i < SMS_PER_CONV - 1; i++) {
 			c->messages[i] = c->messages[i + 1];
+		}
 		c->message_count--;
 	}
 	struct sms_message *m = &c->messages[c->message_count++];
@@ -75,8 +79,9 @@ static void append_msg(int idx, const char *text, int sent)
 
 static int create_conv(const char *peer)
 {
-	if (store.count >= SMS_CONV_MAX)
+	if (store.count >= SMS_CONV_MAX) {
 		return -1;
+	}
 	int idx = store.count++;
 	struct sms_conversation *c = &store.conv[idx];
 	copy_str(c->peer, peer, SMS_PEER_MAX);
@@ -88,18 +93,6 @@ static int create_conv(const char *peer)
 static void seed_mock(void)
 {
 	store.count = 0;
-	int a = create_conv("An Nguyen");
-	append_msg(a, "Hey, are we still on for tonight?", 0);
-	append_msg(a, "Yes, see you at 7", 1);
-	append_msg(a, "Great, I'll book a table", 0);
-
-	int b = create_conv("Bao Tran");
-	append_msg(b, "Did you get the files?", 0);
-	append_msg(b, "Got them, thanks!", 1);
-
-	int o = create_conv("0987 654 321");
-	append_msg(o, "Your OTP is 4821. Do not share it.", 0);
-	store.conv[o].unread = 1;
 }
 
 static void messages_tick(lv_timer_t *t);
@@ -120,49 +113,162 @@ int sms_conversation_count(void) { return store.count; }
 
 const struct sms_conversation *sms_conversation_get(int index)
 {
-	if (index < 0 || index >= store.count)
+	if (index < 0 || index >= store.count) {
 		return NULL;
+	}
 	return &store.conv[index];
+}
+
+/* Normalise a phone number for comparison: strip spaces/dashes, +84→0. */
+static void norm_peer(char *dst, const char *src, int sz)
+{
+	int i = 0;
+	while (*src && i < sz - 1) {
+		char c = *src++;
+		if (c >= '0' && c <= '9') dst[i++] = c;
+	}
+	dst[i] = '\0';
+	if (i >= 2 && dst[0] == '8' && dst[1] == '4') dst[0] = '0';
 }
 
 int sms_conversation_find(const char *peer)
 {
+	char key[SMS_PEER_MAX];
 	if (!peer)
 		return -1;
-	for (int i = 0; i < store.count; i++)
-		if (str_eq(store.conv[i].peer, peer))
+	norm_peer(key, peer, sizeof(key));
+	for (int i = 0; i < store.count; i++) {
+		char stored[SMS_PEER_MAX];
+		norm_peer(stored, store.conv[i].peer, sizeof(stored));
+		if (strcmp(key, stored) == 0)
 			return i;
+	}
 	return -1;
 }
 
 int sms_conversation_find_or_create(const char *peer)
 {
 	int idx = sms_conversation_find(peer);
-	if (idx >= 0)
+	if (idx >= 0) {
 		return idx;
+	}
 	return create_conv(peer);
 }
 
 const char *sms_preview(const struct sms_conversation *c)
 {
-	if (!c || c->message_count == 0)
-		return "";
-	return c->messages[c->message_count - 1].text;
+	static char buf[SMS_TEXT_MAX];
+	const char *src; int w = 0, i = 0;
+	if (!c || c->message_count == 0) return "";
+	src = c->messages[c->message_count - 1].text;
+	/* Copy up to 15 words, then append "..." if there were more. */
+	while (*src && w < 15) {
+		while (*src == ' ') { if (i < (int)sizeof(buf)-1) buf[i++] = *src; src++; }
+		while (*src && *src != ' ') { if (i < (int)sizeof(buf)-1) buf[i++] = *src; src++; }
+		w++;
+	}
+	if (*src) { buf[i++] = '.'; buf[i++] = '.'; buf[i++] = '.'; }
+	buf[i] = '\0';
+	return i > 0 ? buf : "";
 }
 
 void sms_send(int conv_index, const char *text)
 {
-	if (conv_index < 0 || conv_index >= store.count || !text || !text[0])
+	if (conv_index < 0 || conv_index >= store.count || !text || !text[0]) {
 		return;
+	}
 	gui_logf("sms: send to %s: %s\n", store.conv[conv_index].peer, text);
 	append_msg(conv_index, text, 1);
 	messages_save();
+	modem_cmd_sms_send(store.conv[conv_index].peer, text);
+}
+
+
+/* Strip Vietnamese diacritics so text renders on Montserrat
+ * (which lacks Vietnamese glyphs).  Converts "Hay rồi bạn ơi"
+ * → "Hay roi ban oi".  Handles the UTF-8 sequences the daemon
+ * produces from UCS2. */
+static void strip_vietnamese(char *s)
+{
+	unsigned char *src = (unsigned char *)s, dst[640], *d = dst;
+	while (*src) {
+		unsigned c = *src;
+		if (c < 0x80) { *d++ = (char)c; src++; continue; }
+		/* 2-byte UTF-8:  Latin-1 Supplement (à, á, è, é, ì, í, ò, ó, ù, ú, ý …) */
+		if ((c & 0xE0) == 0xC0 && (src[1] & 0xC0) == 0x80) {
+			unsigned cp = ((c & 0x1F) << 6) | (src[1] & 0x3F);
+			unsigned base = cp & 0xFFF0;
+			if      (base == 0x00C0) *d++ = 'A';  /* À-Å, Æ→A */
+			else if (base == 0x00E0) *d++ = 'a';  /* à-å, æ→a */
+			else if (cp == 0x00C7) *d++ = 'C';   /* Ç */
+			else if (cp == 0x00E7) *d++ = 'c';   /* ç */
+			else if (base == 0x00C8) *d++ = 'E';  /* È-Ë */
+			else if (base == 0x00E8) *d++ = 'e';  /* è-ë */
+			else if (base == 0x00CC) *d++ = 'I';  /* Ì-Ï */
+			else if (base == 0x00EC) *d++ = 'i';  /* ì-ï */
+			else if (cp == 0x00D1) *d++ = 'N';   /* Ñ */
+			else if (cp == 0x00F1) *d++ = 'n';   /* ñ */
+			else if (base == 0x00D2) *d++ = 'O';  /* Ò-Ö, Ø */
+			else if (base == 0x00F2) *d++ = 'o';  /* ò-ö, ø */
+			else if (base == 0x00D9) *d++ = 'U';  /* Ù-Ü */
+			else if (base == 0x00F9) *d++ = 'u';  /* ù-ü */
+			else if (cp == 0x00DD) *d++ = 'Y';   /* Ý */
+			else if (cp == 0x00FD) *d++ = 'y';   /* ý */
+			else *d++ = (char)c;                  /* passthrough for unrecognised */
+			src += 2;
+			continue;
+		}
+		/* 3-byte UTF-8:  Vietnamese Extension (U+1EA0-1EFF) & Latin Ext-A */
+		if ((c & 0xF0) == 0xE0 && (src[1] & 0xC0) == 0x80 && (src[2] & 0xC0) == 0x80) {
+			unsigned cp = ((c & 0x0F) << 12) | ((src[1] & 0x3F) << 6) | (src[2] & 0x3F);
+			char repl = 0;
+			if      (cp >= 0x1EA0 && cp <= 0x1EB7) repl = 'a';
+			else if (cp >= 0x1EB8 && cp <= 0x1EC7) repl = 'e';
+			else if (cp >= 0x1EC8 && cp <= 0x1ECB) repl = 'i';
+			else if (cp >= 0x1ECC && cp <= 0x1EE3) repl = 'o';
+			else if (cp >= 0x1EE4 && cp <= 0x1EF1) repl = 'u';
+			else if (cp >= 0x1EF2 && cp <= 0x1EF9) repl = 'y';
+			else if (cp == 0x0111 || cp == 0x0110)  repl = 'd';
+			else if (cp == 0x0128 || cp == 0x0129)  repl = 'i';
+			else if (cp == 0x0168 || cp == 0x0169)  repl = 'u';
+			else if (cp == 0x01A0 || cp == 0x01A1)  repl = 'o';
+			else if (cp == 0x01AF || cp == 0x01B0)  repl = 'u';
+			*d++ = repl ? repl : (char)c;
+			src += 3;
+			continue;
+		}
+		/* Anything else — pass through */
+		*d++ = (char)*src++;
+	}
+	*d = '\0';
+	strncpy(s, (const char *)dst, SMS_TEXT_MAX - 1);
+	s[SMS_TEXT_MAX - 1] = '\0';
+}
+
+/* ─── Modem-client entry point (called from modem_client.c dispatch) ─── */
+
+void sms_on_received(const char *peer, const char *text)
+{
+	int idx = sms_conversation_find_or_create(peer);
+	if (idx < 0)
+		return;
+	/* Strip Vietnamese accents — Montserrat font lacks those glyphs. */
+	char clean[SMS_TEXT_MAX];
+	strncpy(clean, text, sizeof(clean));
+	clean[sizeof(clean) - 1] = '\0';
+	strip_vietnamese(clean);
+	append_msg(idx, clean, 0);
+	store.conv[idx].unread++;
+	messages_save();
+	gui_logf("sms: recv from %s: %s\n", peer, clean);
+	lv_obj_send_event(lv_screen_active(), LV_EVENT_SCREEN_LOADED, NULL);
 }
 
 void sms_mark_read(int conv_index)
 {
-	if (conv_index < 0 || conv_index >= store.count)
+	if (conv_index < 0 || conv_index >= store.count) {
 		return;
+	}
 	if (store.conv[conv_index].unread) {
 		store.conv[conv_index].unread = 0;
 		messages_save();
@@ -172,8 +278,9 @@ void sms_mark_read(int conv_index)
 int sms_total_unread(void)
 {
 	int n = 0;
-	for (int i = 0; i < store.count; i++)
+	for (int i = 0; i < store.count; i++) {
 		n += store.conv[i].unread;
+	}
 	return n;
 }
 
@@ -181,8 +288,9 @@ int sms_total_unread(void)
  * nudge the active screen so the list/thread refreshes if it is showing. */
 static void mock_receive(void)
 {
-	if (store.count == 0)
+	if (store.count == 0) {
 		return;
+	}
 	int idx  = mock_text_idx % store.count;
 	const char *text = mock_texts[mock_text_idx % (int)(sizeof(mock_texts) /
 							    sizeof(mock_texts[0]))];

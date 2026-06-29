@@ -34,13 +34,15 @@ static char lc(char c)
 
 static int contains_ci(const char *hay, const char *needle)
 {
-	if (!needle || !needle[0])
+	if (!needle || !needle[0]) {
 		return 1;
+	}
 	for (; *hay; hay++) {
 		const char *h = hay, *n = needle;
 		while (*h && *n && lc(*h) == lc(*n)) { h++; n++; }
-		if (!*n)
+		if (!*n) {
 			return 1;
+		}
 	}
 	return 0;
 }
@@ -99,7 +101,6 @@ static void add_row(lv_obj_t *list, const struct sms_conversation *c, int idx)
 	lv_obj_set_style_text_font(peer, &lv_font_montserrat_20, 0);
 
 	lv_obj_t *preview = lv_label_create(col);
-	lv_obj_set_width(preview, lv_pct(100));
 	lv_label_set_long_mode(preview, LV_LABEL_LONG_DOT);
 	lv_label_set_text(preview, sms_preview(c));
 	lv_obj_set_style_text_color(preview,
@@ -126,8 +127,9 @@ static void add_row(lv_obj_t *list, const struct sms_conversation *c, int idx)
 
 static void populate(const char *filter)
 {
-	if (!list_obj)
+	if (!list_obj) {
 		return;
+	}
 	lv_obj_clean(list_obj);
 	for (int i = 0; i < sms_conversation_count(); i++) {
 		const struct sms_conversation *c = sms_conversation_get(i);
@@ -175,8 +177,9 @@ void sms_list_create(lv_obj_t *screen, void *arg)
 	gui_log("screen: sms-list\n");
 
 	lv_obj_t *compose = app_header_create(screen, "Messages", LV_SYMBOL_EDIT);
-	if (compose)
+	if (compose) {
 		lv_obj_add_event_cb(compose, on_compose, LV_EVENT_CLICKED, NULL);
+	}
 
 	build_search(screen);
 

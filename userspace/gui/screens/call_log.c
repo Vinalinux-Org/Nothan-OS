@@ -36,8 +36,9 @@ static void on_row(lv_event_t *e)
 {
 	int idx = (int)(long)lv_event_get_user_data(e);
 	const struct call_log_entry *en = telephony_log_get(idx);
-	if (!en)
+	if (!en) {
 		return;
+	}
 	gui_logf("event: call back %s\n", en->number);
 	telephony_dial(en->number);
 }
@@ -111,8 +112,9 @@ static void add_row(lv_obj_t *list, const struct call_log_entry *en, int idx)
 
 static void populate(void)
 {
-	if (!list_obj)
+	if (!list_obj) {
 		return;
+	}
 	lv_obj_clean(list_obj);
 
 	int n = telephony_log_count();
@@ -124,8 +126,9 @@ static void populate(void)
 		lv_obj_set_style_pad_top(empty, 24, 0);
 		return;
 	}
-	for (int i = 0; i < n; i++)
+	for (int i = 0; i < n; i++) {
 		add_row(list_obj, telephony_log_get(i), i);
+	}
 }
 
 static void on_screen_loaded(lv_event_t *e)
@@ -140,8 +143,9 @@ void call_log_create(lv_obj_t *screen, void *arg)
 	gui_log("screen: call-log\n");
 
 	lv_obj_t *kp = app_header_create(screen, "Recents", LV_SYMBOL_KEYBOARD);
-	if (kp)
+	if (kp) {
 		lv_obj_add_event_cb(kp, on_keypad, LV_EVENT_CLICKED, NULL);
+	}
 
 	int list_top    = APP_HEADER_HEIGHT + 8;
 	int list_bottom = NAV_BAR_HEIGHT + 8;

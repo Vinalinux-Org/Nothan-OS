@@ -20,6 +20,7 @@
 #include "services/contacts.h"
 #include "services/messages.h"
 #include "services/telephony.h"
+#include "services/modem_client.h"
 #include "../lib/syscall.h"
 
 #ifdef GUI_MONKEY
@@ -47,6 +48,7 @@ void main(void)
 	messages_init();	/* SMS threads */
 	telephony_init();	/* call log + radio */
 	call_ui_init();		/* call overlay on the top layer */
+	modem_client_init();	/* IPC to phone_daemon */
 
 #ifdef GUI_MONKEY
 	/* Soak test mirrors the DEMO: the mock radio/SMS injectors stay OFF so the
@@ -87,8 +89,10 @@ void main(void)
 			nav_set_root(home_create, NULL);
 			nav_show_chrome(true);
 			on_home = 1;
+			call_ui_on_boot_done();
 		}
 
+		modem_pump();
 		lv_task_handler();
 		yield();
 	}

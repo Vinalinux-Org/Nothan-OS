@@ -79,8 +79,9 @@ static void add_bubble(lv_obj_t *list, const struct sms_message *m)
 /* Rebuild every bubble from the store and scroll to the newest. */
 static void rebuild_thread(void)
 {
-	if (!chat_list)
+	if (!chat_list) {
 		return;
+	}
 	lv_obj_clean(chat_list);
 
 	const struct sms_conversation *c = sms_conversation_get(chat_idx);
@@ -194,8 +195,9 @@ void sms_chat_create(lv_obj_t *screen, void *arg)
 
 	lv_obj_t *call = app_header_create(screen, c ? c->peer : "Chat",
 					   LV_SYMBOL_CALL);
-	if (call)
+	if (call) {
 		lv_obj_add_event_cb(call, on_call, LV_EVENT_CLICKED, NULL);
+	}
 
 	lv_obj_t *input_bar = build_input_bar(screen);
 	gui_keyboard_set_lift(input_bar, -(int32_t)NAV_BAR_HEIGHT);

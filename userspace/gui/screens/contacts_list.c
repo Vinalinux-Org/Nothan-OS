@@ -50,13 +50,15 @@ static char lc(char c)
 /* Case-insensitive substring test. Empty needle matches everything. */
 static int contains_ci(const char *hay, const char *needle)
 {
-	if (!needle || !needle[0])
+	if (!needle || !needle[0]) {
 		return 1;
+	}
 	for (; *hay; hay++) {
 		const char *h = hay, *n = needle;
 		while (*h && *n && lc(*h) == lc(*n)) { h++; n++; }
-		if (!*n)
+		if (!*n) {
 			return 1;
+		}
 	}
 	return 0;
 }
@@ -66,8 +68,9 @@ static int name_cmp(const char *a, const char *b)
 {
 	while (*a && *b) {
 		char ca = lc(*a), cb = lc(*b);
-		if (ca != cb)
+		if (ca != cb) {
 			return (int)ca - (int)cb;
+		}
 		a++;
 		b++;
 	}
@@ -131,16 +134,18 @@ static void add_row(lv_obj_t *list, const struct contact *c, int idx)
  * indices (unsorted); ordering is computed here for display only. */
 static void populate(const char *filter)
 {
-	if (!list_obj)
+	if (!list_obj) {
 		return;
+	}
 	lv_obj_clean(list_obj);
 
 	/* Build the display order: store indices sorted by name (≤ store cap). */
 	int order[64];
 	int m = 0;
 	int n = contacts_count();
-	for (int i = 0; i < n && m < 64; i++)
+	for (int i = 0; i < n && m < 64; i++) {
 		order[m++] = i;
+	}
 	for (int i = 1; i < m; i++) {
 		int key = order[i], j = i - 1;
 		while (j >= 0 &&
@@ -156,8 +161,9 @@ static void populate(const char *filter)
 	for (int k = 0; k < m; k++) {
 		int idx = order[k];
 		const struct contact *c = contacts_get(idx);
-		if (!contains_ci(c->name, filter) && !contains_ci(c->phone, filter))
+		if (!contains_ci(c->name, filter) && !contains_ci(c->phone, filter)) {
 			continue;
+		}
 		if (c->name[0] != group) {
 			group = c->name[0];
 			add_group_header(list_obj, group);
@@ -206,8 +212,9 @@ void contacts_list_create(lv_obj_t *screen, void *arg)
 	gui_log("screen: contacts-list\n");
 
 	lv_obj_t *add = app_header_create(screen, "Contacts", LV_SYMBOL_PLUS);
-	if (add)
+	if (add) {
 		lv_obj_add_event_cb(add, on_add, LV_EVENT_CLICKED, NULL);
+	}
 
 	build_search(screen);
 

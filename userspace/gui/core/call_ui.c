@@ -137,6 +137,10 @@ static void show(int visible)
 		lv_obj_add_flag(overlay, LV_OBJ_FLAG_HIDDEN);
 }
 
+/* Boot gate: suppress overlay during splash screen. */
+static int boot_done;
+void call_ui_on_boot_done(void) { boot_done = 1; }
+
 /* Telephony observer: re-render the overlay for the new state. */
 static void on_state(enum tel_state s)
 {
@@ -147,15 +151,15 @@ static void on_state(enum tel_state s)
 	switch (s) {
 	case TEL_INCOMING:
 		render_incoming();
-		show(1);
+		if (boot_done) show(1);
 		break;
 	case TEL_DIALING:
 		render_in_call(0);
-		show(1);
+		if (boot_done) show(1);
 		break;
 	case TEL_ACTIVE:
 		render_in_call(1);
-		show(1);
+		if (boot_done) show(1);
 		break;
 	case TEL_IDLE:
 	default:
@@ -164,7 +168,7 @@ static void on_state(enum tel_state s)
 		 * reload the app screen underneath. Nudge it with SCREEN_LOADED
 		 * so a data-driven screen (e.g. Recents) picks up the call that
 		 * just ended — same refresh convention nav uses on pop. */
-		lv_obj_send_event(lv_screen_active(), LV_EVENT_SCREEN_LOADED, NULL);
+		if (boot_done) lv_obj_send_event(lv_screen_active(), LV_EVENT_SCREEN_LOADED, NULL);
 		break;
 	}
 }

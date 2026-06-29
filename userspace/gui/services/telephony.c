@@ -16,12 +16,13 @@
 #include "telephony.h"
 #include "contacts.h"
 #include "storage.h"
+#include "modem_client.h"
 #include "../core/log.h"
 #include "lvgl/lvgl.h"
 
 #define CALLLOG_MAX     32
 #define CALLLOG_PATH    "/CALLLOG.BIN"
-#define CALLLOG_MAGIC   0x474C4143u  /* "CALG" */
+#define CALLLOG_MAGIC   0x474C4144u  /* "CALD" */
 
 /* Mock timing (milliseconds). */
 #define DIAL_CONNECT_MS    2500
@@ -54,17 +55,18 @@ static int             mock_on = 1;   /* auto-inject incoming calls */
 static struct call_log_entry log_buf[CALLLOG_MAX];
 static int                   log_n;
 
-/* Mock incoming callers, cycled through. First is a seeded contact so the
- * name resolves; the second is an unknown number. */
-static const char *mock_callers[] = { "0988 333 222", "0900 000 123" };
+/* Mock incoming callers (for MONKEY builds only). */
+static const char *mock_callers[] = { "0868 000 000" };
 static int         mock_idx;
 
 static void copy_str(char *dst, const char *src, int max)
 {
 	int i = 0;
-	if (src)
-		for (; src[i] && i < max - 1; i++)
+	if (src) {
+		for (; src[i] && i < max - 1; i++) {
 			dst[i] = src[i];
+		}
+	}
 	dst[i] = '\0';
 }
 
@@ -73,8 +75,9 @@ static void calllog_save(void)
 	struct calllog_blob blob;
 	blob.magic = CALLLOG_MAGIC;
 	blob.count = (unsigned int)log_n;
-	for (int i = 0; i < log_n; i++)
+	for (int i = 0; i < log_n; i++) {
 		blob.entries[i] = log_buf[i];
+	}
 	storage_write(CALLLOG_PATH, &blob, sizeof(blob));
 }
 
@@ -82,13 +85,16 @@ static void calllog_load(void)
 {
 	struct calllog_blob blob;
 	int n = storage_read(CALLLOG_PATH, &blob, sizeof(blob));
-	if (n < (int)(sizeof(blob.magic) + sizeof(blob.count)))
+	if (n < (int)(sizeof(blob.magic) + sizeof(blob.count))) {
 		return;
-	if (blob.magic != CALLLOG_MAGIC || blob.count > CALLLOG_MAX)
+	}
+	if (blob.magic != CALLLOG_MAGIC || blob.count > CALLLOG_MAX) {
 		return;
+	}
 	log_n = (int)blob.count;
-	for (int i = 0; i < log_n; i++)
+	for (int i = 0; i < log_n; i++) {
 		log_buf[i] = blob.entries[i];
+	}
 }
 
 /* Append an entry, dropping the oldest when full, then persist. */
@@ -96,8 +102,9 @@ static void calllog_add(const char *number, const char *name,
 			enum call_type type, unsigned int dur_sec)
 {
 	if (log_n == CALLLOG_MAX) {
-		for (int i = 0; i < CALLLOG_MAX - 1; i++)
+		for (int i = 0; i < CALLLOG_MAX - 1; i++) {
 			log_buf[i] = log_buf[i + 1];
+		}
 		log_n--;
 	}
 	struct call_log_entry *e = &log_buf[log_n++];
@@ -121,8 +128,9 @@ static void set_state(enum tel_state s)
 	state_since = lv_tick_get();
 	cur_info.name   = cur_name[0] ? cur_name : NULL;
 	cur_info.number = cur_number;
-	if (observer)
+	if (observer) {
 		observer(s);
+	}
 }
 
 static void go_idle(void)
@@ -134,37 +142,44 @@ static void go_idle(void)
 
 void telephony_dial(const char *number)
 {
-	if (state != TEL_IDLE || !number || !number[0])
+	if (state != TEL_IDLE || !number || !number[0]) {
 		return;
+	}
 	copy_str(cur_number, number, CALL_NUM_MAX);
 	resolve_name(number);
 	cur_dir = CALL_OUTGOING;
 	gui_logf("telephony: dial %s\n", cur_number);
 	set_state(TEL_DIALING);
+	modem_cmd_dial(number);
 }
 
 void telephony_answer(void)
 {
-	if (state != TEL_INCOMING)
+	if (state != TEL_INCOMING) {
 		return;
+	}
 	gui_logf("telephony: answer %s\n", cur_name[0] ? cur_name : cur_number);
 	active_since = lv_tick_get();
 	set_state(TEL_ACTIVE);
+	modem_cmd_answer();
 }
 
 void telephony_reject(void)
 {
-	if (state != TEL_INCOMING)
+	if (state != TEL_INCOMING) {
 		return;
+	}
 	gui_log("telephony: reject\n");
 	calllog_add(cur_number, cur_name, CALL_MISSED, 0);
 	go_idle();
+	modem_cmd_reject();
 }
 
 void telephony_hangup(void)
 {
-	if (state == TEL_IDLE)
+	if (state == TEL_IDLE) {
 		return;
+	}
 	gui_log("telephony: hangup\n");
 
 	if (state == TEL_ACTIVE) {
@@ -179,12 +194,14 @@ void telephony_hangup(void)
 		calllog_add(cur_number, cur_name, CALL_MISSED, 0);
 	}
 	go_idle();
+	modem_cmd_hangup();
 }
 
 void telephony_mute(int on)
 {
 	muted = on;
 	gui_logf("telephony: mute %s\n", on ? "on" : "off");
+	modem_cmd_mute(on);
 }
 
 /* Inject a mock incoming call (only when idle). */
@@ -202,6 +219,13 @@ static void inject_incoming(void)
 static void telephony_tick(lv_timer_t *t)
 {
 	(void)t;
+
+	/* When mock is OFF the real modem backend drives the state machine
+	 * through modem_client.c. The mock tick is inert so it never races
+	 * with daemon URCs. */
+	if (!mock_on)
+		return;
+
 	uint32_t now = lv_tick_get();
 
 	switch (state) {
@@ -220,8 +244,9 @@ static void telephony_tick(lv_timer_t *t)
 		}
 		break;
 	case TEL_IDLE:
-		if (mock_on && (int32_t)(now - next_incoming_at) >= 0)
+		if (mock_on && (int32_t)(now - next_incoming_at) >= 0) {
 			inject_incoming();
+		}
 		break;
 	case TEL_ACTIVE:
 		/* Mock radio: the remote ends the call on its own so a soak run
@@ -252,8 +277,9 @@ const struct call_info *telephony_current(void) { return &cur_info; }
 
 unsigned int telephony_duration_sec(void)
 {
-	if (state != TEL_ACTIVE)
+	if (state != TEL_ACTIVE) {
 		return 0;
+	}
 	return (lv_tick_get() - active_since) / 1000u;
 }
 
@@ -262,6 +288,56 @@ int telephony_muted(void) { return muted; }
 void telephony_set_observer(tel_observer_fn cb) { observer = cb; }
 
 void telephony_set_mock(int on) { mock_on = on; }
+
+/* ─── Modem-client entry points (called from modem_client.c dispatch) ─── */
+
+void telephony_on_incoming(const char *number)
+{
+    if (state != TEL_IDLE)
+        return;
+    copy_str(cur_number, number, CALL_NUM_MAX);
+    resolve_name(number);
+    cur_dir = CALL_INCOMING;
+    gui_logf("telephony: incoming %s\n", cur_name[0] ? cur_name : cur_number);
+    set_state(TEL_INCOMING);
+}
+
+void telephony_on_connected(void)
+{
+    if (state != TEL_DIALING && state != TEL_INCOMING)
+        return;
+    gui_log("telephony: remote answered\n");
+    active_since = lv_tick_get();
+    set_state(TEL_ACTIVE);
+}
+
+void telephony_on_remote_end(int is_missed)
+{
+    if (state == TEL_IDLE)
+        return;
+    gui_logf("telephony: remote end (state=%d missed=%d)\n", state, is_missed);
+    if (state == TEL_ACTIVE && !is_missed) {
+        unsigned int dur = (lv_tick_get() - active_since) / 1000u;
+        calllog_add(cur_number, cur_name,
+                    cur_dir == CALL_OUTGOING ? CALL_OUTGOING : CALL_INCOMING, dur);
+    } else if (state == TEL_INCOMING && is_missed) {
+        calllog_add(cur_number, cur_name, CALL_MISSED, 0);
+    } else if (state == TEL_DIALING && !is_missed) {
+        calllog_add(cur_number, cur_name, CALL_OUTGOING, 0);
+    }
+    go_idle();
+}
+
+/* Mock-only: returns whether mock injectors are active (so the GUI client
+ * can skip pumping when the mock is driving the state machine). */
+int telephony_mock_on(void) { return mock_on; }
+
+/* Clock the mock state machine one tick (called from modem_client when
+ * the mock timer is active, so it integrates with the lv_timer path). */
+void telephony_tick_from_client(void)
+{
+    telephony_tick(NULL);
+}
 
 void telephony_calllog_clear(void)
 {
@@ -273,7 +349,8 @@ int telephony_log_count(void) { return log_n; }
 
 const struct call_log_entry *telephony_log_get(int index)
 {
-	if (index < 0 || index >= log_n)
+	if (index < 0 || index >= log_n) {
 		return NULL;
+	}
 	return &log_buf[log_n - 1 - index]; /* 0 = newest */
 }

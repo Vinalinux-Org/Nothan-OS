@@ -12,10 +12,10 @@
  * timer becomes +CMTI handling; the screens stay unchanged.
  */
 
-#define SMS_TEXT_MAX   160
+#define SMS_TEXT_MAX   640
 #define SMS_PEER_MAX   32
 #define SMS_PER_CONV   16
-#define SMS_CONV_MAX   10
+#define SMS_CONV_MAX   32
 
 struct sms_message {
 	char          text[SMS_TEXT_MAX];

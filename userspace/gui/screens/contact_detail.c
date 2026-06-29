@@ -42,9 +42,10 @@ static void on_sms(lv_event_t *e)
 	(void)e;
 	const struct contact *c = contacts_get(d_idx);
 	gui_logf("event: sms %s\n", c ? c->name : "?");
-	int conv = sms_conversation_find_or_create(c ? c->name : NULL);
-	if (conv >= 0)
+	int conv = sms_conversation_find_or_create(c ? c->phone : NULL);
+	if (conv >= 0) {
 		nav_push(sms_chat_create, (void *)(long)conv);
+	}
 }
 
 static void on_edit(lv_event_t *e)
@@ -104,8 +105,9 @@ static void rebuild(lv_obj_t *screen)
 	gui_logf("screen: contact-detail (%s)\n", c ? c->name : "?");
 
 	lv_obj_t *edit = app_header_create(screen, NULL, LV_SYMBOL_EDIT);
-	if (edit)
+	if (edit) {
 		lv_obj_add_event_cb(edit, on_edit, LV_EVENT_CLICKED, NULL);
+	}
 
 	big_avatar(screen, c ? c->name[0] : '?');
 

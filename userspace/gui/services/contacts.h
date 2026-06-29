@@ -40,4 +40,8 @@ int contacts_remove(int index);
  * a saved name instead of a raw number. */
 const struct contact *contacts_find_by_phone(const char *phone);
 
+/* Find a contact by exact name string, or NULL. For SMS to resolve a
+ * conversation peer name back to a phone number when sending. */
+const struct contact *contacts_find_by_name(const char *name);
+
 #endif

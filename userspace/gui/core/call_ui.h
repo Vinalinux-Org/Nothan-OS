@@ -12,5 +12,6 @@
 /* Create the (hidden) overlay and subscribe to telephony. Call once at
  * startup, after nav_init() and telephony_init(). */
 void call_ui_init(void);
+void call_ui_on_boot_done(void);
 
 #endif
