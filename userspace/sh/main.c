@@ -8,6 +8,7 @@
 #include "../lib/syscall.h"
 #include "../lib/string.h"
 #include "../lib/stdio.h"
+#include "../lib/types.h"
 
 #define LINE_BUF 128
 #define MAX_ARGS 8
@@ -26,6 +27,7 @@ static void cmd_help(void)
 	puts("  uname\t\t\tOS identification\n");
 	puts("  reboot\t\tWarm reboot\n");
 	puts("  shutdown\t\tHalt system\n");
+	puts("  simstat\t\tCheck SIM status\n");
 	putchar('\n');
 }
 
@@ -152,6 +154,74 @@ static void cmd_uname(void)
 	putchar('\n');
 }
 
+/* ─── simstat: check SIM state via phone daemon IPC ─── */
+
+#define FR_MAGIC0  0xAA
+#define FR_MAGIC1  0x55
+#define FR_BUF_MAX 512
+
+static uint16_t crc16(const uint8_t *data, int len)
+{
+	uint16_t crc = 0xFFFF;
+	for (int i = 0; i < len; i++) {
+		crc ^= (uint16_t)data[i] << 8;
+		for (int j = 0; j < 8; j++) {
+			if (crc & 0x8000)
+				crc = (crc << 1) ^ 0x1021;
+			else
+				crc <<= 1;
+		}
+	}
+	return crc;
+}
+
+static void cmd_simstat(void)
+{
+	/* Tell the daemon to re-query AT+CPIN? (fire & forget via phone_fe). */
+	int fd = open("/dev/phone_fe", O_RDWR);
+	if (fd >= 0) {
+		const char *json = "{\"type\":\"CMD_SIM_STAT\"}";
+		int jlen = 0;
+		while (json[jlen]) jlen++;
+		uint8_t frame[FR_BUF_MAX];
+		int total = 4 + jlen + 2;
+		frame[0] = FR_MAGIC0;
+		frame[1] = FR_MAGIC1;
+		frame[2] = (uint8_t)(jlen & 0xFF);
+		frame[3] = (uint8_t)((jlen >> 8) & 0xFF);
+		int i;
+		for (i = 0; i < jlen; i++) frame[4 + i] = (uint8_t)json[i];
+		uint16_t crc_val = crc16(frame + 4, (size_t)jlen);
+		frame[4 + jlen]     = (uint8_t)(crc_val & 0xFF);
+		frame[4 + jlen + 1] = (uint8_t)((crc_val >> 8) & 0xFF);
+		writefile(fd, (const char *)frame, (unsigned long)total);
+		close(fd);
+	}
+
+	/* Yield a few times so the daemon has time to query the modem
+	 * and update /SIMSTATE before we read it. */
+	unsigned long deadline = getticks() * 10 + 4000;
+	while (getticks() * 10 < deadline)
+		yield();
+
+	/* Read the status file the daemon wrote. */
+	char state[24];
+	int n = 0, sf = open("/SIMSTATE", O_RDONLY);
+	if (sf < 0) {
+		puts("SIM state: UNKNOWN (daemon not running?)\n");
+		return;
+	}
+	long r;
+	while (n < 23 && (r = read(sf, (uint8_t *)state + n, 1)) > 0)
+		n++;
+	close(sf);
+	state[n] = '\0';
+
+	puts("SIM state: ");
+	puts(state);
+	putchar('\n');
+}
+
 static void execute(char *line, char *cwd)
 {
 	char *argv[MAX_ARGS];
@@ -224,6 +294,8 @@ static void execute(char *line, char *cwd)
 		reboot(REBOOT_WARM);
 	} else if (strcmp(cmd, "shutdown") == 0) {
 		reboot(REBOOT_HALT);
+	} else if (strcmp(cmd, "simstat") == 0) {
+		cmd_simstat();
 	} else {
 		puts("Unknown: '");
 		puts(cmd);
