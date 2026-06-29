@@ -2273,7 +2273,15 @@ int dispatch_line(const char *line)
         strcmp(line, "BUSY") == 0 ||
         strcmp(line, "NO ANSWER") == 0 ||
         strcmp(line, "NO DIALTONE") == 0)          { handle_call_release(line); return 1; }
-    if (strncmp(line, "MISSED_CALL:", 12) == 0)    { handle_call_release(line); return 1; }
+    if (strncmp(line, "MISSED_CALL:", 12) == 0) {
+        if (cs.in_call) {
+            /* CCWA caller was rejected via AT+CHLD=0; active call continues. */
+            printf("[pd] MISSED_CALL ignored (active call ongoing)\n");
+        } else {
+            handle_call_release(line);
+        }
+        return 1;
+    }
     if (strncmp(line, "+CLCC:", 6) == 0)           { handle_clcc(line); return 1; }
     if (strncmp(line, "+CCWA:", 6) == 0)           { handle_ccwa(line); return 1; }
     if (strncmp(line, "+CEER:", 6) == 0)           { handle_ceer(line); return 1; }
