@@ -15,3 +15,9 @@ _binary_user_shell_end:
 _binary_user_gui_start:
 	.incbin	"build/gui.usr"
 _binary_user_gui_end:
+
+	.globl	_binary_user_phone_daemon_start
+	.globl	_binary_user_phone_daemon_end
+_binary_user_phone_daemon_start:
+	.incbin	"build/phone_daemon.usr"
+_binary_user_phone_daemon_end:

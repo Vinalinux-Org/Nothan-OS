@@ -29,7 +29,7 @@ LVGL_CFLAGS := $(CFLAGS) -I lib/lvgl -DLV_CONF_INCLUDE_SIMPLE \
 
 .PHONY: all clean size
 
-all: $(BUILD)/shell.bin $(BUILD)/gui.bin
+all: $(BUILD)/shell.bin $(BUILD)/gui.bin $(BUILD)/phone_daemon.bin
 
 $(BUILD)/lib/crt0.o: lib/crt0.S | $(BUILD)/lib
 	$(CC) $(AFLAGS) -c -o $@ $<
@@ -43,6 +43,23 @@ $(BUILD)/shell.elf: $(CRT0) $(BUILD)/sh/main.o
 	$(OBJDUMP) -d $@ > $(BUILD)/shell.dis
 
 $(BUILD)/shell.bin: $(BUILD)/shell.elf
+	$(OBJCOPY) -O binary $< $@
+
+# Phone daemon (modem backend) — links like the shell: crt0 + -lgcc, no newlib.
+# Bare-metal flags: no poll()/clock_gettime()/usleep() (use getticks/yield).
+PD_SRCS   := phone_daemon/phone_daemon.c phone_daemon/phone_frame.c phone_daemon/json.c \
+             phone_daemon/pd_libc.c
+PD_OBJS   := $(patsubst %.c,$(BUILD)/%.o,$(PD_SRCS))
+PD_CFLAGS := $(CFLAGS) -DPD_NO_POLL -DPD_NO_CLOCK -DPD_NO_USLEEP
+
+$(BUILD)/phone_daemon/%.o: phone_daemon/%.c | $(BUILD)/phone_daemon
+	$(CC) $(PD_CFLAGS) -c -o $@ $<
+
+$(BUILD)/phone_daemon.elf: $(CRT0) $(PD_OBJS)
+	$(CC) -nostdlib -T $(LDS) -o $@ $^ -lgcc
+	$(OBJDUMP) -d $@ > $(BUILD)/phone_daemon.dis
+
+$(BUILD)/phone_daemon.bin: $(BUILD)/phone_daemon.elf
 	$(OBJCOPY) -O binary $< $@
 
 # LVGL build rules
@@ -59,6 +76,7 @@ GUI_SRCS := gui/main.c \
             gui/core/nav.c gui/core/log.c gui/core/keyboard.c gui/core/call_ui.c \
             gui/core/monkey.c \
             gui/services/contacts.c gui/services/messages.c gui/services/telephony.c \
+            gui/services/modem_client.c \
             gui/services/storage.c \
             gui/widgets/status_bar.c gui/widgets/app_tile.c gui/widgets/nav_bar.c \
             gui/widgets/app_header.c gui/widgets/avatar.c \
@@ -67,7 +85,9 @@ GUI_SRCS := gui/main.c \
             gui/screens/contacts_add.c \
             gui/screens/sms_list.c gui/screens/sms_chat.c \
             gui/screens/dialer.c gui/screens/call_log.c
-GUI_OBJS := $(patsubst %.c,$(BUILD)/%.o,$(GUI_SRCS))
+GUI_OBJS := $(patsubst gui/%.c,$(BUILD)/gui/%.o,$(GUI_SRCS)) \
+            $(BUILD)/gui/phone_daemon/phone_frame.o \
+            $(BUILD)/gui/phone_daemon/json.o
 GUI_CFLAGS := $(CFLAGS) -I lib/lvgl -I gui -DLV_CONF_INCLUDE_SIMPLE
 
 # Soak test: `make MONKEY=1` builds gui.bin with the synthetic-input monkey
@@ -84,6 +104,10 @@ $(BUILD)/gui/%.o: gui/%.c | $(BUILD)/gui/port
 	mkdir -p $(dir $@)
 	$(CC) $(GUI_CFLAGS) -c -o $@ $<
 
+$(BUILD)/gui/phone_daemon/%.o: phone_daemon/%.c | $(BUILD)/gui/phone_daemon
+	mkdir -p $(dir $@)
+	$(CC) $(GUI_CFLAGS) -c -o $@ $<
+
 $(BUILD)/gui.elf: $(CRT0) $(GUI_OBJS) $(LVGL_LIB)
 	$(CC) -nostdlib -T $(LDS) -o $@ $(CRT0) $(GUI_OBJS) $(LVGL_LIB) -lgcc -lc
 	$(OBJDUMP) -d $@ > $(BUILD)/gui.dis
@@ -93,9 +117,10 @@ $(BUILD)/gui.bin: $(BUILD)/gui.elf
 
 LVGL_LIB_DIRS := $(sort $(dir $(LVGL_OBJS)))
 
-DIRS := $(BUILD)/lib $(BUILD)/sh \
+DIRS := $(BUILD)/lib $(BUILD)/sh $(BUILD)/phone_daemon \
         $(BUILD)/gui/port $(BUILD)/gui/core $(BUILD)/gui/services \
-        $(BUILD)/gui/widgets $(BUILD)/gui/screens
+        $(BUILD)/gui/widgets $(BUILD)/gui/screens \
+        $(BUILD)/gui/phone_daemon
 
 $(DIRS):
 	mkdir -p $@

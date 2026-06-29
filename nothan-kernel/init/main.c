@@ -17,6 +17,7 @@ extern void mmu_log_config(void);
 extern void omap_intc_init(void);
 extern struct task_struct *user_task_create(const char *name);
 extern struct task_struct *user_task_create_gui(void);
+extern struct task_struct *user_task_create_phone_daemon(void);
 
 /*
  * Set to 1 to run the FAT32 write self-test at boot. Pure UART output —
@@ -160,6 +161,13 @@ void kernel_main(void)
 #else
 	printk("[KERN] BOOT_GUI=0: GUI not spawned\n");
 #endif
+
+	/* Modem backend — runs regardless of BOOT_GUI (talks to /dev/uart1). */
+	struct task_struct *pd = user_task_create_phone_daemon();
+	if (pd) {
+		printk("[KERN] Spawning phone_daemon\n");
+		enqueue_task(&runqueue, pd);
+	}
 
 	printk("[KERN] NothanOS started\n");
 

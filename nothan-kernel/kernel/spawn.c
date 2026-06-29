@@ -94,6 +94,8 @@ extern char _binary_user_shell_start[];
 extern char _binary_user_shell_end[];
 extern char _binary_user_gui_start[];
 extern char _binary_user_gui_end[];
+extern char _binary_user_phone_daemon_start[];
+extern char _binary_user_phone_daemon_end[];
 
 /*
  * NothanOS user binary header — see userspace/lib/user.lds.
@@ -155,14 +157,18 @@ struct task_struct *user_task_create_bin(const char *name,
 	/* Parse binary header. Reject if magic mismatches or blob too small. */
 	if (blob_size < sizeof(struct user_bin_header)) {
 		printk("[SPAWN] %s: blob too small (%lu B)\n", name, blob_size);
-		kfree(mm); kfree(ksp); kfree(p);
+		kfree(mm);
+		kfree(ksp);
+		kfree(p);
 		return NULL;
 	}
 	struct user_bin_header *hdr = (struct user_bin_header *)blob_start;
 	if (hdr->magic != USER_BIN_MAGIC) {
 		printk("[SPAWN] %s: bad magic 0x%x (expected 0x%x)\n",
 		       name, (unsigned)hdr->magic, (unsigned)USER_BIN_MAGIC);
-		kfree(mm); kfree(ksp); kfree(p);
+		kfree(mm);
+		kfree(ksp);
+		kfree(p);
 		return NULL;
 	}
 	unsigned long bss_size = hdr->bss_size;
@@ -176,7 +182,9 @@ struct task_struct *user_task_create_bin(const char *name,
 	struct page *code_pg = alloc_pages(GFP_USER, order);
 	if (!code_pg) {
 		printk("[SPAWN] %s: alloc_pages(code, order=%u) failed\n", name, order);
-		kfree(mm); kfree(ksp); kfree(p);
+		kfree(mm);
+		kfree(ksp);
+		kfree(p);
 		return NULL;
 	}
 
@@ -214,7 +222,9 @@ struct task_struct *user_task_create_bin(const char *name,
 				       name, bss_pages);
 				mm_free_bss_chunks(mm, zone);
 				__free_pages(code_pg, order);
-				kfree(mm); kfree(ksp); kfree(p);
+				kfree(mm);
+				kfree(ksp);
+				kfree(p);
 				return NULL;
 			}
 
@@ -231,7 +241,9 @@ struct task_struct *user_task_create_bin(const char *name,
 				printk("[SPAWN] %s: alloc_pages(bss) failed\n", name);
 				mm_free_bss_chunks(mm, zone);
 				__free_pages(code_pg, order);
-				kfree(mm); kfree(ksp); kfree(p);
+				kfree(mm);
+				kfree(ksp);
+				kfree(p);
 				return NULL;
 			}
 
@@ -263,7 +275,9 @@ struct task_struct *user_task_create_bin(const char *name,
 		printk("[SPAWN] %s: alloc_pages(stack) failed\n", name);
 		mm_free_bss_chunks(mm, zone);
 		__free_pages(code_pg, order);
-		kfree(mm); kfree(ksp); kfree(p);
+		kfree(mm);
+		kfree(ksp);
+		kfree(p);
 		return NULL;
 	}
 	unsigned long stack_pa = page_to_phys(zone, stack_pg);
@@ -284,7 +298,9 @@ struct task_struct *user_task_create_bin(const char *name,
 		__free_pages(stack_pg, USER_STACK_ORDER);
 		mm_free_bss_chunks(mm, zone);
 		__free_pages(code_pg, order);
-		kfree(mm); kfree(ksp); kfree(p);
+		kfree(mm);
+		kfree(ksp);
+		kfree(p);
 		return NULL;
 	}
 
@@ -372,5 +388,18 @@ struct task_struct *user_task_create_gui(void)
 {
 	return user_task_create_bin("gui", _binary_user_gui_start,
 				    _binary_user_gui_end);
+}
+
+/**
+ * user_task_create_phone_daemon() - Create the modem backend task from the
+ * embedded binary.
+ *
+ * Return: Pointer to the task_struct, or NULL on failure.
+ */
+struct task_struct *user_task_create_phone_daemon(void)
+{
+	return user_task_create_bin("phone_daemon",
+				    _binary_user_phone_daemon_start,
+				    _binary_user_phone_daemon_end);
 }
 
