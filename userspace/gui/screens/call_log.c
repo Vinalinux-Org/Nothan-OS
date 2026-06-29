@@ -140,8 +140,6 @@ static void on_screen_loaded(lv_event_t *e)
 void call_log_create(lv_obj_t *screen, void *arg)
 {
 	(void)arg;
-	gui_log("screen: call-log\n");
-
 	lv_obj_t *kp = app_header_create(screen, "Recents", LV_SYMBOL_KEYBOARD);
 	if (kp) {
 		lv_obj_add_event_cb(kp, on_keypad, LV_EVENT_CLICKED, NULL);

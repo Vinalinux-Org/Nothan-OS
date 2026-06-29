@@ -48,7 +48,6 @@ void nav_init(void)
 
 void nav_show_chrome(bool show)
 {
-	gui_logf("nav: chrome %s\n", show ? "show" : "hide");
 	if (!navbar) {
 		return;
 	}
@@ -80,8 +79,6 @@ void nav_set_root(nav_builder_fn builder, void *arg)
 	depth = 0;
 	stack[depth++] = scr;
 
-	gui_log("nav: set-root\n");
-
 	/* Instant load (no transition layer). The animated screen-load path
 	 * composites both screens through a heap layer, and LVGL 9.2.2's SW
 	 * masked blend over-runs that layer during the slide — corrupting the
@@ -103,7 +100,6 @@ void nav_push(nav_builder_fn builder, void *arg)
 	builder(scr, arg);
 
 	stack[depth++] = scr;
-	gui_logf("nav: push, depth=%d\n", depth);
 	lv_screen_load(scr);
 }
 
@@ -115,7 +111,6 @@ void nav_pop(void)
 
 	lv_obj_t *dying = stack[depth - 1];
 	depth--;
-	gui_logf("nav: pop, depth=%d\n", depth);
 	lv_screen_load(stack[depth - 1]);
 	lv_obj_delete(dying);
 }
@@ -125,8 +120,6 @@ void nav_to_root(void)
 	if (depth <= 1) {
 		return;
 	}
-
-	gui_logf("nav: to-root, depth %d->1\n", depth);
 
 	/* Switch to the root instantly, then free the intermediates — doing
 	 * it instantly avoids deleting a screen mid-animation. */

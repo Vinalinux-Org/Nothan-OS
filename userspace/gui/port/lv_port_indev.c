@@ -38,7 +38,9 @@ static void pointer_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 {
 	(void)indev;
 	static lv_coord_t last_x = 0, last_y = 0;
+	static int        was_pressed = 0;
 	unsigned char rec[5];
+	int pressed = 0;
 
 	if (input_fd >= 0 && read(input_fd, rec, 5) == 5) {
 		int rx = rec[0] | (rec[1] << 8);
@@ -46,10 +48,19 @@ static void pointer_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 
 		last_x = scale(rx, RAW_X0, RAW_X1, PHYS_W);
 		last_y = scale(ry, RAW_Y0, RAW_Y1, PHYS_H);
-		data->state = rec[4] ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+		pressed = rec[4] ? 1 : 0;
+		data->state = pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
 	} else {
 		data->state = LV_INDEV_STATE_RELEASED;
 	}
+
+	/* Log on leading edge only — ROTATION_270: logical (x,y) = (H-1-phy_y, phy_x). */
+	if (pressed && !was_pressed) {
+		int lx = PHYS_H - 1 - (int)last_y;
+		int ly = (int)last_x;
+		gui_logf("touch: (%d, %d)\n", lx, ly);
+	}
+	was_pressed = pressed;
 
 	/* Physical coords; LVGL rotates to logical. Keep last point on release. */
 	data->point.x = last_x;

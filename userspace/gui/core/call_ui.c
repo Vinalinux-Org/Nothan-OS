@@ -197,6 +197,4 @@ void call_ui_init(void)
 
 	telephony_set_observer(on_state);
 	dur_timer = lv_timer_create(on_dur_tick, 500, NULL);
-
-	gui_log("call_ui: overlay ready\n");
 }

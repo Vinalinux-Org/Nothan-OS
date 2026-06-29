@@ -6,7 +6,6 @@
 
 #include "boot.h"
 #include "../theme/theme.h"
-#include "../core/log.h"
 
 #define BOOT_BAR_DELAY_MS 3000	/* hold the bar at 0 while the HDMI panel locks
 				 * (it takes ~1-2s to sync), so by the time the
@@ -23,7 +22,6 @@ static void boot_bar_anim_cb(void *bar, int32_t v)
 void boot_create(lv_obj_t *parent, void *arg)
 {
 	(void)arg;
-	gui_log("screen: boot\n");
 	lv_obj_set_style_bg_color(parent, theme_color(THEME_BG), 0);
 	lv_obj_set_style_bg_opa(parent, LV_OPA_COVER, 0);
 	lv_obj_clear_flag(parent, LV_OBJ_FLAG_SCROLLABLE);

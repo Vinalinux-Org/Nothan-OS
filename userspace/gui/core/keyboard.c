@@ -157,7 +157,6 @@ void gui_keyboard_init(void)
 	lv_obj_set_style_bg_color(kb, theme_color(THEME_ACCENT),
 				   LV_PART_ITEMS | LV_STATE_CHECKED);
 
-	gui_log("keyboard: ready\n");
 }
 
 void gui_keyboard_attach(lv_obj_t *ta, lv_keyboard_mode_t mode)

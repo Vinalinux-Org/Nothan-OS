@@ -102,8 +102,6 @@ static void rebuild(lv_obj_t *screen)
 	lv_obj_clean(screen);
 
 	const struct contact *c = contacts_get(d_idx);
-	gui_logf("screen: contact-detail (%s)\n", c ? c->name : "?");
-
 	lv_obj_t *edit = app_header_create(screen, NULL, LV_SYMBOL_EDIT);
 	if (edit) {
 		lv_obj_add_event_cb(edit, on_edit, LV_EVENT_CLICKED, NULL);

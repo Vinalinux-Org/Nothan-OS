@@ -6,8 +6,8 @@
 
 #include "home.h"
 #include "../theme/theme.h"
-#include "../core/log.h"
 #include "../core/nav.h"
+#include "../core/log.h"
 #include "../widgets/status_bar.h"
 #include "../widgets/app_tile.h"
 #include "../widgets/nav_bar.h"
@@ -66,11 +66,19 @@ static const struct app_def dock_apps[4] = {
 	{ LV_SYMBOL_IMAGE,    NULL, 0x64748B },
 };
 
-/* Generic tile click handler — user_data carries the nav_builder_fn. */
+/* Generic tile click handler — user_data is a pointer to the app_def entry.
+ * Dock tiles have label=NULL so we look up the name from apps[] by builder. */
 static void on_app_tile(lv_event_t *e)
 {
-	uintptr_t u = (uintptr_t)lv_event_get_user_data(e);
-	nav_push((nav_builder_fn)u, NULL);
+	const struct app_def *app = (const struct app_def *)lv_event_get_user_data(e);
+	if (!app || !app->builder) return;
+	const char *name = app->label;
+	if (!name) {
+		for (int i = 0; i < APP_COUNT; i++)
+			if (apps[i].builder == app->builder) { name = apps[i].label; break; }
+	}
+	gui_logf("event: open app %s\n", name ? name : "?");
+	nav_push(app->builder, NULL);
 }
 
 static void build_search_bar(lv_obj_t *parent)
@@ -132,7 +140,7 @@ static void build_dock(lv_obj_t *parent)
 		if (dock_apps[i].builder) {
 			lv_obj_t *badge = lv_obj_get_child(t, 0);
 			lv_obj_add_event_cb(badge, on_app_tile, LV_EVENT_CLICKED,
-					    (void *)(uintptr_t)dock_apps[i].builder);
+					    (void *)&dock_apps[i]);
 		}
 	}
 }
@@ -140,7 +148,6 @@ static void build_dock(lv_obj_t *parent)
 void home_create(lv_obj_t *parent, void *arg)
 {
 	(void)arg;
-	gui_log("screen: home\n");
 	lv_obj_set_style_bg_color(parent, theme_color(THEME_BG), 0);
 	lv_obj_clear_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -200,7 +207,7 @@ void home_create(lv_obj_t *parent, void *arg)
 		if (apps[i].builder) {
 			lv_obj_t *badge = lv_obj_get_child(t, 0);
 			lv_obj_add_event_cb(badge, on_app_tile, LV_EVENT_CLICKED,
-					    (void *)(uintptr_t)apps[i].builder);
+					    (void *)&apps[i]);
 		}
 	}
 

@@ -198,10 +198,10 @@ static void cmd_simstat(void)
 		close(fd);
 	}
 
-	/* Yield a few times so the daemon has time to query the modem
-	 * and update /SIMSTATE before we read it. */
-	unsigned long deadline = getticks() * 10 + 4000;
-	while (getticks() * 10 < deadline)
+	/* Wait for the daemon to run AT+CPIN? and write /SIMSTATE.
+	 * AT+CPIN? has a 3000 ms timeout — wait with margin. */
+	unsigned long start = getticks();
+	while (getticks() - start < 3500)
 		yield();
 
 	/* Read the status file the daemon wrote. */

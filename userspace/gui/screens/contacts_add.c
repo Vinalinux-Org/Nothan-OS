@@ -76,8 +76,6 @@ void contacts_add_create(lv_obj_t *screen, void *arg)
 	edit_index = (int)(long)arg - 1;
 	const struct contact *cur =
 		edit_index >= 0 ? contacts_get(edit_index) : NULL;
-	gui_logf("screen: contacts-%s\n", cur ? "edit" : "add");
-
 	app_header_create(screen, cur ? "Edit contact" : "Add contact", NULL);
 
 	int y = APP_HEADER_HEIGHT + 24;

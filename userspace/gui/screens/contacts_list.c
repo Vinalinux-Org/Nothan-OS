@@ -209,8 +209,6 @@ static void build_search(lv_obj_t *parent)
 void contacts_list_create(lv_obj_t *screen, void *arg)
 {
 	(void)arg;
-	gui_log("screen: contacts-list\n");
-
 	lv_obj_t *add = app_header_create(screen, "Contacts", LV_SYMBOL_PLUS);
 	if (add) {
 		lv_obj_add_event_cb(add, on_add, LV_EVENT_CLICKED, NULL);

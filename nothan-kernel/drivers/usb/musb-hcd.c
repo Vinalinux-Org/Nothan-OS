@@ -563,10 +563,6 @@ static void musb_touch_loop(void)
 				touch_x = buf[4] | buf[5] << 8;
 				touch_y = buf[6] | buf[7] << 8;
 				touch_pressed = tip;
-				if (tip != prev_tip)	/* log only press/release edges */
-					printk("[MUSB] touch %s x=%d y=%d\n",
-					       tip ? "DOWN" : "UP  ",
-					       touch_x, touch_y);
 				prev_tip = tip;
 			}
 		} else if (csr & (RXCSR_H_RXSTALL | RXCSR_H_ERROR | RXCSR_DATAERROR)) {

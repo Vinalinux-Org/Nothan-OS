@@ -141,8 +141,6 @@ void dialer_create(lv_obj_t *screen, void *arg)
 		num_buf[i] = '\0';
 	}
 
-	gui_log("screen: dialer\n");
-
 	app_header_create(screen, "Phone", NULL);
 
 	num_label = lv_label_create(screen);
