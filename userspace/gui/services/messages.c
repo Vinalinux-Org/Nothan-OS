@@ -160,7 +160,12 @@ static void norm_peer(char *dst, const char *src, int sz)
 		if (c >= '0' && c <= '9') dst[i++] = c;
 	}
 	dst[i] = '\0';
-	if (i >= 2 && dst[0] == '8' && dst[1] == '4') dst[0] = '0';
+	/* +84XXXXXXXXX → 0XXXXXXXXX: digits-only "84..." is 11 chars. */
+	if (i == 11 && dst[0] == '8' && dst[1] == '4') {
+		dst[0] = '0';
+		for (int j = 1; j < i - 1; j++) dst[j] = dst[j + 1];
+		dst[--i] = '\0';
+	}
 }
 
 int sms_conversation_find(const char *peer)

@@ -18,6 +18,7 @@
 #include "../widgets/app_header.h"
 #include "../widgets/nav_bar.h"
 #include "../services/messages.h"
+#include "../services/contacts.h"
 
 #define INPUT_H     68
 #define BUBBLE_MAXW 240
@@ -191,10 +192,10 @@ void sms_chat_create(lv_obj_t *screen, void *arg)
 {
 	chat_idx = (int)(long)arg;
 	const struct sms_conversation *c = sms_conversation_get(chat_idx);
-	gui_logf("screen: sms-chat (%s)\n", c ? c->peer : "?");
-
-	lv_obj_t *call = app_header_create(screen, c ? c->peer : "Chat",
-					   LV_SYMBOL_CALL);
+	const char *peer = c ? c->peer : NULL;
+	const struct contact *ct = peer ? contacts_find_by_phone(peer) : NULL;
+	const char *title = (ct && ct->name[0]) ? ct->name : (peer ? peer : "Chat");
+	lv_obj_t *call = app_header_create(screen, title, LV_SYMBOL_CALL);
 	if (call) {
 		lv_obj_add_event_cb(call, on_call, LV_EVENT_CLICKED, NULL);
 	}

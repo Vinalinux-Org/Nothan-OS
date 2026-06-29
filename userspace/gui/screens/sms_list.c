@@ -19,6 +19,7 @@
 #include "../widgets/nav_bar.h"
 #include "../widgets/avatar.h"
 #include "../services/messages.h"
+#include "../services/contacts.h"
 
 #define SEARCH_H   48
 #define ROW_H      84
@@ -50,9 +51,7 @@ static int contains_ci(const char *hay, const char *needle)
 static void on_compose(lv_event_t *e)
 {
 	(void)e;
-	/* A standalone compose screen is deferred; new threads are started
-	 * from a contact's SMS button. */
-	gui_log("event: sms compose (new) - deferred\n");
+	gui_log("event: sms compose\n");
 }
 
 static void on_row(lv_event_t *e)
@@ -61,6 +60,23 @@ static void on_row(lv_event_t *e)
 	const struct sms_conversation *c = sms_conversation_get(idx);
 	gui_logf("event: open chat %s\n", c ? c->peer : "?");
 	nav_push(sms_chat_create, (void *)(long)idx);
+}
+
+/* Resolve display name and avatar initial for a peer number.
+ * Returns contact name if found in address book, raw peer otherwise.
+ * init_out receives the first char to show in the avatar. */
+static const char *peer_display(const char *peer, char *init_out)
+{
+	const struct contact *ct = contacts_find_by_phone(peer);
+	if (ct && ct->name[0]) {
+		*init_out = ct->name[0];
+		return ct->name;
+	}
+	/* Unknown number — skip leading '+' for avatar initial */
+	const char *p = peer;
+	while (*p == '+') p++;
+	*init_out = *p ? *p : '?';
+	return peer;
 }
 
 static void add_row(lv_obj_t *list, const struct sms_conversation *c, int idx)
@@ -81,7 +97,9 @@ static void add_row(lv_obj_t *list, const struct sms_conversation *c, int idx)
 	lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 	lv_obj_add_event_cb(row, on_row, LV_EVENT_CLICKED, (void *)(long)idx);
 
-	avatar_create(row, c->peer[0], AVATAR_SZ, &lv_font_montserrat_28);
+	char av_init;
+	const char *display_name = peer_display(c->peer, &av_init);
+	avatar_create(row, av_init, AVATAR_SZ, &lv_font_montserrat_28);
 
 	/* Text column: peer on top, preview below. */
 	lv_obj_t *col = lv_obj_create(row);
@@ -96,7 +114,7 @@ static void add_row(lv_obj_t *list, const struct sms_conversation *c, int idx)
 	lv_obj_clear_flag(col, LV_OBJ_FLAG_CLICKABLE);
 
 	lv_obj_t *peer = lv_label_create(col);
-	lv_label_set_text(peer, c->peer);
+	lv_label_set_text(peer, display_name);
 	lv_obj_set_style_text_color(peer, theme_color(THEME_TEXT), 0);
 	lv_obj_set_style_text_font(peer, &lv_font_montserrat_20, 0);
 
@@ -174,8 +192,6 @@ static void build_search(lv_obj_t *parent)
 void sms_list_create(lv_obj_t *screen, void *arg)
 {
 	(void)arg;
-	gui_log("screen: sms-list\n");
-
 	lv_obj_t *compose = app_header_create(screen, "Messages", LV_SYMBOL_EDIT);
 	if (compose) {
 		lv_obj_add_event_cb(compose, on_compose, LV_EVENT_CLICKED, NULL);

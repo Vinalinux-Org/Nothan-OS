@@ -162,7 +162,13 @@ static void norm_phone_local(char *dst, const char *src, int sz)
 		if (c >= '0' && c <= '9') dst[i++] = c;
 	}
 	dst[i] = '\0';
-	if (i >= 2 && dst[0] == '8' && dst[1] == '4') dst[0] = '0';
+	/* +84XXXXXXXXX (E.164) → 0XXXXXXXXX (local): digits-only "84..." is 11 chars.
+	 * Remove the redundant '4' at index 1 so "84329..." becomes "0329...". */
+	if (i == 11 && dst[0] == '8' && dst[1] == '4') {
+		dst[0] = '0';
+		for (int j = 1; j < i - 1; j++) dst[j] = dst[j + 1];
+		dst[--i] = '\0';
+	}
 }
 
 const struct contact *contacts_find_by_phone(const char *phone)

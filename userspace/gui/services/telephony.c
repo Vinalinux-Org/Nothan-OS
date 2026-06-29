@@ -328,6 +328,18 @@ void telephony_on_remote_end(int is_missed)
     go_idle();
 }
 
+/* Log a missed call directly, without touching state machine.
+ * Used for CCWA callers: daemon sends CALL_MISS(num) after CALL_END has
+ * already moved state to IDLE, so telephony_on_remote_end would early-return. */
+void telephony_log_missed_direct(const char *number)
+{
+    char name[CALL_NAME_MAX];
+    const struct contact *c = contacts_find_by_phone(number);
+    copy_str(name, c ? c->name : "", sizeof(name));
+    gui_logf("telephony: missed (ccwa) %s\n", name[0] ? name : number);
+    calllog_add(number, name, CALL_MISSED, 0);
+}
+
 /* Mock-only: returns whether mock injectors are active (so the GUI client
  * can skip pumping when the mock is driving the state machine). */
 int telephony_mock_on(void) { return mock_on; }

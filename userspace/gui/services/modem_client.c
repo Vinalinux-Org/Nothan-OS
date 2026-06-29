@@ -12,6 +12,7 @@
  */
 #include "modem_client.h"
 #include "contacts.h"
+#include "telephony.h"
 #include "../core/log.h"
 
 #include "../../phone_daemon/phone_frame.h"
@@ -25,7 +26,9 @@
 extern void telephony_on_incoming(const char *number);
 extern void telephony_on_connected(void);
 extern void telephony_on_remote_end(int is_missed);
+extern void telephony_log_missed_direct(const char *number);
 extern void sms_on_received(const char *peer, const char *text);
+extern void messages_set_mock(int on);
 
 /* Forward: called back from the shell so the mock timer keeps working for
  * MONKEY builds (where there is no phone_daemon). */
@@ -105,7 +108,7 @@ static void fe_raw_write(const char *json)
  * Strip non-digits, convert 84→0, space after first 3 digits. */
 static void fmt_call(char *out, int sz, const char *raw)
 {
-	int i = 0, p; char t[32];
+	int i = 0, p; char t[32] = {0};
 	while (*raw && i < 31) { if (*raw>='0'&&*raw<='9') t[i++]=*raw; raw++; }
 	t[i] = '\0';
 	if (t[0]=='8' && t[1]=='4') {
@@ -148,11 +151,10 @@ static void dispatch_event(const char *json)
 
     /* ── Call events ── */
     if (strcmp(type, "CALL_IN") == 0) {
-        char raw[32], num[32];
+        char raw[32];
         json_get_str(json, "num", raw, sizeof(raw));
-        fmt_call(num, sizeof(num), raw);
         if (seq > 0) send_ack(seq);
-        telephony_on_incoming(num);
+        telephony_on_incoming(raw);
         return;
     }
     if (strcmp(type, "CALL_ACT") == 0) {
@@ -167,7 +169,16 @@ static void dispatch_event(const char *json)
     }
     if (strcmp(type, "CALL_MISS") == 0) {
         if (seq > 0) send_ack(seq);
-        telephony_on_remote_end(1);
+        /* CCWA case: daemon sends CALL_MISS(num) after CALL_END has already moved
+         * state to IDLE. Extract num — if present and state is idle, log directly. */
+        {
+            char missed_num[32];
+            json_get_str(json, "num", missed_num, sizeof(missed_num));
+            if (missed_num[0] && telephony_state() == TEL_IDLE)
+                telephony_log_missed_direct(missed_num);
+            else
+                telephony_on_remote_end(1);
+        }
         return;
     }
     /* ── SMS events ── */
@@ -179,6 +190,24 @@ static void dispatch_event(const char *json)
         json_get_str(json, "text", text, sizeof(text));
         if (seq > 0) send_ack(seq);
         sms_on_received(from, text);
+        return;
+    }
+    if (strcmp(type, "SMS_ACK") == 0) {
+        int ref = -1;
+        json_get_int(json, "ref", &ref);
+        gui_logf("modem_client: SMS sent ok ref=%d\n", ref);
+        return;
+    }
+    if (strcmp(type, "SMS_ERR") == 0) {
+        int code = -1; char msg[64];
+        json_get_int(json, "code", &code);
+        msg[0] = '\0';
+        json_get_str(json, "msg", msg, sizeof(msg));
+        gui_logf("modem_client: SMS send error %d: %s\n", code, msg);
+        return;
+    }
+    /* READY beacon — periodic daemon liveness snapshot, no action needed. */
+    if (strcmp(type, "READY") == 0) {
         return;
     }
     /* SIM state */
@@ -208,14 +237,15 @@ void modem_client_init(void)
         gui_log("modem_client: no /dev/phone_fe — running with mock\n");
         return;
     }
-    gui_log("modem_client: /dev/phone_fe opened\n");
-
+    /* Real daemon connected — disable mock injectors so fake SMS/calls
+     * don't mix with real modem events. */
+    telephony_set_mock(0);
+    messages_set_mock(0);
     /* Send HELLO handshake */
     fe_boot = (int)getticks();  /* best-effort boot id */
     char buf[128];
     snprintf(buf, sizeof(buf), "{\"type\":\"CMD_HELLO\",\"fe_boot\":%d,\"last_seq\":0}", fe_boot);
     fe_raw_write(buf);
-    gui_logf("modem_client: HELLO sent (boot=%d)\n", fe_boot);
 }
 
 void modem_pump(void)
