@@ -10,9 +10,9 @@
  */
 
 #include "sms_chat.h"
-#include "dialer.h"
 #include "../theme/theme.h"
 #include "../core/log.h"
+#include "../services/modem_client.h"
 #include "../core/nav.h"
 #include "../core/keyboard.h"
 #include "../widgets/app_header.h"
@@ -27,13 +27,6 @@ static int        chat_idx;
 static lv_obj_t  *chat_input;
 static lv_obj_t  *chat_list;
 
-static void on_call(lv_event_t *e)
-{
-	(void)e;
-	const struct sms_conversation *c = sms_conversation_get(chat_idx);
-	gui_logf("event: call %s\n", c ? c->peer : "?");
-	nav_push(dialer_create, c ? (void *)c->peer : NULL);
-}
 
 static void add_bubble(lv_obj_t *list, const struct sms_message *m)
 {
@@ -101,10 +94,24 @@ static void on_send(lv_event_t *e)
 {
 	(void)e;
 	const char *text = lv_textarea_get_text(chat_input);
-	if (text && text[0]) {
-		sms_send(chat_idx, text);
-		lv_textarea_set_text(chat_input, "");
-		rebuild_thread();
+	if (!text || !text[0]) return;
+	if (!modem_net_registered()) {
+		gui_toast("No network");
+		return;
+	}
+	sms_send(chat_idx, text);
+	lv_textarea_set_text(chat_input, "");
+
+	/* Append only the new bubble — avoids the lv_obj_clean→scroll-reset→
+	 * scroll_to_view jump that rebuild_thread() would cause mid-send. */
+	const struct sms_conversation *c = sms_conversation_get(chat_idx);
+	if (c && c->message_count > 0) {
+		add_bubble(chat_list, &c->messages[c->message_count - 1]);
+		lv_obj_t *last = lv_obj_get_child(chat_list, -1);
+		if (last) {
+			lv_obj_update_layout(chat_list);
+			lv_obj_scroll_to_view(last, LV_ANIM_OFF);
+		}
 	}
 }
 
@@ -195,10 +202,7 @@ void sms_chat_create(lv_obj_t *screen, void *arg)
 	const char *peer = c ? c->peer : NULL;
 	const struct contact *ct = peer ? contacts_find_by_phone(peer) : NULL;
 	const char *title = (ct && ct->name[0]) ? ct->name : (peer ? peer : "Chat");
-	lv_obj_t *call = app_header_create(screen, title, LV_SYMBOL_CALL);
-	if (call) {
-		lv_obj_add_event_cb(call, on_call, LV_EVENT_CLICKED, NULL);
-	}
+	app_header_create(screen, title, NULL);
 
 	lv_obj_t *input_bar = build_input_bar(screen);
 	gui_keyboard_set_lift(input_bar, -(int32_t)NAV_BAR_HEIGHT);
