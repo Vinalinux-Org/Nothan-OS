@@ -112,6 +112,11 @@ void nav_pop(void)
 	lv_obj_t *dying = stack[depth - 1];
 	depth--;
 	lv_screen_load(stack[depth - 1]);
+	/* Reset all indev state before deleting the outgoing screen.
+	 * Without this, the indev keeps stale pointers to scroll targets /
+	 * pressed objects on the dying screen; the next touch then calls
+	 * lv_obj_get_child_count on a freed object → Data Abort. */
+	lv_indev_reset(NULL, NULL);
 	lv_obj_delete(dying);
 }
 
@@ -121,9 +126,8 @@ void nav_to_root(void)
 		return;
 	}
 
-	/* Switch to the root instantly, then free the intermediates — doing
-	 * it instantly avoids deleting a screen mid-animation. */
 	lv_screen_load(stack[0]);
+	lv_indev_reset(NULL, NULL);
 	for (int i = 1; i < depth; i++) {
 		lv_obj_delete(stack[i]);
 	}
