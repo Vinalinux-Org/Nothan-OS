@@ -58,8 +58,9 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 		};
 		ioctl(fb_fd, FB_FLUSH, (unsigned long)&f);
 
-		if (lv_display_flush_is_last(disp))
+		if (lv_display_flush_is_last(disp)) {
 			ioctl(fb_fd, FB_FLIP, 0);
+		}
 	}
 	lv_display_flush_ready(disp);
 }

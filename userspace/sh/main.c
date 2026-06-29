@@ -33,14 +33,22 @@ static void cmd_ls(const char *cwd)
 {
 	struct file_entry files[32];
 	long count = listdir(cwd, files, 32);
-	if (count < 0) { puts("ls: failed\n"); return; }
-	if (count == 0) { puts("(empty)\n"); return; }
+	if (count < 0) {
+		puts("ls: failed\n");
+		return;
+	}
+	if (count == 0) {
+		puts("(empty)\n");
+		return;
+	}
 
 	puts("\n");
 	for (long i = 0; i < count; i++) {
 		const char *name = files[i].name;
 		int len = 0;
-		while (name[len]) len++;
+		while (name[len]) {
+			len++;
+		}
 		int is_dir = len > 0 && name[len - 1] == '/';
 
 		putchar(' ');
@@ -70,7 +78,10 @@ static void cmd_ps(void)
 {
 	struct task_info tasks[16];
 	long count = gettasklist(tasks, 16);
-	if (count <= 0) { puts("No tasks\n"); return; }
+	if (count <= 0) {
+		puts("No tasks\n");
+		return;
+	}
 
 	putchar('\n');
 	puts("  PID    NAME                   STATE     PRIO\n");
@@ -105,9 +116,27 @@ static void cmd_info(void)
 	puts("  ---------------------\n");
 	puts("  Memory Info\n");
 	puts("  ---------------------\n");
-	puts("  Total:  "); putint(total_kb, 8); puts(" KB  ("); putint(si.total_pages, 6); puts(" pages)\n");
-	puts("  Used:   "); putint(used_kb,  8); puts(" KB  ("); putint(used_pages,      6); puts(" pages)  "); putint(pct, 2);       puts("%\n");
-	puts("  Free:   "); putint(free_kb,  8); puts(" KB  ("); putint(si.free_pages,   6); puts(" pages)  "); putint(100 - pct, 2); puts("%\n");
+	puts("  Total:  ");
+	putint(total_kb, 8);
+	puts(" KB  (");
+	putint(si.total_pages, 6);
+	puts(" pages)\n");
+
+	puts("  Used:   ");
+	putint(used_kb, 8);
+	puts(" KB  (");
+	putint(used_pages, 6);
+	puts(" pages)  ");
+	putint(pct, 2);
+	puts("%\n");
+
+	puts("  Free:   ");
+	putint(free_kb, 8);
+	puts(" KB  (");
+	putint(si.free_pages, 6);
+	puts(" pages)  ");
+	putint(100 - pct, 2);
+	puts("%\n");
 	puts("  ---------------------\n");
 }
 
@@ -128,22 +157,31 @@ static void execute(char *line, char *cwd)
 	char *argv[MAX_ARGS];
 	int argc = 0;
 
-	while (*line == ' ' || *line == '\t') line++;
-	if (*line == '\0') return;
+	while (*line == ' ' || *line == '\t') {
+		line++;
+	}
+	if (*line == '\0') {
+		return;
+	}
 
 	argv[argc++] = line;
 	while (*line) {
 		if (*line == ' ' || *line == '\t') {
 			*line++ = '\0';
-			while (*line == ' ' || *line == '\t') line++;
-			if (*line && argc < MAX_ARGS)
+			while (*line == ' ' || *line == '\t') {
+				line++;
+			}
+			if (*line && argc < MAX_ARGS) {
 				argv[argc++] = line;
+			}
 			continue;
 		}
 		line++;
 	}
 
-	if (argc == 0) return;
+	if (argc == 0) {
+		return;
+	}
 
 	const char *cmd = argv[0];
 
@@ -169,10 +207,12 @@ static void execute(char *line, char *cwd)
 		} else {
 			int pid = 0;
 			const char *s = argv[1];
-			while (*s >= '0' && *s <= '9')
+			while (*s >= '0' && *s <= '9') {
 				pid = pid * 10 + (*s++ - '0');
-			if (kill(pid) < 0)
+			}
+			if (kill(pid) < 0) {
 				puts("kill: pid not found\n");
+			}
 		}
 	} else if (strcmp(cmd, "ps") == 0) {
 		cmd_ps();
@@ -211,7 +251,10 @@ void main(void)
 		while (1) {
 			char c;
 			long n = read(0, &c, 1);
-			if (n <= 0) { yield(); continue; }
+			if (n <= 0) {
+				yield();
+				continue;
+			}
 
 			if (c == '\r' || c == '\n') {
 				putchar('\n');

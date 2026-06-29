@@ -1,5 +1,5 @@
 /*
- * screens/boot.c - MiNuong splash: wordmark + tagline
+ * screens/boot.c - MyNuong splash: wordmark + tagline
  *
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
@@ -8,11 +8,11 @@
 #include "../theme/theme.h"
 #include "../core/log.h"
 
-#define BOOT_BAR_DELAY_MS 1500	/* hold the bar at 0 while the HDMI panel locks
+#define BOOT_BAR_DELAY_MS 3000	/* hold the bar at 0 while the HDMI panel locks
 				 * (it takes ~1-2s to sync), so by the time the
 				 * screen actually shows, the bar is still near empty
 				 * instead of already half-filled. */
-#define BOOT_BAR_MS  5000	/* fill time; delay + fill (6.5s) sits under BOOT_MS=7000 */
+#define BOOT_BAR_MS  5000	/* fill time; delay + fill (8.0s) sits under BOOT_MS=8700 */
 
 /* lv_anim drives an int 0..100 into the bar value as it fills. */
 static void boot_bar_anim_cb(void *bar, int32_t v)
@@ -29,7 +29,7 @@ void boot_create(lv_obj_t *parent, void *arg)
 	lv_obj_clear_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
 
 	lv_obj_t *logo = lv_label_create(parent);
-	lv_label_set_text(logo, "MiNuong");
+	lv_label_set_text(logo, "MyNuong");
 	lv_obj_set_style_text_color(logo, theme_color(THEME_TEXT), 0);
 	lv_obj_set_style_text_font(logo, &lv_font_montserrat_48, 0);
 	lv_obj_align(logo, LV_ALIGN_CENTER, 0, -90);

@@ -56,7 +56,7 @@ lv_obj_t *status_bar_create(lv_obj_t *parent)
 	lv_obj_align(clock, LV_ALIGN_LEFT_MID, 0, 0);
 
 	lv_obj_t *brand = lv_label_create(bar);
-	lv_label_set_text(brand, "MiNuong");
+	lv_label_set_text(brand, "MyNuong");
 	lv_obj_set_style_text_color(brand, theme_color(THEME_TEXT), 0);
 	lv_obj_set_style_text_font(brand, &lv_font_montserrat_16, 0);
 	lv_obj_align(brand, LV_ALIGN_CENTER, 0, 0);

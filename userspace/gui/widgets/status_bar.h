@@ -9,7 +9,7 @@
 
 /*
  * status_bar_create() - full-width bar across the top with clock left,
- * "MiNuong" title centered, signal + wifi + battery icons right.
+ * "MyNuong" title centered, signal + wifi + battery icons right.
  */
 lv_obj_t *status_bar_create(lv_obj_t *parent);
 

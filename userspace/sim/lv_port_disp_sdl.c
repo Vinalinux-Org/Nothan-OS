@@ -139,7 +139,7 @@ void lv_port_disp_init(void)
 	SDL_InitSubSystem(SDL_INIT_VIDEO);
 
 	window = SDL_CreateWindow(
-		"NothanOS MiNuong",
+		"NothanOS MyNuong",
 		SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
 		DISP_W, DISP_H,
 		SDL_WINDOW_SHOWN);
