@@ -40,6 +40,14 @@ static int  phone_fd = -1;
 static int  be_seq  = 0;   /* last-known seq from daemon, for ACK/dedup */
 static int  fe_boot = 0;
 
+/* Network status (updated by NET_REG / SIGNAL events) */
+static int  g_net_reg = 0;   /* 1 = registered (home or roaming) */
+
+static modem_signal_cb_t g_signal_cb;
+
+int modem_net_registered(void) { return phone_fd < 0 ? 1 : g_net_reg; }
+void modem_set_signal_cb(modem_signal_cb_t cb) { g_signal_cb = cb; }
+
 /* ─── non-blocking frame assembler (mirrors the daemon's fe_parse) ─── */
 
 /* Forward: event dispatch (defined after this section). */
@@ -208,6 +216,14 @@ static void dispatch_event(const char *json)
     }
     /* READY beacon — periodic daemon liveness snapshot, no action needed. */
     if (strcmp(type, "READY") == 0) {
+        return;
+    }
+    /* Network registration */
+    if (strcmp(type, "NET_REG") == 0) {
+        int stat = 0;
+        json_get_int(json, "stat", &stat);
+        g_net_reg = (stat == 1 || stat == 5);
+        if (g_signal_cb) g_signal_cb(g_net_reg, 0);
         return;
     }
     /* SIM state */
