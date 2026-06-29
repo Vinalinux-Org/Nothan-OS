@@ -13,4 +13,9 @@
  */
 lv_obj_t *status_bar_create(lv_obj_t *parent);
 
+/* Update signal indicator. registered=0 shows X; registered=1 shows bars
+ * scaled to rssi (0-31 AT+CSQ scale, 99=unknown). Safe to call before
+ * status_bar_create — the call is ignored until the widget exists. */
+void status_bar_update_signal(int registered, int rssi);
+
 #endif
