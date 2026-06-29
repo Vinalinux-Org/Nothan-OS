@@ -91,7 +91,7 @@ GUI_SRCS := gui/main.c \
 GUI_OBJS := $(patsubst gui/%.c,$(BUILD)/gui/%.o,$(GUI_SRCS)) \
             $(BUILD)/gui/phone_daemon/phone_frame.o \
             $(BUILD)/gui/phone_daemon/json.o
-GUI_CFLAGS := $(CFLAGS) -I lib/lvgl -I gui -DLV_CONF_INCLUDE_SIMPLE
+GUI_CFLAGS := $(CFLAGS) -I lib/lvgl -I gui -DLV_CONF_INCLUDE_SIMPLE -Wno-missing-field-initializers
 
 
 $(BUILD)/gui/%.o: gui/%.c | $(BUILD)/gui/port

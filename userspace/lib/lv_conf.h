@@ -222,7 +222,7 @@
 /*=========================
  * WIDGETS
  *=========================*/
-#define LV_USE_ANIMIMAGE    0
+// #define LV_USE_ANIMIMAGE    1
 #define LV_USE_ARC          0
 #define LV_USE_BAR          1
 #define LV_USE_BUTTON       1

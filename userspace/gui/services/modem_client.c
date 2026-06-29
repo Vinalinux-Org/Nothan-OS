@@ -96,19 +96,6 @@ static void fe_raw_write(const char *json)
     writefile(phone_fd, (const char *)frame, (unsigned long)total);
 }
 
-/* Normalise a phone number *in place* for matching: strip whitespace,
- * convert +84… → 0…  The result is suitable for comparison (contacts,
- * conversation keys) but loses the original formatting for display. */
-static void normalize_phone(char *num)
-{
-	char *src = num, *dst = num;
-	while (*src) {
-		char c = *src++;
-		if (c >= '0' && c <= '9') *dst++ = c;
-	}
-	*dst = '\0';
-	if (num[0] == '8' && num[1] == '4') { num[0] = '0'; }
-}
 
 /* Format a phone number for display: "+84 70 2507253" style.
  * Input is the raw JSON string (e.g. "+84702507253").

@@ -1,3 +1,4 @@
+#include "string.h"
 /*
  * services/messages.c - SMS store (mutable, persisted) + mock receiver
  *
@@ -50,11 +51,6 @@ static void copy_str(char *dst, const char *src, int max)
 	dst[i] = '\0';
 }
 
-static int str_eq(const char *a, const char *b)
-{
-	while (*a && *a == *b) { a++; b++; }
-	return *a == *b;
-}
 
 static void messages_save(void)
 {

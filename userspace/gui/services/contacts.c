@@ -1,3 +1,4 @@
+#include "string.h"
 /*
  * services/contacts.c - Contacts store
  *
