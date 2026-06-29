@@ -48,8 +48,9 @@ lv_obj_t *app_tile_create(lv_obj_t *parent, const char *symbol,
 	/* Grid (labeled) tiles use TILE_W so the label has room; the grid
 	 * layout centers each tile in its column. Dock (label-less) tiles
 	 * shrink to the badge so the floating tray keeps wide even gaps. */
-	if (label)
+	if (label) {
 		lv_obj_set_size(tile, TILE_W, TILE_H);
+	}
 	else
 		lv_obj_set_size(tile, badge_size, badge_size);
 	lv_obj_clear_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
@@ -62,8 +63,9 @@ lv_obj_t *app_tile_create(lv_obj_t *parent, const char *symbol,
 	/* Align AFTER styling: style_badge() does remove_style_all(), which
 	 * wipes any alignment set before it — that left every badge pinned
 	 * to the tile's top-left and the whole grid looked shifted left. */
-	if (label)
+	if (label) {
 		lv_obj_align(badge, LV_ALIGN_TOP_MID, 0, 0);
+	}
 	else
 		lv_obj_center(badge);
 

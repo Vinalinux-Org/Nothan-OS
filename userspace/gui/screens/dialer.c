@@ -33,8 +33,9 @@ static const struct { const char *digit; const char *letters; } keys[] = {
 static int num_len(void)
 {
 	int n = 0;
-	while (num_buf[n])
+	while (num_buf[n]) {
 		n++;
+	}
 	return n;
 }
 
@@ -64,8 +65,9 @@ static void on_backspace(lv_event_t *e)
 static void on_call(lv_event_t *e)
 {
 	(void)e;
-	if (!num_buf[0])
+	if (!num_buf[0]) {
 		return;
+	}
 	gui_logf("event: dial call %s\n", num_buf);
 	telephony_dial(num_buf);
 	/* The call overlay (lv_layer_top) takes over from here; drop back to
@@ -158,8 +160,9 @@ void dialer_create(lv_obj_t *screen, void *arg)
 	lv_obj_set_grid_dsc_array(grid, kp_col_dsc, kp_row_dsc);
 	lv_obj_clear_flag(grid, LV_OBJ_FLAG_SCROLLABLE);
 
-	for (int i = 0; i < (int)(sizeof(keys) / sizeof(keys[0])); i++)
+	for (int i = 0; i < (int)(sizeof(keys) / sizeof(keys[0])); i++) {
 		keypad_btn(grid, keys[i].digit, keys[i].letters, i / 3, i % 3);
+	}
 
 	/* Call button centered, lifted well above the nav bar; backspace beside. */
 	lv_obj_t *call = round_button(screen, LV_SYMBOL_CALL, THEME_SUCCESS);

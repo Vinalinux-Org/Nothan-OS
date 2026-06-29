@@ -49,10 +49,12 @@ void nav_init(void)
 void nav_show_chrome(bool show)
 {
 	gui_logf("nav: chrome %s\n", show ? "show" : "hide");
-	if (!navbar)
+	if (!navbar) {
 		return;
-	if (show)
+	}
+	if (show) {
 		lv_obj_clear_flag(navbar, LV_OBJ_FLAG_HIDDEN);
+	}
 	else
 		lv_obj_add_flag(navbar, LV_OBJ_FLAG_HIDDEN);
 }
@@ -71,8 +73,9 @@ void nav_set_root(nav_builder_fn builder, void *arg)
 
 	/* Free stacked screens below the active one; delete the active one
 	 * explicitly after switching away from it. */
-	for (int i = 0; i < depth - 1; i++)
+	for (int i = 0; i < depth - 1; i++) {
 		lv_obj_delete(stack[i]);
+	}
 
 	depth = 0;
 	stack[depth++] = scr;
@@ -84,14 +87,16 @@ void nav_set_root(nav_builder_fn builder, void *arg)
 	 * masked blend over-runs that layer during the slide — corrupting the
 	 * heap. Instant loads avoid the compositing entirely. */
 	lv_screen_load(scr);
-	if (old_active)
+	if (old_active) {
 		lv_obj_delete(old_active);
+	}
 }
 
 void nav_push(nav_builder_fn builder, void *arg)
 {
-	if (depth >= NAV_MAX)
+	if (depth >= NAV_MAX) {
 		return;
+	}
 
 	lv_obj_t *scr = lv_obj_create(NULL);
 	screen_bg(scr);
@@ -104,8 +109,9 @@ void nav_push(nav_builder_fn builder, void *arg)
 
 void nav_pop(void)
 {
-	if (depth <= 1)
+	if (depth <= 1) {
 		return;
+	}
 
 	lv_obj_t *dying = stack[depth - 1];
 	depth--;
@@ -116,15 +122,17 @@ void nav_pop(void)
 
 void nav_to_root(void)
 {
-	if (depth <= 1)
+	if (depth <= 1) {
 		return;
+	}
 
 	gui_logf("nav: to-root, depth %d->1\n", depth);
 
 	/* Switch to the root instantly, then free the intermediates — doing
 	 * it instantly avoids deleting a screen mid-animation. */
 	lv_screen_load(stack[0]);
-	for (int i = 1; i < depth; i++)
+	for (int i = 1; i < depth; i++) {
 		lv_obj_delete(stack[i]);
+	}
 	depth = 1;
 }

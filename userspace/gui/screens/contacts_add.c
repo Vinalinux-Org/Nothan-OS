@@ -33,8 +33,9 @@ static void on_save(lv_event_t *e)
 		 name ? name : "", phone ? phone : "",
 		 edit_index >= 0 ? "edit" : "add");
 	if (name && name[0]) {
-		if (edit_index >= 0)
+		if (edit_index >= 0) {
 			contacts_update(edit_index, name, phone);
+		}
 		else
 			contacts_add(name, phone);
 	}
@@ -55,8 +56,9 @@ static lv_obj_t *text_field(lv_obj_t *parent, int y, const char *accepted)
 {
 	lv_obj_t *ta = lv_textarea_create(parent);
 	lv_textarea_set_one_line(ta, true);
-	if (accepted)
+	if (accepted) {
 		lv_textarea_set_accepted_chars(ta, accepted);
+	}
 	lv_obj_set_size(ta, lv_pct(92), 44);
 	lv_obj_align(ta, LV_ALIGN_TOP_MID, 0, y);
 	lv_obj_set_style_bg_color(ta, theme_color(THEME_SURFACE), 0);
@@ -81,15 +83,17 @@ void contacts_add_create(lv_obj_t *screen, void *arg)
 	int y = APP_HEADER_HEIGHT + 24;
 	field_label(screen, "Name", y);
 	name_field = text_field(screen, y + 22, NULL);
-	if (cur)
+	if (cur) {
 		lv_textarea_set_text(name_field, cur->name);
+	}
 	gui_keyboard_attach(name_field, LV_KEYBOARD_MODE_TEXT_LOWER);
 
 	y += 22 + 44 + 20;
 	field_label(screen, "Phone", y);
 	phone_field = text_field(screen, y + 22, "0123456789 +");
-	if (cur)
+	if (cur) {
 		lv_textarea_set_text(phone_field, cur->phone);
+	}
 	gui_keyboard_attach(phone_field, LV_KEYBOARD_MODE_NUMBER);
 
 	lv_obj_t *save = lv_button_create(screen);

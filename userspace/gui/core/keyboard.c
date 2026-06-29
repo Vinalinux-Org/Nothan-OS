@@ -78,8 +78,9 @@ static void kb_done_cb(lv_event_t *e)
 {
 	(void)e;
 	/* Restore companion bar before hiding — works for both READY and CANCEL. */
-	if (lift_obj)
+	if (lift_obj) {
 		lv_obj_align(lift_obj, LV_ALIGN_BOTTOM_MID, 0, lift_y_closed);
+	}
 	lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -91,8 +92,9 @@ static void ta_focused_cb(lv_event_t *e)
 	lv_keyboard_set_mode(kb, mode);
 	lv_keyboard_set_textarea(kb, ta);
 	lv_obj_clear_flag(kb, LV_OBJ_FLAG_HIDDEN);
-	if (lift_obj)
+	if (lift_obj) {
 		lv_obj_align(lift_obj, LV_ALIGN_BOTTOM_MID, 0, -KB_HEIGHT);
+	}
 }
 
 static void ta_gone_cb(lv_event_t *e)
@@ -101,8 +103,9 @@ static void ta_gone_cb(lv_event_t *e)
 	lv_obj_t       *ta   = lv_event_get_target(e);
 
 	/* DEFOCUSED: keyboard dismissed by losing focus — restore bar. */
-	if (code == LV_EVENT_DEFOCUSED && lift_obj)
+	if (code == LV_EVENT_DEFOCUSED && lift_obj) {
 		lv_obj_align(lift_obj, LV_ALIGN_BOTTOM_MID, 0, lift_y_closed);
+	}
 	lv_obj_add_flag(kb, LV_OBJ_FLAG_HIDDEN);
 	/* DELETE: the textarea's screen is tearing down. Drop every dangling
 	 * reference to it — the keyboard keeps a textarea pointer internally and
@@ -110,8 +113,9 @@ static void ta_gone_cb(lv_event_t *e)
 	 * touches the OLD textarea), and lift_obj may point into this screen. */
 	if (code == LV_EVENT_DELETE) {
 		lift_obj = NULL;
-		if (kb && lv_keyboard_get_textarea(kb) == ta)
+		if (kb && lv_keyboard_get_textarea(kb) == ta) {
 			lv_keyboard_set_textarea(kb, NULL);
+		}
 	}
 }
 

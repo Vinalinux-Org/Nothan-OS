@@ -23,8 +23,9 @@ static lv_obj_t *make_button_slot(lv_obj_t *parent, lv_event_cb_t cb)
 	lv_obj_set_style_bg_color(slot, theme_color(THEME_TEXT), LV_STATE_PRESSED);
 	lv_obj_set_style_bg_opa(slot, LV_OPA_20, LV_STATE_PRESSED);
 	lv_obj_clear_flag(slot, LV_OBJ_FLAG_SCROLLABLE);
-	if (cb)
+	if (cb) {
 		lv_obj_add_event_cb(slot, cb, LV_EVENT_CLICKED, NULL);
+	}
 	return slot;
 }
 

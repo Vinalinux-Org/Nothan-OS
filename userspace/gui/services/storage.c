@@ -17,8 +17,9 @@
 int storage_read(const char *path, void *buf, int max_len)
 {
 	long fd = open(path, O_RDONLY);
-	if (fd < 0)
+	if (fd < 0) {
 		return -1;
+	}
 	long n = read(fd, buf, (unsigned long)max_len);
 	close(fd);
 	return (int)n;
@@ -27,8 +28,9 @@ int storage_read(const char *path, void *buf, int max_len)
 int storage_write(const char *path, const void *buf, int len)
 {
 	long fd = open(path, O_WRONLY | O_CREAT);
-	if (fd < 0)
+	if (fd < 0) {
 		return -1;
+	}
 	long n = writefile(fd, buf, (unsigned long)len);
 	close(fd);
 	return (int)n;

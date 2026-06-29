@@ -220,8 +220,9 @@ static void scroll_exec_cb(void *grid, int32_t v)
 void home_scroll_to_end(int to_bottom, int duration_ms)
 {
 	lv_obj_t *grid = home_grid;
-	if (!grid)
+	if (!grid) {
 		return;
+	}
 
 	int cur    = lv_obj_get_scroll_top(grid);	/* current position */
 	int target = to_bottom ? cur + lv_obj_get_scroll_bottom(grid) : 0;
