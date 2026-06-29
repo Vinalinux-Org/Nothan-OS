@@ -12,6 +12,7 @@
 
 #include "messages.h"
 #include "modem_client.h"
+#include "telephony.h"
 #include "../core/log.h"
 #include "storage.h"
 #include "lvgl/lvgl.h"
@@ -300,6 +301,8 @@ static void strip_vietnamese(char *s)
 static void refresh_screen_cb(void *user_data)
 {
 	(void)user_data;
+	if (telephony_state() != TEL_IDLE)
+		return;   /* call overlay is active; call_ui fires SCREEN_LOADED on hang-up */
 	lv_obj_send_event(lv_screen_active(), LV_EVENT_SCREEN_LOADED, NULL);
 }
 

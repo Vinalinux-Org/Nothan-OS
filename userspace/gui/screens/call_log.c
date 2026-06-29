@@ -19,6 +19,7 @@
 #include "../widgets/nav_bar.h"
 #include "../widgets/avatar.h"
 #include "../services/telephony.h"
+#include "../services/modem_client.h"
 
 #define ROW_H      84
 #define AVATAR_SZ  60
@@ -37,6 +38,10 @@ static void on_row(lv_event_t *e)
 	int idx = (int)(long)lv_event_get_user_data(e);
 	const struct call_log_entry *en = telephony_log_get(idx);
 	if (!en) {
+		return;
+	}
+	if (!modem_net_registered()) {
+		gui_toast("No network");
 		return;
 	}
 	gui_logf("event: call back %s\n", en->number);

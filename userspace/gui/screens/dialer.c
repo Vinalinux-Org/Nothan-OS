@@ -11,6 +11,7 @@
 #include "../widgets/app_header.h"
 #include "../widgets/nav_bar.h"
 #include "../services/telephony.h"
+#include "../services/modem_client.h"
 
 #define KEY_SZ  80	/* circular dial-key diameter */
 
@@ -66,6 +67,10 @@ static void on_call(lv_event_t *e)
 {
 	(void)e;
 	if (!num_buf[0]) {
+		return;
+	}
+	if (!modem_net_registered()) {
+		gui_toast("No network");
 		return;
 	}
 	gui_logf("event: dial call %s\n", num_buf);

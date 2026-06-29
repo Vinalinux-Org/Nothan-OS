@@ -15,4 +15,7 @@ void gui_log(const char *msg);
 /* Log a printf-style formatted line ("[GUI] " is prepended). */
 void gui_logf(const char *fmt, ...);
 
+/* Show a brief on-screen message on lv_layer_top that disappears after 2s. */
+void gui_toast(const char *msg);
+
 #endif
