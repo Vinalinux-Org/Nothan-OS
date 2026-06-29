@@ -20,9 +20,6 @@
 #define DOCK_H     76
 #define DOCK_FLOAT 18	/* gap between the floating dock and the nav bar */
 
-/* The scrollable app grid, kept so the demo sweep can reach it without
- * threading a handle back through the nav builder signature. */
-static lv_obj_t *home_grid;
 
 struct app_def {
 	const char    *symbol;
@@ -204,42 +201,7 @@ void home_create(lv_obj_t *parent, void *arg)
 					      apps[i].label, apps[i].color);
 		lv_obj_set_grid_cell(t, LV_GRID_ALIGN_CENTER, i % 4, 1,
 				     LV_GRID_ALIGN_START, i / 4, 1);
-		if (apps[i].builder) {
-			lv_obj_t *badge = lv_obj_get_child(t, 0);
-			lv_obj_add_event_cb(badge, on_app_tile, LV_EVENT_CLICKED,
-					    (void *)&apps[i]);
-		}
 	}
 
 	build_dock(parent);
-
-	/* The system nav bar is owned by the navigation stack and drawn on
-	 * the display top layer, so the home screen does not create its own.
-	 * grid_bottom above still reserves NAV_BAR_HEIGHT for it. */
-	home_grid = grid;
-}
-
-static void scroll_exec_cb(void *grid, int32_t v)
-{
-	lv_obj_scroll_to_y((lv_obj_t *)grid, v, LV_ANIM_OFF);
-}
-
-void home_scroll_to_end(int to_bottom, int duration_ms)
-{
-	lv_obj_t *grid = home_grid;
-	if (!grid) {
-		return;
-	}
-
-	int cur    = lv_obj_get_scroll_top(grid);	/* current position */
-	int target = to_bottom ? cur + lv_obj_get_scroll_bottom(grid) : 0;
-
-	lv_anim_t a;
-	lv_anim_init(&a);
-	lv_anim_set_var(&a, grid);
-	lv_anim_set_values(&a, cur, target);
-	lv_anim_set_duration(&a, duration_ms);
-	lv_anim_set_exec_cb(&a, scroll_exec_cb);
-	lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
-	lv_anim_start(&a);
 }

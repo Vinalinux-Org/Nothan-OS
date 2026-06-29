@@ -13,8 +13,6 @@
 #include "../core/nav.h"
 #include "../core/log.h"
 
-static void on_back(lv_event_t *e) { (void)e; gui_log("event: header back\n"); nav_pop(); }
-
 static lv_obj_t *icon_button(lv_obj_t *parent, const char *symbol)
 {
 	lv_obj_t *btn = lv_button_create(parent);
@@ -44,10 +42,6 @@ lv_obj_t *app_header_create(lv_obj_t *parent, const char *title,
 	lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
 	lv_obj_set_style_pad_hor(bar, 8, 0);
 	lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
-
-	lv_obj_t *back = icon_button(bar, LV_SYMBOL_LEFT);
-	lv_obj_align(back, LV_ALIGN_LEFT_MID, 0, 0);
-	lv_obj_add_event_cb(back, on_back, LV_EVENT_CLICKED, NULL);
 
 	if (title) {
 		lv_obj_t *lbl = lv_label_create(bar);

@@ -7,7 +7,7 @@ OBJDUMP = $(CROSS_COMPILE)objdump
 
 BUILD   := build
 
-CFLAGS  := -mcpu=cortex-a8 -marm -O2 -std=gnu11 -ffreestanding -nostdlib
+CFLAGS  := -mcpu=cortex-a8 -marm -O1 -std=gnu11 -ffreestanding -nostdlib
 # -fno-strict-aliasing: LVGL (and our type-punning) violate strict aliasing;
 # without this, ARM GCC -O2 miscompiles the SW draw path (the masked RGB565
 # blend's loop bound and lv_area pointers came out garbage → Data Aborts).
