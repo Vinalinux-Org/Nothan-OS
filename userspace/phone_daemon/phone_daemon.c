@@ -101,10 +101,6 @@ static int  g_bcl      = 100;
 static unsigned long g_clip_deadline = 0;
 static int           g_call_in_sent  = 0;
 
-/* Call-waiting deferred missed-call: when a +CCWA arrives during an active
- * call we save the caller number here; on call-end we log it as missed. */
-static char g_pending_ccwa_num[CALLER_NUM_MAX];
-
 /* GPS state */
 static int           g_gps_on       = 0;
 static unsigned long g_last_gps_poll = 0;
@@ -1509,7 +1505,7 @@ static int  g_body_ucs2;
  * lines (both without a +CMT: prefix).  We accumulate all-hex continuation
  * lines and flush the complete body after BODY_HEX_FLUSH_MS of idle silence
  * or when the next non-hex line terminates the sequence. */
-#define BODY_HEX_FLUSH_MS  250
+#define BODY_HEX_FLUSH_MS  1000
 static char  g_body_hex_acc[SMS_HEX_MAX + 4];
 static int   g_body_hex_acc_len;
 static unsigned long g_body_hex_flush_ms;
@@ -1635,12 +1631,6 @@ void handle_call_release(const char *reason)
         fe_send_call_end(r, initiator, cs.duration, cs.last_cause);
         at_submit("AT+CEER\r", 2000);
 
-        /* If someone called while we were busy (+CCWA), log them as missed now. */
-        if (g_pending_ccwa_num[0]) {
-            printf("[pd] CCWA caller %s logged as missed (was busy)\n", g_pending_ccwa_num);
-            fe_send_call_miss(g_pending_ccwa_num);
-            g_pending_ccwa_num[0] = '\0';
-        }
     } else if (cs.pending_clip) {
         fe_send_call_miss(cs.caller_num);
     }
@@ -1661,11 +1651,11 @@ void handle_ccwa(const char *line)
 {
     char num[CALLER_NUM_MAX];
     extract_quoted(line + 6, num, sizeof(num));
-    /* Save the caller number so we can log it as a missed call when the
-     * active call ends (no hold/swap in this demo — the 3rd party gets busy). */
-    strncpy(g_pending_ccwa_num, num, sizeof(g_pending_ccwa_num) - 1);
-    g_pending_ccwa_num[sizeof(g_pending_ccwa_num) - 1] = '\0';
-    printf("[pd] CCWA from %s (will log missed on call-end)\n", num);
+    /* Reject the waiting caller immediately with UDUB (busy).
+     * AT+CHLD=0 with no held call = set User Determined User Busy on the
+     * waiting party.  Active call is unaffected.  No missed-call entry. */
+    printf("[pd] CCWA from %s — rejecting with busy (AT+CHLD=0)\n", num);
+    at_submit("AT+CHLD=0\r", 2000);
 }
 
 void handle_ceer(const char *line)
@@ -3355,6 +3345,15 @@ void trigger_recover(const char *why)
     if (g_modem_state == MODEM_RECOVER) {
         return;
     }
+    /* If recovery fires mid-call, tell the frontend immediately so it resets
+     * to IDLE — otherwise it waits for a CALL_END that will never arrive. */
+    if (cs.in_call || cs.outgoing || cs.pending_clip) {
+        fe_send_call_end(why ? why : "RECOVER", "remote", "", -1);
+        cs.in_call = 0; cs.outgoing = 0; cs.pending_clip = 0;
+        cs.local_hangup = 0; cs.rejected = 0; cs.last_cause = -1;
+        cs.caller_num[0] = '\0'; cs.duration[0] = '\0';
+        g_call_in_sent = 0; g_clip_deadline = 0;
+    }
     printf("[pd] modem down (%s) — reopening %s\n", why ? why : "?", SIM_DEV);
     fe_send_modem_down();
     g_modem_state = MODEM_RECOVER;
@@ -3420,6 +3419,10 @@ void heartbeat_tick(unsigned long now)
         return;
     }
     if (now - g_last_hb < HB_INTERVAL_MS) {
+        return;
+    }
+    if (cs.in_call) {
+        g_last_hb = now;   /* modem busy with voice — not a failure */
         return;
     }
     if (at_busy || at_count > 0) {
