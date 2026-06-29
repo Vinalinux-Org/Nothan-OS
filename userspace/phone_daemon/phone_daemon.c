@@ -52,7 +52,7 @@ int errno;
 #define RPI_DEV         "/dev/phone_be"   /* phonebus loopback to the GUI (was /dev/uart4 → RPi) */
 
 #define CALLER_NUM_MAX  32
-#define SMS_TEXT_MAX    640
+#define SMS_TEXT_MAX    1024
 #define SMS_HEX_MAX     1024
 #define USSD_CODE_MAX   64
 #define DTMF_TONE_MAX   4
@@ -1968,6 +1968,13 @@ void handle_cpin(const char *line)
     strncpy(g_sim_state, p, sizeof(g_sim_state) - 1);
     g_sim_state[sizeof(g_sim_state) - 1] = '\0';
     fe_send_sim_stat(p);
+
+    /* Write state to a status file so the shell can read it. */
+    int sf = open("/SIMSTATE", O_WRONLY | O_CREAT);
+    if (sf >= 0) {
+        while (*p) { writefile(sf, p, 1); p++; }
+        close(sf);
+    }
 }
 
 static void handle_cbc(const char *line)
@@ -2192,16 +2199,30 @@ void sim_line_handler(const char *line)
          * valid all-hex line.  Accumulate until the idle timer fires or a
          * non-hex / non-CMT line arrives (signals end-of-body). */
         if (g_body_pending == BODY_CMT) {
-            if (is_all_hex_line(line)) {
-                int len = (int)strlen(line);
-                if (g_body_hex_acc_len + len < SMS_HEX_MAX) {
-                    memcpy(g_body_hex_acc + g_body_hex_acc_len, line, (size_t)len);
-                    g_body_hex_acc_len += len;
+            /* Strip any surrounding "..." that the modem adds around UCS2 hex. */
+            const char *h = line;
+            int hlen = (int)strlen(h);
+            if (hlen > 0 && h[hlen - 1] == '"') hlen--;
+            if (*h == '"') { h++; hlen--; }
+
+            if (hlen > 0) {
+                int all_hex = 1;
+                for (int i = 0; i < hlen; i++) {
+                    char c = h[i];
+                    if (!((c >= '0' && c <= '9') ||
+                          (c >= 'A' && c <= 'F') ||
+                          (c >= 'a' && c <= 'f'))) { all_hex = 0; break; }
                 }
-                g_body_hex_acc_len += len;
-                g_body_hex_flush_ms = pd_now_ms() + BODY_HEX_FLUSH_MS;
-                return;
+                if (all_hex) {
+                    if (g_body_hex_acc_len + hlen < SMS_HEX_MAX) {
+                        memcpy(g_body_hex_acc + g_body_hex_acc_len, h, (size_t)hlen);
+                        g_body_hex_acc_len += hlen;
+                    }
+                    g_body_hex_flush_ms = pd_now_ms() + BODY_HEX_FLUSH_MS;
+                    return;
+                }
             }
+            /* Non-hex BODY_CMT line (plain-text SMS body — not UCS2 hex): flush
             /* Non-hex BODY_CMT line (plain-text SMS body — not UCS2 hex): flush
              * any previously accumulated hex (shouldn't mix), then pass line as body. */
             if (g_body_hex_acc_len > 0) {
@@ -3019,6 +3040,10 @@ void dispatch_cmd(const char *json)
         at_submit("AT+CMUT=1\r", 3000);
     } else if (!strcmp(type, MSG_CMD_UNMUTE)) {
         at_submit("AT+CMUT=0\r", 3000);
+    }
+    /* ── Device queries ── */
+    else if (!strcmp(type, MSG_CMD_SIM_STAT)) {
+        at_submit("AT+CPIN?\r", 3000);
     }
     /* ── SMS ── */
     else if (!strcmp(type, MSG_CMD_SMS)) {
