@@ -538,8 +538,6 @@ static void musb_touch_setup(void)
  * Milestone 3: just parse and print tip/X/Y to confirm the data path. */
 static void musb_touch_loop(void)
 {
-	int prev_tip = -1;
-
 	printk("[MUSB] touch: polling EP%d-IN, feeding /dev/input0\n", TOUCH_EP_IN);
 
 	while (musb_connected) {
@@ -563,7 +561,6 @@ static void musb_touch_loop(void)
 				touch_x = buf[4] | buf[5] << 8;
 				touch_y = buf[6] | buf[7] << 8;
 				touch_pressed = tip;
-				prev_tip = tip;
 			}
 		} else if (csr & (RXCSR_H_RXSTALL | RXCSR_H_ERROR | RXCSR_DATAERROR)) {
 			mmio_write16(usbss_va + EP1_RXCSR, RXCSR_FLUSHFIFO);
