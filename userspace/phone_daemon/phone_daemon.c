@@ -2623,6 +2623,12 @@ void handle_cmd_dial(const char *json)
 void handle_cmd_answer(void)
 {
     at_submit("ATA\r", 10000);
+    /* SIM7600 resets audio routing on incoming call answer — re-apply
+     * handset device (CSDVC=1) and volume (CLVL=5) so RX audio is audible.
+     * Outgoing calls don't need this because the module holds the last
+     * audio state from init; incoming ATA clears it. */
+    at_submit("AT+CSDVC=1\r", 2000);
+    at_submit("AT+CLVL=5\r",  2000);
 }
 
 /* End or reject the current call.
@@ -3366,6 +3372,7 @@ void enqueue_init(void)
     at_submit("AT+CGREG=2\r", 2000);
     at_submit("AT+CSDVC=1\r", 2000);
     at_submit("AT+CLVL=5\r", 2000);
+    at_submit("AT+CRSL=5\r", 2000);
     at_submit("AT+CMICGAIN=8\r", 2000);
     cs.ucs2_mode = 0;
 }
