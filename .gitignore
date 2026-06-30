@@ -93,6 +93,7 @@ TAGS
 .roo*
 .agents/
 .codex/
+.codegraph/
 nothan_os_old/
 
 # Documentation (WIP, không track)
