@@ -56,6 +56,26 @@ static const struct app_def apps[] = {
 };
 #define APP_COUNT  (int)(sizeof(apps) / sizeof(apps[0]))
 
+static lv_obj_t *s_grid;
+
+static void on_screen_unloaded(lv_event_t *e)
+{
+	(void)e;
+	s_grid = NULL;
+}
+
+void home_scroll_to_end(int to_end, int animated)
+{
+	if (!s_grid) return;
+	lv_anim_enable_t anim = animated ? LV_ANIM_ON : LV_ANIM_OFF;
+	if (to_end) {
+		uint32_t n = lv_obj_get_child_count(s_grid);
+		if (n) lv_obj_scroll_to_view(lv_obj_get_child(s_grid, (int32_t)(n - 1)), anim);
+	} else {
+		lv_obj_scroll_to_y(s_grid, 0, anim);
+	}
+}
+
 static const struct app_def dock_apps[4] = {
 	{ LV_SYMBOL_CALL,     NULL, 0x22C55E, call_log_create },
 	{ LV_SYMBOL_ENVELOPE, NULL, 0x3B82F6, sms_list_create },
@@ -202,6 +222,10 @@ void home_create(lv_obj_t *parent, void *arg)
 		lv_obj_set_grid_cell(t, LV_GRID_ALIGN_CENTER, i % 4, 1,
 				     LV_GRID_ALIGN_START, i / 4, 1);
 	}
+
+	s_grid = grid;
+	lv_obj_add_event_cb(parent, on_screen_unloaded,
+			    LV_EVENT_SCREEN_UNLOAD_START, NULL);
 
 	build_dock(parent);
 }

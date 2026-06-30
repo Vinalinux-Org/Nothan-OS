@@ -24,12 +24,14 @@
 #define CALLLOG_PATH    "/CALLLOG.BIN"
 #define CALLLOG_MAGIC   0x474C4144u  /* "CALD" */
 
+#ifdef GUI_MONKEY
 /* Mock timing (milliseconds). */
 #define DIAL_CONNECT_MS    2500
 #define ACTIVE_HANGUP_MS   8000		/* mock remote ends the call after this */
 #define RING_TIMEOUT_MS    12000
 #define INCOMING_EVERY_MS  30000
 #define TICK_PERIOD_MS     500
+#endif
 
 struct calllog_blob {
 	unsigned int          magic;
@@ -46,18 +48,20 @@ static int             cur_dir;                   /* enum call_type at pickup */
 static int             muted;
 static uint32_t        state_since;               /* lv_tick at last transition */
 static uint32_t        active_since;              /* lv_tick when ACTIVE began */
-static uint32_t        next_incoming_at;          /* lv_tick to inject next ring */
 
-static tel_observer_fn observer;
-static int             mock_on = 1;   /* auto-inject incoming calls */
+static tel_observer_fn     observer;
+static tel_log_changed_fn  log_observer;
 
 /* Call log: append-only ring, newest at the end. */
 static struct call_log_entry log_buf[CALLLOG_MAX];
 static int                   log_n;
 
-/* Mock incoming callers (for MONKEY builds only). */
+#ifdef GUI_MONKEY
+static uint32_t        next_incoming_at;          /* lv_tick to inject next ring */
+static int             mock_on = 1;               /* auto-inject incoming calls */
 static const char *mock_callers[] = { "0868 000 000" };
 static int         mock_idx;
+#endif
 
 static void copy_str(char *dst, const char *src, int max)
 {
@@ -146,7 +150,9 @@ static void set_state(enum tel_state s)
 static void go_idle(void)
 {
 	muted = 0;
+#ifdef GUI_MONKEY
 	next_incoming_at = lv_tick_get() + INCOMING_EVERY_MS;
+#endif
 	set_state(TEL_IDLE);
 }
 
@@ -214,7 +220,7 @@ void telephony_mute(int on)
 	modem_cmd_mute(on);
 }
 
-/* Inject a mock incoming call (only when idle). */
+#ifdef GUI_MONKEY
 static void inject_incoming(void)
 {
 	const char *num = mock_callers[mock_idx];
@@ -229,15 +235,9 @@ static void inject_incoming(void)
 static void telephony_tick(lv_timer_t *t)
 {
 	(void)t;
-
-	/* When mock is OFF the real modem backend drives the state machine
-	 * through modem_client.c. The mock tick is inert so it never races
-	 * with daemon URCs. */
 	if (!mock_on)
 		return;
-
 	uint32_t now = lv_tick_get();
-
 	switch (state) {
 	case TEL_DIALING:
 		if (now - state_since >= DIAL_CONNECT_MS) {
@@ -254,15 +254,11 @@ static void telephony_tick(lv_timer_t *t)
 		}
 		break;
 	case TEL_IDLE:
-		if (mock_on && (int32_t)(now - next_incoming_at) >= 0) {
+		if ((int32_t)(now - next_incoming_at) >= 0)
 			inject_incoming();
-		}
 		break;
 	case TEL_ACTIVE:
-		/* Mock radio: the remote ends the call on its own so a soak run
-		 * (or an unattended demo) is never stuck on the call screen. A
-		 * real call only ends when the user hangs up (mock_on == 0). */
-		if (mock_on && now - active_since >= ACTIVE_HANGUP_MS) {
+		if (now - active_since >= ACTIVE_HANGUP_MS) {
 			gui_log("telephony: remote hung up\n");
 			telephony_hangup();
 		}
@@ -271,14 +267,17 @@ static void telephony_tick(lv_timer_t *t)
 		break;
 	}
 }
+#endif /* GUI_MONKEY */
 
 void telephony_init(void)
 {
 	calllog_load();
-	next_incoming_at = lv_tick_get() + INCOMING_EVERY_MS;
 	cur_info.name   = NULL;
 	cur_info.number = cur_number;
+#ifdef GUI_MONKEY
+	next_incoming_at = lv_tick_get() + INCOMING_EVERY_MS;
 	lv_timer_create(telephony_tick, TICK_PERIOD_MS, NULL);
+#endif
 }
 
 enum tel_state telephony_state(void) { return state; }
@@ -296,8 +295,13 @@ unsigned int telephony_duration_sec(void)
 int telephony_muted(void) { return muted; }
 
 void telephony_set_observer(tel_observer_fn cb) { observer = cb; }
+void telephony_set_log_observer(tel_log_changed_fn cb) { log_observer = cb; }
 
+#ifdef GUI_MONKEY
 void telephony_set_mock(int on) { mock_on = on; }
+#else
+void telephony_set_mock(int on) { (void)on; }
+#endif
 
 /* ─── Modem-client entry points (called from modem_client.c dispatch) ─── */
 
@@ -348,18 +352,16 @@ void telephony_log_missed_direct(const char *number)
     copy_str(name, c ? c->name : "", sizeof(name));
     gui_logf("telephony: missed (ccwa) %s\n", name[0] ? name : number);
     calllog_add(number, name, CALL_MISSED, 0);
+    if (log_observer) log_observer();
 }
 
-/* Mock-only: returns whether mock injectors are active (so the GUI client
- * can skip pumping when the mock is driving the state machine). */
+#ifdef GUI_MONKEY
 int telephony_mock_on(void) { return mock_on; }
-
-/* Clock the mock state machine one tick (called from modem_client when
- * the mock timer is active, so it integrates with the lv_timer path). */
-void telephony_tick_from_client(void)
-{
-    telephony_tick(NULL);
-}
+void telephony_tick_from_client(void) { telephony_tick(NULL); }
+#else
+int telephony_mock_on(void) { return 0; }
+void telephony_tick_from_client(void) {}
+#endif
 
 void telephony_calllog_clear(void)
 {

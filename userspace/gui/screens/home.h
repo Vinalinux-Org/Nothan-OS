@@ -11,4 +11,8 @@
  */
 void home_create(lv_obj_t *screen, void *arg);
 
+/* Programmatically scroll the app grid. to_end=1 scrolls to the last row,
+ * to_end=0 scrolls back to the top. animated=0 snaps instantly. */
+void home_scroll_to_end(int to_end, int animated);
+
 #endif

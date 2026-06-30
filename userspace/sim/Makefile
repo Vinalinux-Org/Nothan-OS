@@ -22,20 +22,23 @@ LDFLAGS := $(shell pkg-config --libs sdl2) -lm -lrt
 # Sources
 # -----------------------------------------------------------------------
 
-# These 4 files replace their kernel-specific counterparts:
-#   gui/main.c              → sim_main.c        (POSIX timing, SDL event pump)
-#   gui/core/log.c          → log_sim.c         (printf instead of svc write)
-#   gui/port/lv_port_disp.c → lv_port_disp_sdl.c (SDL2 instead of FB ioctl)
-#   gui/port/lv_port_indev.c → lv_port_indev_sdl.c (SDL2 mouse)
-#   gui/services/storage.c  → storage_sim.c       (no-op; no kernel/FS in sim)
-SIM_SRC := sim_main.c log_sim.c lv_port_disp_sdl.c lv_port_indev_sdl.c storage_sim.c
+# These files replace their kernel-specific counterparts:
+#   gui/main.c                    → sim_main.c             (POSIX timing, SDL event pump)
+#   gui/core/log.c                → log_sim.c              (printf instead of svc write)
+#   gui/port/lv_port_disp.c      → lv_port_disp_sdl.c     (SDL2 instead of FB ioctl)
+#   gui/port/lv_port_indev.c     → lv_port_indev_sdl.c    (SDL2 mouse)
+#   gui/services/storage.c       → storage_sim.c           (no-op; no kernel/FS in sim)
+#   gui/services/modem_client.c  → modem_client_sim.c      (no-op; mock driven by lv_timer)
+SIM_SRC := sim_main.c log_sim.c lv_port_disp_sdl.c lv_port_indev_sdl.c \
+           storage_sim.c modem_client_sim.c
 
 GUI_ALL  := $(shell find $(ROOT)/gui -name "*.c")
 GUI_EXCL := $(ROOT)/gui/main.c \
             $(ROOT)/gui/core/log.c \
             $(ROOT)/gui/port/lv_port_disp.c \
             $(ROOT)/gui/port/lv_port_indev.c \
-            $(ROOT)/gui/services/storage.c
+            $(ROOT)/gui/services/storage.c \
+            $(ROOT)/gui/services/modem_client.c
 GUI_SRC  := $(filter-out $(GUI_EXCL), $(GUI_ALL))
 
 LVGL_SRC := $(shell find $(ROOT)/lib/lvgl/src -name "*.c")
@@ -315,7 +318,7 @@ $(PBUILD)/lvgl/%.o: $(ROOT)/lib/lvgl/src/%.c
 RBUILD      := build-arm
 RTARGET     := nothan-sim-arm
 ARMCC       := arm-linux-gnueabihf-gcc
-ARM_CFLAGS  := -marm -mcpu=cortex-a8 -O2 -fno-strict-aliasing -g -DLV_SIM_HOST \
+ARM_CFLAGS  := -marm -mcpu=cortex-a8 -O1 -fno-strict-aliasing -g -DLV_SIM_HOST \
                -DSIM_AUTOTAP -DSIM_HEADLESS -DSIM_BUILTIN -DSIM_GUARD \
                -Wno-unused-function -Wno-unused-variable -Wno-unused-parameter \
                -iquote $(ROOT)/lib -iquote $(ROOT)/gui
@@ -380,6 +383,64 @@ $(KBUILD)/lvgl/%.o: $(ROOT)/lib/lvgl/src/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) $(KSAN_FLAGS) -c $< -o $@
 
+# -----------------------------------------------------------------------
+# Monkey-mock (`make monkey-mock`) — same as monkey but with async
+# telephony + messages mock events enabled. This mirrors real board usage
+# where SIM7600 URCs (incoming call, SMS) fire at arbitrary points during
+# navigation and scrolling. Runs 30 000 frames (~5× longer) to surface
+# the timer/scroll race (UAF: mock lv_timer rebuilds screen mid-scroll).
+#
+#   make monkey-mock && ASAN_OPTIONS=detect_leaks=0 ./nothan-sim-monkey-mock
+# -----------------------------------------------------------------------
+
+LBUILD      := build-monkey-mock
+LTARGET     := nothan-sim-monkey-mock
+LSAN_FLAGS  := -fsanitize=address -fno-omit-frame-pointer \
+               -DSIM_AUTOTAP -DSIM_MONKEY -DGUI_MONKEY -DSIM_HEADLESS \
+               -DMONKEY_MOCK -DSIM_MONKEY_FRAMES=30000
+
+L_SIM_OBJS  := $(patsubst %.c,              $(LBUILD)/sim/%.o,  $(SIM_SRC))
+L_GUI_OBJS  := $(patsubst $(ROOT)/gui/%.c,  $(LBUILD)/gui/%.o,  $(GUI_SRC))
+L_LVGL_OBJS := $(patsubst $(ROOT)/lib/lvgl/src/%.c, $(LBUILD)/lvgl/%.o, $(LVGL_SRC))
+L_OBJS := $(L_SIM_OBJS) $(L_GUI_OBJS) $(L_LVGL_OBJS)
+
+monkey-mock: $(LTARGET)
+
+$(LTARGET): $(L_OBJS)
+	$(CC) $^ -fsanitize=address -lm -lrt -o $@
+
+$(LBUILD)/sim/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(LSAN_FLAGS) -c $< -o $@
+
+$(LBUILD)/gui/%.o: $(ROOT)/gui/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(LSAN_FLAGS) -c $< -o $@
+
+$(LBUILD)/lvgl/%.o: $(ROOT)/lib/lvgl/src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(LSAN_FLAGS) -c $< -o $@
+
+# -----------------------------------------------------------------------
+# Soak (`make soak [SOAK_N=50]`) — runs monkey-mock N times with seeds
+# 1..N so each run exercises a different gesture+URC sequence.
+# A fixed seed (make monkey-mock) replays the same path every time;
+# soak catches intermittent bugs that need many attempts to surface.
+#
+#   make soak          # default 20 seeds
+#   make soak SOAK_N=100
+# -----------------------------------------------------------------------
+SOAK_N ?= 20
+
+soak: monkey-mock
+	@echo "Soak: $(SOAK_N) seeds against nothan-sim-monkey-mock"
+	@for seed in $$(seq 1 $(SOAK_N)); do \
+		MONKEY_SEED=$$seed ASAN_OPTIONS=detect_leaks=0 ./nothan-sim-monkey-mock \
+			|| { echo "FAIL seed=$$seed"; exit 1; }; \
+		printf "  seed %3d: PASS\n" $$seed; \
+	done
+	@echo "Soak done — all $(SOAK_N) seeds clean"
+
 clean:
-	rm -rf $(BUILD) $(ABUILD) $(BBUILD) $(GBUILD) $(SBUILD) $(MBUILD) $(PBUILD) $(RBUILD) $(KBUILD) \
-	       $(TARGET) $(ATARGET) $(BTARGET) $(GTARGET) $(STARGET) $(MTARGET) $(PTARGET) $(RTARGET) $(KTARGET)
+	rm -rf $(BUILD) $(ABUILD) $(BBUILD) $(GBUILD) $(SBUILD) $(MBUILD) $(PBUILD) $(RBUILD) $(KBUILD) $(LBUILD) \
+	       $(TARGET) $(ATARGET) $(BTARGET) $(GTARGET) $(STARGET) $(MTARGET) $(PTARGET) $(RTARGET) $(KTARGET) $(LTARGET)

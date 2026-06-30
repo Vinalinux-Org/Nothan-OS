@@ -20,11 +20,17 @@
 #include "../widgets/avatar.h"
 #include "../services/telephony.h"
 #include "../services/modem_client.h"
+#include "../../lib/string.h"
 
 #define ROW_H      84
 #define AVATAR_SZ  60
 
 static lv_obj_t *list_obj;
+
+/* Numbers captured at populate() time — on_row uses these directly so it
+ * is immune to log_n changing (e.g. from a concurrent calllog_add) between
+ * populate() and the tap. */
+static char row_num_buf[32][24];
 
 static void on_keypad(lv_event_t *e)
 {
@@ -35,17 +41,14 @@ static void on_keypad(lv_event_t *e)
 
 static void on_row(lv_event_t *e)
 {
-	int idx = (int)(long)lv_event_get_user_data(e);
-	const struct call_log_entry *en = telephony_log_get(idx);
-	if (!en) {
-		return;
-	}
+	const char *number = (const char *)lv_event_get_user_data(e);
+	if (!number || !number[0]) return;
 	if (!modem_net_registered()) {
 		gui_toast("No network");
 		return;
 	}
-	gui_logf("event: call back %s\n", en->number);
-	telephony_dial(en->number);
+	gui_logf("event: call back %s\n", number);
+	telephony_dial(number);
 }
 
 /* "Outgoing · 02:14" / "Incoming · 00:45" / "Missed" */
@@ -68,6 +71,12 @@ static void add_row(lv_obj_t *list, const struct call_log_entry *en, int idx)
 	int missed = (en->type == CALL_MISSED);
 	const char *title = en->name[0] ? en->name : en->number;
 
+	/* Snapshot number into stable buffer — on_row reads this instead of
+	 * telephony_log_get(idx) so index-shift after concurrent calllog_add
+	 * cannot cause a wrong number to be dialled. */
+	strncpy(row_num_buf[idx], en->number, sizeof(row_num_buf[0]) - 1);
+	row_num_buf[idx][sizeof(row_num_buf[0]) - 1] = '\0';
+
 	lv_obj_t *row = lv_button_create(list);
 	lv_obj_remove_style_all(row);
 	lv_obj_set_size(row, lv_pct(100), ROW_H);
@@ -80,7 +89,7 @@ static void add_row(lv_obj_t *list, const struct call_log_entry *en, int idx)
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
 			      LV_FLEX_ALIGN_CENTER);
 	lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-	lv_obj_add_event_cb(row, on_row, LV_EVENT_CLICKED, (void *)(long)idx);
+	lv_obj_add_event_cb(row, on_row, LV_EVENT_CLICKED, row_num_buf[idx]);
 
 	avatar_create(row, title[0], AVATAR_SZ, &lv_font_montserrat_28);
 
@@ -136,6 +145,11 @@ static void populate(void)
 	}
 }
 
+static void on_log_changed(void)
+{
+	populate();
+}
+
 static void on_screen_loaded(lv_event_t *e)
 {
 	(void)e;
@@ -146,6 +160,7 @@ static void on_screen_unloaded(lv_event_t *e)
 {
 	(void)e;
 	list_obj = NULL;
+	telephony_set_log_observer(NULL);
 }
 
 void call_log_create(lv_obj_t *screen, void *arg)
@@ -177,5 +192,6 @@ void call_log_create(lv_obj_t *screen, void *arg)
 
 	lv_obj_add_event_cb(screen, on_screen_loaded, LV_EVENT_SCREEN_LOADED, NULL);
 	lv_obj_add_event_cb(screen, on_screen_unloaded, LV_EVENT_SCREEN_UNLOAD_START, NULL);
+	telephony_set_log_observer(on_log_changed);
 	populate();
 }

@@ -46,6 +46,10 @@ struct call_log_entry {
 /* Notified on every state transition so the call overlay can re-render. */
 typedef void (*tel_observer_fn)(enum tel_state state);
 
+/* Notified when the call log gains a new entry outside a state transition
+ * (CCWA missed calls logged while already IDLE). */
+typedef void (*tel_log_changed_fn)(void);
+
 /* Load the call log and start the mock event timer. Call once at startup. */
 void telephony_init(void);
 
@@ -70,6 +74,7 @@ const struct call_info   *telephony_current(void);
 unsigned int              telephony_duration_sec(void);
 int                       telephony_muted(void);
 void                      telephony_set_observer(tel_observer_fn cb);
+void                      telephony_set_log_observer(tel_log_changed_fn cb);
 
 /* Recent-calls log. index 0 is the most recent. */
 int                          telephony_log_count(void);

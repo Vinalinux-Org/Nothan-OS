@@ -26,3 +26,8 @@ void gui_logf(const char *fmt, ...)
 	va_end(ap);
 	fflush(stdout);
 }
+
+void gui_toast(const char *msg)
+{
+	printf("[TOAST] %s\n", msg);
+}

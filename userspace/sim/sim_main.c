@@ -19,10 +19,18 @@
 #include "core/log.h"
 #include "screens/boot.h"
 #include "screens/home.h"
+#include "screens/call_log.h"
+#include "screens/sms_list.h"
+#include "screens/sms_chat.h"
+#include "screens/contacts_list.h"
+#include "screens/contact_detail.h"
+#include "screens/contacts_add.h"
+#include "screens/dialer.h"
 #include "core/call_ui.h"
 #include "services/contacts.h"
 #include "services/messages.h"
 #include "services/telephony.h"
+#include "services/modem_client.h"
 
 #define SIM_BOOT_MS  BOOT_DURATION_MS
 
@@ -68,6 +76,7 @@ static void at_press(int lx, int ly, bool down)
 static void at_pump(int frames)
 {
 	for (int i = 0; i < frames; i++) {
+		modem_pump();		/* dispatch URCs before render, like real main loop */
 		lv_tick_inc(33);	/* one full LV_DEF_REFR_PERIOD per frame */
 		lv_task_handler();
 	}
@@ -143,11 +152,192 @@ static void at_drag(int x0, int y0, int x1, int y1, int steps)
 	at_check("drag");
 }
 
+/* =======================================================================
+ * Per-screen autotap sequences (logical display 480×800 after ROTATION_270)
+ *
+ * Each function nav_push()es its target screen, exercises the key paths
+ * (scroll, tap, back), then returns to home via nav_to_root(). The same
+ * at_check() after each screen catches any heap corruption the interaction
+ * triggers. Coordinates are approximate — close enough to hit the widget.
+ *
+ * List row geometry: rows are ~100 px tall, content starts at y≈120.
+ *   AT_ROW(0)=170, AT_ROW(1)=270, AT_ROW(2)=370, AT_ROW(3)=470
+ * =======================================================================*/
+
+/* Entry points declared in telephony.c / messages.c — called by modem_client */
+extern void telephony_on_incoming(const char *number);
+extern void sms_on_received(const char *peer, const char *text);
+
+/* Seed realistic test data so every screen has something to render and
+ * scroll. Called once at the top of run_autotap(), before screen tests. */
+static void at_seed_data(void)
+{
+	/* Contacts */
+	contacts_add("An Nguyen",    "0868 000 001");
+	contacts_add("Binh Tran",    "0912 345 678");
+	contacts_add("Cuong Le",     "0987 654 321");
+	contacts_add("Dung Pham",    "0901 111 222");
+	contacts_add("Giang Hoang",  "0933 444 555");
+
+	/* SMS conversations — a few messages each */
+	sms_on_received("0868 000 001", "Hey, are you free?");
+	sms_on_received("0868 000 001", "Let me know when you arrive");
+	sms_on_received("0912 345 678", "Meeting moved to 3pm");
+	sms_on_received("0912 345 678", "Can you confirm?");
+	sms_on_received("0987 654 321", "On my way");
+}
+
+#define AT_CX        240		/* center X of the 480-wide display     */
+#define AT_BACK_X    43		/* header back-chevron position          */
+#define AT_BACK_Y    54
+#define AT_ROW(n)   (170 + (n) * 100)	/* list-row center Y             */
+
+/* Dial-pad column centers (3 cols across 480 px) and row centers */
+#define AT_DPAD_C0   80
+#define AT_DPAD_C1   240
+#define AT_DPAD_C2   400
+#define AT_DPAD_R(n) (220 + (n) * 100)  /* rows 0-3: 1-9 + *0#           */
+
+/* Push a screen, let it settle, then exercise it; always land back on home. */
+static void at_screen_open(nav_builder_fn b, void *arg, const char *name)
+{
+	gui_logf("autotap: >> %s\n", name);
+	nav_push(b, arg);
+	at_pump(5);
+}
+
+static void at_screen_back(void)
+{
+	at_click(AT_BACK_X, AT_BACK_Y);
+	at_pump(4);
+	nav_to_root();
+	at_pump(2);
+}
+
+static void at_test_call_log(void)
+{
+	at_screen_open(call_log_create, NULL, "call_log");
+	at_drag(AT_CX, AT_ROW(3), AT_CX, AT_ROW(0), 8);	/* scroll down */
+	at_drag(AT_CX, AT_ROW(0), AT_CX, AT_ROW(3), 8);	/* scroll up   */
+	at_tap(AT_CX, AT_ROW(0));	/* tap first row → dial (no-op in sim) */
+	at_tap(AT_CX, AT_ROW(1));
+	/* open dialer from call_log keypad icon (top-right, ~x=440, y=54) */
+	at_click(440, 54);
+	at_pump(4);
+	nav_to_root();
+	at_pump(2);
+	at_check("call_log");
+}
+
+static void at_test_dialer(void)
+{
+	at_screen_open(dialer_create, NULL, "dialer");
+	/* tap digits: 1 2 3 4 5 6 0 */
+	at_tap(AT_DPAD_C0, AT_DPAD_R(0));	/* 1 */
+	at_tap(AT_DPAD_C1, AT_DPAD_R(0));	/* 2 */
+	at_tap(AT_DPAD_C2, AT_DPAD_R(0));	/* 3 */
+	at_tap(AT_DPAD_C0, AT_DPAD_R(1));	/* 4 */
+	at_tap(AT_DPAD_C1, AT_DPAD_R(1));	/* 5 */
+	at_tap(AT_DPAD_C2, AT_DPAD_R(1));	/* 6 */
+	at_tap(AT_DPAD_C1, AT_DPAD_R(3));	/* 0 */
+	/* backspace twice */
+	at_tap(380, 570);
+	at_tap(380, 570);
+	/* call button (no-op: modem_cmd_dial stub) */
+	at_tap(AT_CX, 570);
+	at_pump(4);
+	nav_to_root();
+	at_pump(2);
+	at_check("dialer");
+}
+
+static void at_test_sms_list(void)
+{
+	at_screen_open(sms_list_create, NULL, "sms_list");
+	at_drag(AT_CX, AT_ROW(3), AT_CX, AT_ROW(0), 8);
+	at_drag(AT_CX, AT_ROW(0), AT_CX, AT_ROW(3), 8);
+	/* open first conversation if one exists */
+	if (sms_conversation_count() > 0) {
+		at_click(AT_CX, AT_ROW(0));
+		at_pump(5);
+		/* inside sms_chat: scroll thread */
+		at_drag(AT_CX, AT_ROW(2), AT_CX, AT_ROW(0), 6);
+		at_drag(AT_CX, AT_ROW(0), AT_CX, AT_ROW(2), 6);
+		/* tap send button area (keyboard not open, so it's a no-op) */
+		at_tap(AT_CX, 700);
+		at_pump(2);
+		at_click(AT_BACK_X, AT_BACK_Y);	/* back from sms_chat */
+		at_pump(4);
+	}
+	at_screen_back();
+	at_check("sms_list");
+}
+
+static void at_test_contacts_list(void)
+{
+	at_screen_open(contacts_list_create, NULL, "contacts_list");
+	at_drag(AT_CX, AT_ROW(3), AT_CX, AT_ROW(0), 8);
+	at_drag(AT_CX, AT_ROW(0), AT_CX, AT_ROW(3), 8);
+	if (contacts_count() > 0) {
+		/* open first contact → contact_detail */
+		at_click(AT_CX, AT_ROW(0));
+		at_pump(5);
+		/* inside contact_detail: tap Call and SMS action buttons */
+		at_tap(160, 520);	/* Call button */
+		at_pump(3);
+		at_tap(320, 520);	/* SMS button */
+		at_pump(3);
+		nav_to_root();
+		at_pump(2);
+		/* re-enter contacts to test Add flow */
+		nav_push(contacts_list_create, NULL);
+		at_pump(4);
+	}
+	/* tap Add button (top-right, ~x=440, y=54) */
+	at_click(440, 54);
+	at_pump(5);
+	at_screen_back();	/* back from contacts_add without saving */
+	at_screen_back();	/* back from contacts_list */
+	at_check("contacts_list");
+}
+
+static void at_test_contacts_add(void)
+{
+	/* Add with empty name → Save should be a no-op (guard in app code) */
+	at_screen_open(contacts_add_create, NULL, "contacts_add");
+	at_tap(AT_CX, 650);	/* Save button */
+	at_pump(2);
+	at_screen_back();
+	at_check("contacts_add");
+}
+
+static void at_test_call_overlay(void)
+{
+	gui_log("autotap: >> call_overlay\n");
+
+	/* Incoming call → reject */
+	telephony_on_incoming("0868 000 000");
+	at_pump(5);
+	at_tap(140, 620);	/* reject button */
+	at_pump(5);
+	at_check("overlay_reject");
+
+	/* Incoming call → accept → hang up */
+	telephony_on_incoming("0912 345 678");
+	at_pump(5);
+	at_tap(340, 620);	/* accept button */
+	at_pump(5);
+	at_tap(AT_CX, 620);	/* hang up */
+	at_pump(8);
+	at_check("overlay_accept_hangup");
+}
+
 static int run_autotap(void)
 {
 	const int col_x[4] = { 74, 184, 294, 404 };	/* 4-col badge centers */
 
 	gui_log("autotap: begin\n");
+	at_seed_data();
 	at_pump(4);					/* let the boot splash settle */
 	nav_set_root(home_create, NULL);
 	nav_show_chrome(true);
@@ -226,6 +416,14 @@ static int run_autotap(void)
 		}
 	}
 
+	/* 8) Per-screen deep tests — exercise every app screen systematically. */
+	at_test_call_log();
+	at_test_dialer();
+	at_test_sms_list();
+	at_test_contacts_list();
+	at_test_contacts_add();
+	at_test_call_overlay();
+
 #ifdef NOTHAN_MEM_TRACE
 	{
 		extern size_t nothan_mem_biggest;
@@ -256,10 +454,19 @@ static int run_autotap(void)
 #ifndef SIM_MONKEY_FRAMES
 #define SIM_MONKEY_FRAMES  6000
 #endif
+static uint32_t get_seed(void)
+{
+	const char *s = getenv("MONKEY_SEED");
+	if (s && *s)
+		return (uint32_t)strtoul(s, NULL, 0);
+	return 0x1234abcd;
+}
+
 static int run_monkey(void)
 {
-	gui_log("monkey-sim: begin (driving target monkey gen under ASan)\n");
-	monkey_init(0x1234abcd);		/* same seed as the target default */
+	uint32_t seed = get_seed();
+	gui_logf("monkey-sim: begin seed=0x%08x\n", seed);
+	monkey_init(seed);
 
 	at_pump(4);
 	nav_set_root(home_create, NULL);

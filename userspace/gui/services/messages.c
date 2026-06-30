@@ -19,8 +19,10 @@
 
 #define SMS_PATH        "/SMS.BIN"
 #define SMS_MAGIC       0x534D5332u  /* "SMS1" */
+#ifdef GUI_MONKEY
 #define RECV_EVERY_MS   40000
 #define TICK_PERIOD_MS  1000
+#endif
 
 /* Whole store, kept in BSS (too big for the stack) and written verbatim. */
 static struct {
@@ -29,7 +31,7 @@ static struct {
 	struct sms_conversation conv[SMS_CONV_MAX];
 } store;
 
-/* Mock inbound traffic: canned texts dropped into rotating peers. */
+#ifdef GUI_MONKEY
 static const char *mock_texts[] = {
 	"On my way",
 	"Call me when you can",
@@ -39,6 +41,7 @@ static const char *mock_texts[] = {
 static int      mock_text_idx;
 static uint32_t next_recv_at;
 static int      recv_on = 1;   /* auto-inject inbound SMS */
+#endif
 
 /* Deferred-save timer: batches FAT writes so the GUI main loop is not
  * blocked on every incoming SMS/read.  Fires once after 300 ms of
@@ -128,7 +131,9 @@ void sms_clear(void)
 	storage_write(SMS_PATH, &store, sizeof(store));
 }
 
+#ifdef GUI_MONKEY
 static void messages_tick(lv_timer_t *t);
+#endif
 
 void messages_init(void)
 {
@@ -138,8 +143,10 @@ void messages_init(void)
 	    store.count > SMS_CONV_MAX)
 		seed_mock();
 
+#ifdef GUI_MONKEY
 	next_recv_at = lv_tick_get() + RECV_EVERY_MS;
 	lv_timer_create(messages_tick, TICK_PERIOD_MS, NULL);
+#endif
 }
 
 int sms_conversation_count(void) { return store.count; }
@@ -343,18 +350,15 @@ int sms_total_unread(void)
 	return n;
 }
 
-/* Drop a mock inbound message into an existing thread, mark it unread, and
- * nudge the active screen so the list/thread refreshes if it is showing. */
+#ifdef GUI_MONKEY
 static void mock_receive(void)
 {
-	if (store.count == 0) {
+	if (store.count == 0)
 		return;
-	}
 	int idx  = mock_text_idx % store.count;
 	const char *text = mock_texts[mock_text_idx % (int)(sizeof(mock_texts) /
 							    sizeof(mock_texts[0]))];
 	mock_text_idx++;
-
 	append_msg(idx, text, 0);
 	store.conv[idx].unread++;
 	schedule_save();
@@ -371,3 +375,6 @@ static void messages_tick(lv_timer_t *t)
 }
 
 void messages_set_mock(int on) { recv_on = on; }
+#else
+void messages_set_mock(int on) { (void)on; }
+#endif
