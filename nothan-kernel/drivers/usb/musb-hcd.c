@@ -282,6 +282,10 @@ static u8 ep0_mps = 8;	/* EP0 max packet size, refined from device descriptor */
 static volatile unsigned int touch_seq;
 static volatile int touch_x, touch_y, touch_pressed;
 
+/* Incremented on every VBUS error or DISCONNECT so musb_touch_loop()
+ * exits immediately regardless of how quickly CONNECT fires next. */
+static volatile unsigned int musb_generation;
+
 static int musb_get_pointer(int *x, int *y, int *pressed)
 {
 	unsigned int s1, s2;
@@ -551,11 +555,11 @@ static void musb_touch_setup(void)
 
 /* Poll the interrupt-IN endpoint and log touch reports until disconnect.
  * Milestone 3: just parse and print tip/X/Y to confirm the data path. */
-static void musb_touch_loop(void)
+static void musb_touch_loop(unsigned int gen)
 {
 	printk("[MUSB] touch: polling EP%d-IN, feeding /dev/input0\n", TOUCH_EP_IN);
 
-	while (musb_connected) {
+	while (musb_generation == gen) {
 		CWR8(MC_INDEX, 1);
 		u16 csr = mmio_read16(usbss_va + EP1_RXCSR);
 
@@ -612,7 +616,7 @@ static void musb_enum_thread(void)
 
 		if (ok) {
 			musb_touch_setup();
-			musb_touch_loop();	/* returns on disconnect */
+			musb_touch_loop(musb_generation);	/* returns when generation changes */
 		}
 	}
 }
@@ -641,15 +645,17 @@ static void musb_irq_handler(unsigned int irq)
 		complete(&musb_connect_event);	/* wake the enumeration thread */
 	}
 	if (usbintr & INTR_DISCONNECT) {
+		musb_generation++;
 		musb_connected = 0;
 		printk("[MUSB] DISCONNECT\n");
 	}
 	if (usbintr & INTR_VBUSERROR) {
-		/* VBUS dropped — mark disconnected so musb_touch_loop() exits and
-		 * the enum thread returns to wait_for_completion(), then re-arm
-		 * the session so the subsequent CONNECT fires and re-enumerates. */
-		printk("[MUSB] VBUS error — restarting session\n");
+		/* Increment generation before re-arming: musb_touch_loop() exits
+		 * as soon as it sees generation != my_gen, regardless of how
+		 * quickly CONNECT fires and sets musb_connected back to 1. */
+		musb_generation++;
 		musb_connected = 0;
+		printk("[MUSB] VBUS error — restarting session\n");
 		CWR8(MC_DEVCTL, CRD8(MC_DEVCTL) | DEVCTL_SESSION);
 	}
 }
