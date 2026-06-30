@@ -42,6 +42,7 @@ static int  fe_boot = 0;
 
 /* Network status (updated by NET_REG / SIGNAL events) */
 static int  g_net_reg = 0;   /* 1 = registered (home or roaming) */
+static int  g_rssi    = 0;   /* last rssi from SIGNAL event */
 
 static modem_signal_cb_t g_signal_cb;
 
@@ -218,12 +219,20 @@ static void dispatch_event(const char *json)
     if (strcmp(type, "READY") == 0) {
         return;
     }
+    /* Signal strength */
+    if (strcmp(type, "SIGNAL") == 0) {
+        int rssi = 0;
+        json_get_int(json, "rssi", &rssi);
+        g_rssi = rssi;
+        if (g_signal_cb) g_signal_cb(g_net_reg, g_rssi);
+        return;
+    }
     /* Network registration */
     if (strcmp(type, "NET_REG") == 0) {
         int stat = 0;
         json_get_int(json, "stat", &stat);
         g_net_reg = (stat == 1 || stat == 5);
-        if (g_signal_cb) g_signal_cb(g_net_reg, 0);
+        if (g_signal_cb) g_signal_cb(g_net_reg, g_rssi);
         return;
     }
     /* SIM state */
