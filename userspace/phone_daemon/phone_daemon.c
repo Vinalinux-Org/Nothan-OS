@@ -2626,7 +2626,7 @@ void handle_cmd_dial(const char *json)
         fe_send_err(409, "call already active");
         return;
     }
-    if (at_free_slots() < 1) {
+    if (at_free_slots() < 3) {     /* CSDVC + CLVL + ATD */
         printf("[pd] REJECT dial: at queue full (%d used)\n", at_count);
         fe_send_err(503, "at queue full");
         return;
@@ -2635,6 +2635,11 @@ void handle_cmd_dial(const char *json)
     cs.outgoing = 1;
     strncpy(cs.caller_num, num, sizeof(cs.caller_num) - 1);
     cs.caller_num[sizeof(cs.caller_num) - 1] = '\0';
+    /* Open the audio path before dialing so network in-band ringback during
+     * the alerting phase is reliably routed to the speaker (otherwise it
+     * depends on leftover state from a prior call — "sometimes audible"). */
+    at_submit("AT+CSDVC=1\r", 2000);
+    at_submit("AT+CLVL=5\r",  2000);
     snprintf(cmd, sizeof(cmd), "ATD%s;\r", num);
     at_enqueue(cmd, -1, WAIT_FINAL, 60000, STEP_DIAL, -1);
 }
