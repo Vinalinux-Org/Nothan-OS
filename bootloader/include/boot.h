@@ -17,7 +17,7 @@ void uart_print_hex(uint32_t val);
 void uart_flush(void);
 
 void ddr_init(void);
-int  ddr_test(void);
+int  ddr_test(int silent);
 
 int mmc_init(void);
 int mmc_read_sectors(uint32_t start_sector, uint32_t count, void *dest);

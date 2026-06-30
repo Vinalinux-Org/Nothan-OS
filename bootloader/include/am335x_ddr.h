@@ -12,6 +12,7 @@
 #define EMIF_SDRAM_TIM_2            (EMIF_BASE + 0x20)
 #define EMIF_SDRAM_TIM_3            (EMIF_BASE + 0x28)
 #define EMIF_PWR_MGMT_CTRL          (EMIF_BASE + 0x38)
+#define EMIF_ZQ_CONFIG              (EMIF_BASE + 0xC8)
 #define EMIF_DDR_PHY_CTRL_1         (EMIF_BASE + 0xE4)
 #define EMIF_DDR_PHY_CTRL_2         (EMIF_BASE + 0xEC)
 
@@ -42,6 +43,9 @@
 #define DDR_DATA1_FIFO_WE_SLAVE_RATIO_0   (CONTROL_MODULE_BASE + 0x0D1C)
 #define DDR_DATA1_WR_DATA_SLAVE_RATIO_0   (CONTROL_MODULE_BASE + 0x0D20)
 #define DDR_DATA1_GATE_LEVEL_INIT_RATIO_0 (CONTROL_MODULE_BASE + 0x0D28)
+
+/* Control Status — secure mirror of EMIF_SDRAM_CONFIG (offset 0x110) */
+#define SECURE_EMIF_SDRAM_CONFIG    (CONTROL_MODULE_BASE + 0x0110)
 
 #define DDR_IO_CTRL     (CONTROL_MODULE_BASE + 0xE04)
 #define VTP_CTRL        (CONTROL_MODULE_BASE + 0xE0C)

@@ -141,11 +141,11 @@ void bootloader_main(void)
 	 * EMIF_SDRAM_CONFIG != 0 only on true power-on where ROM left it
 	 * configured; skip re-init and just verify in that case.
 	 */
-	if (readl(EMIF_SDRAM_CONFIG) != 0 && ddr_test() == 0) {
+	if (readl(EMIF_SDRAM_CONFIG) != 0 && ddr_test(1) == 0) {
 		uart_puts("[DDR]  512MB @ 0x80000000 OK (warm)\r\n");
 	} else {
 		ddr_init();
-		if (ddr_test() == 0)
+		if (ddr_test(0) == 0)
 			uart_puts("[DDR]  512MB @ 0x80000000 OK\r\n");
 		else
 			panic("DDR memory test FAILED!");

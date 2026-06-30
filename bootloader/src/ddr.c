@@ -45,22 +45,47 @@
 
 #define DDR_IO_CTRL_VAL		0x0000018B
 
-#define VTP_CTRL_ENABLE		(1 << 6)	/* CLRZ: 1 = start calibration */
-#define VTP_CTRL_READY		(1 << 5)	/* set when calibration complete */
+/* vtp_ctrl register fields (Control Module offset 0xE0C, TRM Table 9-63) */
+#define VTP_CTRL_ENABLE		(1 << 6)	/* enable: 1 = dynamic VTP compensation */
+#define VTP_CTRL_READY		(1 << 5)	/* ready: 1 = training complete */
+#define VTP_CTRL_CLRZ		(1 << 0)	/* clrz: reset FSM on low pulse, start on high */
+
+/* SDRAM_REF_CTRL[31]: disable init and refresh while programming EMIF */
+#define EMIF_INITREF_DIS	(1u << 31)
+
+/*
+ * ZQ calibration for MT41K256M16HA-125 (from u-boot ddr_defs.h):
+ *   CS0EN=1, SFEXITEN=1, periodic interval and ZQ timing per DDR3 spec.
+ */
+#define EMIF_ZQ_CFG		0x50074BE4
 
 void ddr_init(void)
 {
 	uint32_t i;
 
-	/* VTP calibrates pad impedance. Must reset (CLRZ=0) before enabling. */
-	writel(readl(VTP_CTRL) & ~VTP_CTRL_ENABLE, VTP_CTRL);
+	/*
+	 * VTP calibrates DDR pad impedance. Sequence (TRM Table 9-63):
+	 *   1. Set enable (bit 6) → dynamic compensation mode
+	 *   2. Clear clrz (bit 0) → reset FSM
+	 *   3. Set clrz (bit 0) → start calibration
+	 *   4. Poll ready (bit 5)
+	 * enable and clrz are separate bits; toggling only enable (old code)
+	 * leaves clrz=0 so the FSM never starts — works on cold boot because
+	 * ROM left VTP in a good state, fails on warm reset.
+	 */
 	writel(readl(VTP_CTRL) | VTP_CTRL_ENABLE, VTP_CTRL);
+	writel(readl(VTP_CTRL) & ~VTP_CTRL_CLRZ, VTP_CTRL);
+	writel(readl(VTP_CTRL) | VTP_CTRL_CLRZ, VTP_CTRL);
 	for (i = 0; i < 10000; i++) {
 		if (readl(VTP_CTRL) & VTP_CTRL_READY)
 			break;
 	}
 
+	/* IO control for command and data macros (all pads same value). */
 	writel(DDR_IO_CTRL_VAL, DDR_IO_CTRL);
+	writel(DDR_IO_CTRL_VAL, DDR_CMD0_IOCTRL);
+	writel(DDR_IO_CTRL_VAL, DDR_CMD1_IOCTRL);
+	writel(DDR_IO_CTRL_VAL, DDR_CMD2_IOCTRL);
 	writel(DDR_IO_CTRL_VAL, DDR_DATA0_IOCTRL);
 	writel(DDR_IO_CTRL_VAL, DDR_DATA1_IOCTRL);
 	writel(0x1, DDR_CKE_CTRL);
@@ -84,22 +109,46 @@ void ddr_init(void)
 	writel(0x7D, DDR_DATA1_WR_DATA_SLAVE_RATIO_0);
 	writel(0x00, DDR_DATA1_GATE_LEVEL_INIT_RATIO_0);
 
+	/*
+	 * Disable init+refresh before programming PHY/timing registers.
+	 * Without INITREF_DIS, a warm reset leaves EMIF partially configured
+	 * and stray refreshes race with register writes.
+	 *
+	 * Then explicitly clear SDRAM_CONFIG. On warm reset the EMIF retains
+	 * the previous value (0x61C05332). Writing the same value again may not
+	 * re-trigger the DDR3 init sequence; clearing to 0 first guarantees the
+	 * subsequent write is a state transition that forces re-initialization.
+	 */
+	writel(EMIF_INITREF_DIS | EMIF_REF_CTRL, EMIF_SDRAM_REF_CTRL);
+	writel(0, EMIF_SDRAM_CONFIG);
+
 	writel(DDR_PHY_CTRL, EMIF_DDR_PHY_CTRL_1);
 	writel(DDR_PHY_CTRL, EMIF_DDR_PHY_CTRL_2);
 	writel(EMIF_TIM1, EMIF_SDRAM_TIM_1);
 	writel(EMIF_TIM2, EMIF_SDRAM_TIM_2);
 	writel(EMIF_TIM3, EMIF_SDRAM_TIM_3);
+
+	writel(EMIF_ZQ_CFG, EMIF_ZQ_CONFIG);
+
+	/*
+	 * Write secure Control Status mirror first, then enable refresh, then
+	 * write SDRAM_CONFIG. DDR3 power-on init (DDR_RESET_N assertion, CKE
+	 * sequence, mode registers) is triggered by the SDRAM_CONFIG write and
+	 * requires INITREF_DIS=0 at that moment — writing SDRAM_CONFIG while
+	 * INITREF_DIS=1 prevents the init sequence on cold boot.
+	 */
+	writel(EMIF_CFG, SECURE_EMIF_SDRAM_CONFIG);
 	writel(EMIF_REF_CTRL, EMIF_SDRAM_REF_CTRL);
 	writel(EMIF_CFG, EMIF_SDRAM_CONFIG);
 
-	/* Allow time for ZQ calibration and mode register programming. */
-	for (i = 0; i < 5000; i++)
+	for (i = 0; i < 500000; i++)
 		;
 
 	writel(EMIF_REF_CTRL, EMIF_SDRAM_REF_CTRL);
+	writel(EMIF_REF_CTRL, EMIF_SDRAM_REF_CTRL_SHDW);
 }
 
-int ddr_test(void)
+int ddr_test(int silent)
 {
 	volatile uint32_t *ddr = (volatile uint32_t *)DDR_BASE;
 	uint32_t pattern1 = 0xAA55AA55;
@@ -110,8 +159,13 @@ int ddr_test(void)
 		ddr[i] = pattern1;
 	for (i = 0; i < 1024; i++) {
 		if (ddr[i] != pattern1) {
-			uart_puts("\r\nFAIL P1 @ ");
-			uart_print_hex((uint32_t)&ddr[i]);
+			if (!silent) {
+				uart_puts("FAIL P1 @ ");
+				uart_print_hex((uint32_t)&ddr[i]);
+				uart_puts(" got ");
+				uart_print_hex(ddr[i]);
+				uart_puts("\r\n");
+			}
 			return -1;
 		}
 	}
@@ -120,8 +174,11 @@ int ddr_test(void)
 		ddr[i] = pattern2;
 	for (i = 0; i < 1024; i++) {
 		if (ddr[i] != pattern2) {
-			uart_puts("\r\nFAIL P2 @ ");
-			uart_print_hex((uint32_t)&ddr[i]);
+			if (!silent) {
+				uart_puts("FAIL P2 @ ");
+				uart_print_hex((uint32_t)&ddr[i]);
+				uart_puts("\r\n");
+			}
 			return -1;
 		}
 	}
