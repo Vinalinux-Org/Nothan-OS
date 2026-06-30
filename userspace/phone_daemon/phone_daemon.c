@@ -64,7 +64,17 @@ int errno;
 #define POLL_TIMEOUT_MS 20      /* max idle between timer ticks            */
 #define IDLE_SLEEP_US   3000    /* fallback round-robin idle nap           */
 
-#define CLIP_WAIT_MS      600   /* max wait for +CLIP after first RING      */
+#define CLIP_WAIT_MS      2000  /* max wait for +CLIP after first RING      */
+
+/* Incoming-call ring tone, played locally on the modem via AT+CPTONE.
+ * GSM does not deliver ring audio to the called party, so the host drives
+ * it: CPTONE plays one burst (<=1000 ms), repeated every RING_PERIOD_MS
+ * while the call is alerting. RING_TONE (0..16) must be tuned on real
+ * hardware — pick the index that sounds like a ring. */
+#define RING_TONE         1     /* AT+CPTONE tone index — TUNE on hardware  */
+#define RING_TONE_MS      1000  /* burst duration per ring (CPTONE max 1000)*/
+#define RING_TONE_GAIN    4000  /* CPTONE gain 1..9999 (default 4000)       */
+#define RING_PERIOD_MS    3000  /* cadence: ~1 s tone then ~2 s silence     */
 #define HB_INTERVAL_MS    10000 /* modem liveness heartbeat (AT)           */
 #define HB_TIMEOUT_MS     3000
 #define HB_MAX_FAIL       2     /* consecutive heartbeat misses → recover  */
@@ -102,6 +112,10 @@ static int  g_bcl      = 100;
 /* RING/CLIP debounce — send CALL_IN once, after CLIP or after CLIP_WAIT_MS */
 static unsigned long g_clip_deadline = 0;
 static int           g_call_in_sent  = 0;
+
+/* Local incoming-ring tone state (driven by ring_tick via AT+CPTONE) */
+static int           g_ring_active  = 0;
+static unsigned long g_next_ring_ms = 0;
 
 /* GPS state */
 static int           g_gps_on       = 0;
@@ -1544,6 +1558,45 @@ void sms_body_hex_flush(void)
     g_body_hex_flush_ms = 0;
 }
 
+/* Begin the local ring tone for an incoming call. The modem's codec must be
+ * open for CPTONE to be audible (host-controlled codec, AT+CSDVC=1); init
+ * already sets it, but re-assert here in case a prior call left it closed.
+ * The first burst fires immediately on the next ring_tick(). */
+static void ring_start(void)
+{
+    g_ring_active  = 1;
+    g_next_ring_ms = 0;                 /* 0 = play on the very next tick */
+    at_submit("AT+CSDVC=1\r", 2000);
+}
+
+/* Stop the local ring tone (call answered, rejected, ended, or missed). */
+static void ring_stop(void)
+{
+    g_ring_active  = 0;
+    g_next_ring_ms = 0;
+}
+
+/* Re-issue AT+CPTONE on the ring cadence while a call is alerting. CPTONE
+ * plays a single burst of at most 1000 ms, so a repeating tick is what makes
+ * a continuous ring. */
+static void ring_tick(unsigned long now)
+{
+    char cmd[32];
+    if (!g_ring_active) {
+        return;
+    }
+    if (g_next_ring_ms != 0 && now < g_next_ring_ms) {
+        return;
+    }
+    if (at_free_slots() < 1) {
+        return;                         /* queue busy — try again next tick */
+    }
+    snprintf(cmd, sizeof(cmd), "AT+CPTONE=%d,%d,%d\r",
+             RING_TONE, RING_TONE_MS, RING_TONE_GAIN);
+    at_submit(cmd, 2000);
+    g_next_ring_ms = now + RING_PERIOD_MS;
+}
+
 void handle_ring(void)
 {
     /* Ignore RING if already in a call or dialing (call waiting is handled
@@ -1556,6 +1609,7 @@ void handle_ring(void)
     cs.pending_clip   = 1;
     g_call_in_sent    = 0;
     g_clip_deadline   = pd_now_ms() + CLIP_WAIT_MS;
+    ring_start();
     fe_send_call_ring();
 }
 
@@ -1593,6 +1647,7 @@ void clip_timer_tick(unsigned long now)
 
 void handle_voice_call_begin(void)
 {
+    ring_stop();                 /* call connected — silence the ring tone */
     cs.in_call = 1; cs.pending_clip = 0; cs.duration[0] = '\0';
     if (cs.outgoing) {
         /* SIM7600CE: VOICE CALL: BEGIN = bên kia đã answer thật sự.
@@ -1638,6 +1693,7 @@ void handle_call_release(const char *reason)
     } else if (cs.pending_clip) {
         fe_send_call_miss(cs.caller_num);
     }
+    ring_stop();                 /* call gone — stop ringing if still active */
     cs.in_call = 0; cs.pending_clip = 0; cs.outgoing = 0;
     cs.local_hangup = 0; cs.rejected = 0;
     cs.last_cause = -1; cs.caller_num[0] = '\0'; cs.duration[0] = '\0';
@@ -2626,6 +2682,7 @@ void handle_cmd_dial(const char *json)
 
 void handle_cmd_answer(void)
 {
+    ring_stop();                 /* user answered — stop the ring tone */
     at_submit("ATA\r", 10000);
     /* SIM7600 resets audio routing on incoming call answer — re-apply
      * handset device (CSDVC=1) and volume (CLVL=5) so RX audio is audible.
@@ -2650,6 +2707,7 @@ void handle_cmd_answer(void)
  * no-op (state already cleared). */
 void call_terminate(int reject)
 {
+    ring_stop();                 /* hang up / reject — stop the ring tone */
     cs.local_hangup = 1;
     if (reject) {
         cs.rejected = 1;
@@ -3587,6 +3645,7 @@ static void super_loop(void)
         now = pd_now_ms();
         at_timers_tick(now);
         clip_timer_tick(now);
+        ring_tick(now);
         /* Flush SMS hex body accumulation after idle period (no more modem chunks). */
         if (g_body_pending == BODY_CMT && g_body_hex_flush_ms > 0
                 && now >= g_body_hex_flush_ms) {
