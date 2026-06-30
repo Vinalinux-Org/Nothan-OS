@@ -233,13 +233,23 @@ static void dispatch_event(const char *json)
             gui_logf("modem_client: SIM state = %s\n", state);
         return;
     }
-    /* MODEM_DOWN/UP — log only for now */
     if (strcmp(type, "MODEM_DOWN") == 0) {
+        if (seq > 0) send_ack(seq);
+        g_net_reg = 0;
+        if (g_signal_cb) g_signal_cb(0, 0);
         gui_log("modem_client: modem down\n");
         return;
     }
     if (strcmp(type, "MODEM_UP") == 0) {
+        if (seq > 0) send_ack(seq);
         gui_log("modem_client: modem up\n");
+        return;
+    }
+    if (strcmp(type, "PHONE_NUM") == 0) {
+        char num[32];
+        num[0] = '\0';
+        json_get_str(json, "num", num, sizeof(num));
+        gui_logf("modem_client: own number %s\n", num);
         return;
     }
 }

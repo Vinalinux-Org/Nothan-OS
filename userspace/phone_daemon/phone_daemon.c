@@ -69,7 +69,7 @@ int errno;
 #define HB_TIMEOUT_MS     3000
 #define HB_MAX_FAIL       2     /* consecutive heartbeat misses → recover  */
 #define READY_BEACON_MS   5000  /* periodic READY so a late FE re-syncs     */
-#define SIM_POLL_MS       30000 /* retry AT+CPIN? while SIM is not READY    */
+#define SIM_POLL_MS       4000  /* retry AT+CPIN? while SIM is not READY    */
 #define REOPEN_BACKOFF_MS 200
 #define REOPEN_BACKOFF_MAX 5000
 
@@ -93,6 +93,7 @@ static call_state_t cs;
 /* Last-known snapshot fields for READY/resync */
 static char g_sim_state[16] = "UNKNOWN";
 static int  g_cpin_pending  = 0;  /* set while AT+CPIN? is in flight */
+static int  g_sim_booting   = 1;  /* cleared on first +CPIN: READY; suppresses heartbeat */
 static int  g_net_stat = -1;
 static int  g_rssi     = 99;
 static int  g_bcl      = 100;
@@ -2080,6 +2081,12 @@ void handle_cpin(const char *line)
     strncpy(g_sim_state, p, sizeof(g_sim_state) - 1);
     g_sim_state[sizeof(g_sim_state) - 1] = '\0';
     fe_send_sim_stat(p);
+    if (strncmp(p, "READY", 5) == 0 && g_sim_booting) {
+        g_sim_booting = 0;
+        /* sim_poll_tick only queues CPIN? — add signal/reg queries now */
+        at_submit("AT+CSQ\r", 3000);
+        at_submit("AT+CREG?\r", 3000);
+    }
 
     /* Write state to a status file so the shell can read it. */
     int sf = open("/SIMSTATE", O_WRONLY | O_CREAT);
@@ -2091,14 +2098,29 @@ void handle_cpin(const char *line)
 
 static void handle_cbc(const char *line)
 {
+    /* SIM7600CE returns "+CBC: 3.591V" (voltage), not standard <bcs>,<bcl>. */
     const char *p = line + 5;
-    int bcs = 0, bcl = 100;
-    p = parse_int(p, &bcs);
-    if (*p == ',') { p++; parse_int(p, &bcl); }
+    while (*p == ' ') p++;
+    int whole = 0, frac = 0;
+    p = parse_int(p, &whole);
+    if (*p == '.') {
+        p++;
+        /* read up to 3 decimal digits → millivolts */
+        int digits = 0;
+        while (*p >= '0' && *p <= '9' && digits < 3) {
+            frac = frac * 10 + (*p - '0');
+            p++; digits++;
+        }
+        while (digits++ < 3) frac *= 10;   /* pad to mV */
+    }
+    /* voltage in mV: whole * 1000 + frac */
+    int mv = whole * 1000 + frac;
+    /* Li-ion linear approximation: 4200 mV = 100%, 3200 mV = 0% */
+    int bcl = (mv - 3200) / 10;
     if (bcl < 0)   bcl = 0;
     if (bcl > 100) bcl = 100;
     g_bcl = bcl;
-    fe_send_battery(bcs, bcl);
+    fe_send_battery(0, bcl);
 }
 
 static void handle_imei(const char *line)
@@ -2294,6 +2316,13 @@ int dispatch_line(const char *line)
     if (strncmp(line, "+CGREG:", 7) == 0)          { handle_cgreg(line); return 1; }
     /* SIM */
     if (strncmp(line, "+CPIN:", 6) == 0)           { handle_cpin(line); return 1; }
+    if (strncmp(line, "+CNUM:", 6) == 0)           { handle_cnum(line); return 1; }
+    if (strncmp(line, "+CCID:", 6) == 0)           { handle_iccid(line); return 1; }
+    /* Device / peripherals */
+    if (strncmp(line, "+CBC:",  5) == 0)           { handle_cbc(line);  return 1; }
+    if (strncmp(line, "+CTZV:", 6) == 0)           { handle_ctzv(line); return 1; }
+    if (strncmp(line, "+CGPS:", 6) == 0)           { handle_cgps(line); return 1; }
+    if (strncmp(line, "+CGPSINFO:", 10) == 0)      { handle_cgpsinfo(line); return 1; }
     return 0;   /* not a URC — pass to AT response consumer */
 }
 
@@ -3366,6 +3395,7 @@ void trigger_recover(const char *why)
     fe_send_modem_down();
     g_modem_state = MODEM_RECOVER;
     g_was_recovering = 1;
+    g_sim_booting = 1;
     g_hb_fail = 0;
     /* abort any in-flight/queued AT work and reset the line assembler */
     at_busy = 0; at_wait = WAIT_NONE; at_head = at_tail = at_count = 0;
@@ -3427,6 +3457,10 @@ void heartbeat_tick(unsigned long now)
         return;
     }
     if (now - g_last_hb < HB_INTERVAL_MS) {
+        return;
+    }
+    if (g_sim_booting) {
+        g_last_hb = now;   /* SIM not yet READY — don't count as HB failure */
         return;
     }
     if (cs.in_call) {
