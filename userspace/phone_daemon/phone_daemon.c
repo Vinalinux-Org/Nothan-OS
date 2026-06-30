@@ -70,6 +70,7 @@ int errno;
 #define HB_MAX_FAIL       2     /* consecutive heartbeat misses → recover  */
 #define READY_BEACON_MS   5000  /* periodic READY so a late FE re-syncs     */
 #define SIM_POLL_MS       4000  /* retry AT+CPIN? while SIM is not READY    */
+#define SIGNAL_POLL_MS    10000 /* refresh AT+CSQ / AT+CREG? for signal bar */
 #define REOPEN_BACKOFF_MS 200
 #define REOPEN_BACKOFF_MAX 5000
 
@@ -1208,7 +1209,8 @@ typedef enum { WAIT_FINAL, WAIT_PROMPT, WAIT_SMS_RESULT, WAIT_NONE } at_wait_t;
 /* step kinds — route completion side effects */
 enum { STEP_PLAIN, STEP_HEARTBEAT, STEP_SMS_HDR, STEP_SMS_RESULT,
        STEP_SMS_LIST, STEP_PB_READ, STEP_NET_SCAN, STEP_HANGUP, STEP_DIAL,
-       STEP_SMS_MODE_RESTORE };   /* AT+CMGF=1 sentinel after multipart PDU send */
+       STEP_SMS_MODE_RESTORE,    /* AT+CMGF=1 sentinel after multipart PDU send */
+       STEP_SIGNAL };            /* periodic AT+CSQ / AT+CREG? — log suppressed */
 
 #define SMS_UCS2_SINGLE_MAX  70   /* chars: single UCS2 SMS, no UDH        */
 #define SMS_UCS2_PART_CHARS  67   /* chars per part in concatenated UCS2   */
@@ -1267,7 +1269,8 @@ void sim_raw_write(const char *s, int len)
     }
     /* Suppress init/recovery and periodic heartbeat commands — only log
      * real AT exchanges at READY state (dial, SMS body, etc.). */
-    if (g_modem_state == MODEM_READY && !(at_busy && at_cur_kind == STEP_HEARTBEAT)) {
+    if (g_modem_state == MODEM_READY &&
+        !(at_busy && (at_cur_kind == STEP_HEARTBEAT || at_cur_kind == STEP_SIGNAL))) {
         if (len == 1 && s[0] == '\r') {
             printf("[pd] sim> <CR>\n");
         } else if (len == 1 && s[0] == 0x1A) {
@@ -2330,7 +2333,8 @@ int dispatch_line(const char *line)
 void sim_line_handler(const char *line)
 {
     /* Suppress during init/recovery and heartbeat — only log real modem events. */
-    if (g_modem_state == MODEM_READY && !(at_busy && at_cur_kind == STEP_HEARTBEAT))
+    if (g_modem_state == MODEM_READY &&
+        !(at_busy && (at_cur_kind == STEP_HEARTBEAT || at_cur_kind == STEP_SIGNAL)))
         printf("[pd] sim< %s\n", line);
     if (g_body_pending != BODY_NONE) {
         /* Guard: OK/ERROR — flush any accumulated body, then let AT machine handle. */
@@ -3356,6 +3360,7 @@ static unsigned long g_reopen_backoff = REOPEN_BACKOFF_MS;
 static unsigned long g_last_hb = 0;
 static unsigned long g_last_beacon = 0;
 static unsigned long g_last_sim_poll = 0;
+static unsigned long g_last_signal_poll = 0;
 
 void enqueue_init(void)
 {
@@ -3456,6 +3461,7 @@ void check_init_done(void)
     g_last_hb = pd_now_ms();
     g_last_beacon = g_last_hb;
     g_last_sim_poll = g_last_hb;  /* CPIN already queued via enqueue_state_queries */
+    g_last_signal_poll = g_last_hb;  /* CSQ/CREG already queued via enqueue_state_queries */
 }
 
 void heartbeat_tick(unsigned long now)
@@ -3500,6 +3506,25 @@ static void sim_poll_tick(unsigned long now)
     g_last_sim_poll = now;
     printf("[pd] SIM not ready (%s) — retrying CPIN\n", g_sim_state);
     g_cpin_pending = 1; at_submit("AT+CPIN?\r", 3000);
+}
+
+/* Refresh signal strength + network registration so the GUI signal bar
+ * reflects reality. CSQ (rssi) has no URC and must be polled; CREG state can
+ * move from "searching" (stat=2) to "registered" (stat=1) after the cold-boot
+ * query, and without this re-poll g_net_stat/g_rssi stay frozen at their
+ * boot-time values — the icon shows no-signal and modem_net_registered()
+ * keeps blocking outgoing calls even though the network is up. Tagged
+ * STEP_SIGNAL so the AT exchange is suppressed from the console log. */
+static void signal_poll_tick(unsigned long now)
+{
+    if (g_modem_state != MODEM_READY) return;
+    if (g_sim_booting) return;
+    if (cs.in_call) return;                  /* don't interrupt active voice */
+    if (now - g_last_signal_poll < SIGNAL_POLL_MS) return;
+    if (at_busy || at_count > 1) return;     /* don't pile up behind a busy queue */
+    g_last_signal_poll = now;
+    at_enqueue("AT+CSQ\r",   -1, WAIT_FINAL, 3000, STEP_SIGNAL, -1);
+    at_enqueue("AT+CREG?\r", -1, WAIT_FINAL, 3000, STEP_SIGNAL, -1);
 }
 
 static void gps_poll_tick(unsigned long now)
@@ -3574,6 +3599,7 @@ static void super_loop(void)
         heartbeat_tick(now);
         beacon_tick(now);
         sim_poll_tick(now);
+        signal_poll_tick(now);
         gps_poll_tick(now);
     }
 }
