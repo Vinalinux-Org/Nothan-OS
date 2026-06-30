@@ -275,14 +275,29 @@ static u8 ep0_mps = 8;	/* EP0 max packet size, refined from device descriptor */
 #define TOUCH_MAXP	64
 #define TOUCH_INTERVAL	3
 
-/* Latest raw touch state (landscape panel coords), published to /dev/input0. */
+/* Latest raw touch state (landscape panel coords), published to /dev/input0.
+ * Protected by a seqlock so readers get a consistent snapshot even under
+ * preemption.  touch_seq odd  = writer active; even = data stable.
+ */
+static volatile unsigned int touch_seq;
 static volatile int touch_x, touch_y, touch_pressed;
 
 static int musb_get_pointer(int *x, int *y, int *pressed)
 {
-	*x = touch_x;
-	*y = touch_y;
-	*pressed = touch_pressed;
+	unsigned int s1, s2;
+	int lx, ly, lp;
+
+	do {
+		s1 = touch_seq;
+		lx = touch_x;
+		ly = touch_y;
+		lp = touch_pressed;
+		s2 = touch_seq;
+	} while (s1 != s2 || (s1 & 1));
+
+	*x = lx;
+	*y = ly;
+	*pressed = lp;
 	return 1;
 }
 
@@ -558,9 +573,11 @@ static void musb_touch_loop(void)
 
 			if (cnt >= 8 && buf[0] == 0x01) {
 				int tip = buf[1] & 1;
+				touch_seq++;
 				touch_x = buf[4] | buf[5] << 8;
 				touch_y = buf[6] | buf[7] << 8;
 				touch_pressed = tip;
+				touch_seq++;
 			}
 		} else if (csr & (RXCSR_H_RXSTALL | RXCSR_H_ERROR | RXCSR_DATAERROR)) {
 			mmio_write16(usbss_va + EP1_RXCSR, RXCSR_FLUSHFIFO);
@@ -573,7 +590,9 @@ static void musb_touch_loop(void)
 	}
 
 	/* Device gone: report release so the GUI doesn't latch a stuck press. */
+	touch_seq++;
 	touch_pressed = 0;
+	touch_seq++;
 }
 
 static void musb_enum_thread(void)
@@ -626,9 +645,11 @@ static void musb_irq_handler(unsigned int irq)
 		printk("[MUSB] DISCONNECT\n");
 	}
 	if (usbintr & INTR_VBUSERROR) {
-		/* VBUS dropped (e.g. on unplug) ends the session; re-arm it so a
-		 * subsequent plug is detected again. */
+		/* VBUS dropped — mark disconnected so musb_touch_loop() exits and
+		 * the enum thread returns to wait_for_completion(), then re-arm
+		 * the session so the subsequent CONNECT fires and re-enumerates. */
 		printk("[MUSB] VBUS error — restarting session\n");
+		musb_connected = 0;
 		CWR8(MC_DEVCTL, CRD8(MC_DEVCTL) | DEVCTL_SESSION);
 	}
 }
