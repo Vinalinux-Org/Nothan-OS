@@ -224,6 +224,7 @@ static void dispatch_event(const char *json)
         int rssi = 0;
         json_get_int(json, "rssi", &rssi);
         g_rssi = rssi;
+        gui_logf("modem_client: signal rssi=%d\n", g_rssi);
         if (g_signal_cb) g_signal_cb(g_net_reg, g_rssi);
         return;
     }
@@ -232,6 +233,7 @@ static void dispatch_event(const char *json)
         int stat = 0;
         json_get_int(json, "stat", &stat);
         g_net_reg = (stat == 1 || stat == 5);
+        gui_logf("modem_client: net_reg stat=%d registered=%d\n", stat, g_net_reg);
         if (g_signal_cb) g_signal_cb(g_net_reg, g_rssi);
         return;
     }
