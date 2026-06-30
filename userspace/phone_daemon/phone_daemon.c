@@ -65,7 +65,7 @@ int errno;
  * default is version-specific and not saved across calls, so we re-assert it
  * each time a call goes active. Higher = louder; TUNE on hardware — too high
  * clips/echoes. Set to 0 to leave the modem default untouched. */
-#define TX_VOICE_VOL    0x8000
+#define TX_VOICE_VOL    0xE000
 #define PB_NAME_MAX     32
 
 #define READ_CHUNK      256
