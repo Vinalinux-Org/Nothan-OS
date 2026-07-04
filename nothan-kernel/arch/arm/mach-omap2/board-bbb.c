@@ -1,139 +1,124 @@
 /*
- * arch/arm/mach-omap2/board-bbb.c — BeagleBone Black platform device table
+ * arch/arm/mach-omap2/board-bbb.c - BeagleBone Black platform devices
  *
- * Registers the following platform devices with the platform bus:
- *   omap-uart    @ 0x44E09000  (UART0 console)
- *   omap-intc    @ 0x48200000  (interrupt controller)
- *   omap-dmtimer @ 0x48040000  (DMTimer2)
- *   omap-hsmmc   @ 0x48060000  (MMC0)
- *   omap-wdt     @ 0x44E35000  (WDT1)
- *   omap-i2c     @ 0x44E0B000  (I2C0 — TDA19988 HDMI, PMIC, EEPROM)
- *   tilcdc       @ 0x4830E000  (LCDC + TDA19988 HDMI bridge)
- *   omap-mdio    @ 0x4A101000  (MDIO bus controller)
- *   omap-cpsw    @ 0x4A100000  (Ethernet switch)
- *   omap-gpio    @ 0x44E07000/4804C000/481AC000/481AE000  (GPIO banks 0-3)
- *
- * Each driver's probe() function is called by the platform bus when its
- * matching name is found in this table.
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 
-#include "platform_device.h"
-#include "mach/irqs.h"
-#include "nothan/init.h"
+#include <nothan/platform.h>
+#include <nothan/pinctrl.h>
+#include <nothan/i2c.h>
+#include <nothan/init.h>
 
-static struct platform_device omap_uart0 = {
-    .name   = "omap-uart",
-    .base   = 0x44E09000,
-    .irq    = PLATFORM_IRQ_UART0,
-    .clk_id = "uart0",
+/* L4_PER peripherals */
+#define L4_PER_BASE		0x48000000
+#define DMTIMER2_BASE		(L4_PER_BASE + 0x40000)	/* 0x48040000 */
+#define INTC_BASE		0x48200000
+
+/* USB subsystem (USBSS base; usb1 = BBB Type-A host port, IRQ 19) */
+#define USBSS_BASE		0x47400000
+#define USB1_IRQ		19
+
+/* L4_WKUP peripherals */
+#define L4_WKUP_BASE		0x44E00000
+#define UART0_BASE		(L4_WKUP_BASE + 0x9000)		/* 0x44E09000 */
+#define UART1_BASE		(L4_PER_BASE  + 0x22000)	/* 0x48022000 (SIM7600 modem) */
+#define MMC0_BASE		(L4_PER_BASE + 0x60000)		/* 0x48060000 */
+
+/* GPIO banks */
+#define GPIO0_BASE		(L4_WKUP_BASE + 0x7000)		/* 0x44E07000 */
+#define GPIO1_BASE		(L4_PER_BASE  + 0x4C000)	/* 0x4804C000 */
+#define GPIO2_BASE		0x481AC000
+#define GPIO3_BASE		0x481AE000
+
+/* Control Module VA: PA 0x44E10000 → VA 0xF0E10000 (via L4_WKUP mapping) */
+#define CM_BASE_VA		0xF0E10000
+#define CM_REG(offset)		(CM_BASE_VA + (offset))
+
+static const struct pin_desc uart0_pins[] = {
+	{ CM_REG(0x970), PIN_INPUT_PULLUP  | PIN_MUXMODE(0) },	/* uart0_rxd */
+	{ CM_REG(0x974), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* uart0_txd */
 };
 
-static struct platform_device omap_intc = {
-    .name   = "omap-intc",
-    .base   = 0x48200000,
-    .irq    = 0,
-    .clk_id = 0,
+/* UART1 → SIM7600 modem. P9_26 = uart1_rxd, P9_24 = uart1_txd (mode 0). */
+static const struct pin_desc uart1_pins[] = {
+	{ CM_REG(0x980), PIN_INPUT_PULLUP  | PIN_MUXMODE(0) },	/* uart1_rxd (P9_26) */
+	{ CM_REG(0x984), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* uart1_txd (P9_24) */
 };
 
-static struct platform_device omap_dmtimer2 = {
-    .name   = "omap-dmtimer",
-    .base   = 0x48040000,
-    .irq    = PLATFORM_IRQ_DMTIMER2,
-    .clk_id = "timer2",
+static const struct pin_desc mmc0_pins[] = {
+	{ CM_REG(0x8F0), PIN_INPUT_PULLUP | PIN_MUXMODE(0) },	/* mmc0_dat3 */
+	{ CM_REG(0x8F4), PIN_INPUT_PULLUP | PIN_MUXMODE(0) },	/* mmc0_dat2 */
+	{ CM_REG(0x8F8), PIN_INPUT_PULLUP | PIN_MUXMODE(0) },	/* mmc0_dat1 */
+	{ CM_REG(0x8FC), PIN_INPUT_PULLUP | PIN_MUXMODE(0) },	/* mmc0_dat0 */
+	{ CM_REG(0x900), PIN_INPUT_PULLUP | PIN_MUXMODE(0) },	/* mmc0_clk  */
+	{ CM_REG(0x904), PIN_INPUT_PULLUP | PIN_MUXMODE(0) },	/* mmc0_cmd  */
 };
 
-static struct platform_device omap_hsmmc0 = {
-    .name   = "omap-hsmmc",
-    .base   = 0x48060000,
-    .irq    = PLATFORM_IRQ_MMC0,
-    .clk_id = "mmc0",
+static const struct pin_desc i2c0_pins[] = {
+	{ CM_REG(0x988), PIN_INPUT_PULLUP | PIN_MUXMODE(0) },	/* i2c0_sda */
+	{ CM_REG(0x98C), PIN_INPUT_PULLUP | PIN_MUXMODE(0) },	/* i2c0_scl */
 };
 
-static struct platform_device omap_wdt = {
-    .name   = "omap-wdt",
-    .base   = 0x44E35000,
-    .irq    = 0,
-    .clk_id = "wdt1",
+/* LCDC pins — LCD_DATA0-15, VSYNC, HSYNC, PCLK, AC_BIAS_EN (all mode 0) */
+static const struct pin_desc lcdc_pins[] = {
+	{ CM_REG(0x8A0), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data0  */
+	{ CM_REG(0x8A4), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data1  */
+	{ CM_REG(0x8A8), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data2  */
+	{ CM_REG(0x8AC), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data3  */
+	{ CM_REG(0x8B0), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data4  */
+	{ CM_REG(0x8B4), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data5  */
+	{ CM_REG(0x8B8), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data6  */
+	{ CM_REG(0x8BC), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data7  */
+	{ CM_REG(0x8C0), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data8  */
+	{ CM_REG(0x8C4), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data9  */
+	{ CM_REG(0x8C8), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data10 */
+	{ CM_REG(0x8CC), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data11 */
+	{ CM_REG(0x8D0), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data12 */
+	{ CM_REG(0x8D4), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data13 */
+	{ CM_REG(0x8D8), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data14 */
+	{ CM_REG(0x8DC), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_data15 */
+	{ CM_REG(0x8E0), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_vsync  */
+	{ CM_REG(0x8E4), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_hsync  */
+	{ CM_REG(0x8E8), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_pclk   */
+	{ CM_REG(0x8EC), PIN_OUTPUT_PULLDOWN | PIN_MUXMODE(0) },/* lcd_ac_bias_en */
 };
 
-static struct platform_device omap_i2c0 = {
-    .name   = "omap-i2c",
-    .base   = 0x44E0B000,
-    .irq    = 0,                /* polling mode */
-    .clk_id = "i2c0",
+#define ARRAY_SIZE(a)	(sizeof(a) / sizeof((a)[0]))
+
+static const struct pin_group bbb_pin_groups[] = {
+	{ "uart0", uart0_pins, ARRAY_SIZE(uart0_pins) },
+	{ "uart1", uart1_pins, ARRAY_SIZE(uart1_pins) },
+	{ "mmc0",  mmc0_pins,  ARRAY_SIZE(mmc0_pins)  },
+	{ "i2c0",  i2c0_pins,  ARRAY_SIZE(i2c0_pins)  },
+	{ "lcdc",  lcdc_pins,  ARRAY_SIZE(lcdc_pins)  },
 };
 
-static struct platform_device omap_tilcdc = {
-    .name   = "tilcdc",
-    .base   = 0x4830E000,
-    .irq    = 0,                /* polled, no IRQ used yet */
-    .clk_id = "lcdc",
+static struct platform_device bbb_devices[] = {
+	{ .name = "omap_intc",  .base = INTC_BASE,    .irq = 0  },
+	{ .name = "omap_timer", .base = DMTIMER2_BASE, .irq = 68 },
+	{ .name = "omap_uart",  .base = UART0_BASE,   .irq = 72 },
+	{ .name = "omap_uart",  .base = UART1_BASE,   .irq = 73 },
+	{ .name = "omap_mmc",   .base = MMC0_BASE,    .irq = 64 },
+	{ .name = "omap_gpio",  .base = GPIO0_BASE,   .irq = 0  },
+	{ .name = "omap_gpio",  .base = GPIO1_BASE,   .irq = 0  },
+	{ .name = "omap_gpio",  .base = GPIO2_BASE,   .irq = 0  },
+	{ .name = "omap_gpio",  .base = GPIO3_BASE,   .irq = 0  },
+	{ .name = "musb_hcd",   .base = USBSS_BASE,   .irq = USB1_IRQ },
 };
 
-static struct platform_device omap_mdio0 = {
-    .name   = "omap-mdio",
-    .base   = 0x4A101000,
-    .irq    = 0,
-    .clk_id = "cpgmac0",
+static const struct i2c_board_info i2c0_devices[] = {
+	{ "tda19988", 0x70 },   /* NXP TDA19988 HDMI framer */
 };
 
-static struct platform_device omap_cpsw0 = {
-    .name   = "omap-cpsw",
-    .base   = 0x4A100000,
-    .irq    = PLATFORM_IRQ_CPSW_RX,
-    .clk_id = "cpgmac0",
-};
-
-static struct platform_device omap_gpio0 = {
-    .name   = "omap-gpio",
-    .base   = 0x44E07000,
-    .irq    = 0,    /* not used */
-    .clk_id = "gpio0",
-};
-
-static struct platform_device omap_gpio1 = {
-    .name   = "omap-gpio",
-    .base   = 0x4804C000,
-    .irq    = 0,    /* not used */
-    .clk_id = "gpio1",
-};
-
-static struct platform_device omap_gpio2 = {
-    .name   = "omap-gpio",
-    .base   = 0x481AC000,
-    .irq    = 0,    /* not used */
-    .clk_id = "gpio2",
-};
-
-static struct platform_device omap_gpio3 = {
-    .name   = "omap-gpio",
-    .base   = 0x481AE000,
-    .irq    = 0,    /* not used */
-    .clk_id = "gpio3",
-};
-
-static struct platform_device *bbb_devices[] = {
-    &omap_intc,
-    &omap_uart0,
-    &omap_i2c0,
-    &omap_dmtimer2,
-    &omap_hsmmc0,
-    &omap_wdt,
-    &omap_tilcdc,
-    &omap_mdio0,
-    &omap_cpsw0,
-    &omap_gpio0,
-    &omap_gpio1,
-    &omap_gpio2,
-    &omap_gpio3,
-};
-
-static int __init bbb_platform_init(void)
+static int __init bbb_board_init(void)
 {
-    bus_register(&platform_bus);
-    for (unsigned i = 0; i < sizeof(bbb_devices) / sizeof(bbb_devices[0]); i++) {
-        platform_device_register(bbb_devices[i]);
-    }
-    return 0;
+	pinctrl_register(bbb_pin_groups, ARRAY_SIZE(bbb_pin_groups));
+
+	i2c_register_board_info(0, i2c0_devices, ARRAY_SIZE(i2c0_devices));
+
+	for (unsigned int i = 0; i < ARRAY_SIZE(bbb_devices); i++)
+		platform_device_register(&bbb_devices[i]);
+
+	return 0;
 }
-core_initcall(bbb_platform_init);
+arch_initcall(bbb_board_init);

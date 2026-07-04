@@ -1,146 +1,119 @@
-# NothanOS Kernel Makefile (Linux-style layout)
-
-CROSS_COMPILE = arm-none-eabi-
-CC      = $(CROSS_COMPILE)gcc
-AS      = $(CROSS_COMPILE)as
-LD      = $(CROSS_COMPILE)ld
+CROSS_COMPILE ?= arm-none-eabi-
+CC = $(CROSS_COMPILE)gcc
+LD = $(CROSS_COMPILE)ld
 OBJCOPY = $(CROSS_COMPILE)objcopy
 
-USERSPACE_DIR = ../userspace
-BUILD_DIR     = build
+BUILD_DIR := build
 
-# Source layout — Linux-style flat structure
-ASM_SRC = arch/arm/entry/reset.S \
-          arch/arm/entry/entry.S \
-          arch/arm/exceptions/vectors.S \
-          arch/arm/exceptions/exception_entry.S \
-          arch/arm/scheduler/context_switch.S \
-          arch/arm/mm/mmu_enable.S
+KBUILD_CFLAGS := -mcpu=cortex-a8 -marm -O2 -std=gnu11 -Wall -Wextra
+KBUILD_CFLAGS += -mno-unaligned-access -fno-common
+KBUILD_CFLAGS += -ffreestanding -nostdlib -fno-stack-protector
+KBUILD_CFLAGS += -Wno-array-bounds -Wno-unused-parameter
+KBUILD_CFLAGS += -I include -I arch/arm/include
 
-C_SRC = arch/arm/kernel/exception_handlers.c \
-        arch/arm/kernel/svc_handler.c \
-        arch/arm/kernel/cpustat.c \
-        arch/arm/mm/mmu.c \
-        arch/arm/mach-omap2/memmap.c \
-        arch/arm/mach-omap2/board-bbb.c \
-        init/main.c \
-        init/initcall.c \
-        kernel/fork.c \
-        kernel/wait.c \
-        kernel/exec.c \
-        kernel/irq/irq_core.c \
-        kernel/irqchip/irqchip.c \
-        kernel/time/clockevents.c \
-        kernel/printk/printk.c \
-        drivers/i2c/i2c-core.c \
-        drivers/mmc/core/core.c \
-        drivers/mmc/core/mmc_block.c \
-        drivers/tty/serial/serial_core.c \
-        kernel/sched/scheduler.c \
-        kernel/sched/task.c \
-        kernel/sched/idle.c \
-        kernel/locking/atomic.c \
-        kernel/locking/spinlock.c \
-        kernel/locking/wait_queue.c \
-        kernel/locking/sleep.c \
-        kernel/locking/sync_selftest.c \
-        drivers/tty/serial/omap_serial.c \
-        drivers/watchdog/omap_wdt.c \
-        drivers/irqchip/irq-omap-intc.c \
-        drivers/clocksource/timer-omap-dm.c \
-        drivers/i2c/busses/i2c-omap.c \
-        drivers/gpu/drm/tilcdc/tilcdc_drv.c \
-        drivers/gpu/drm/i2c/tda998x.c \
-        drivers/mmc/host/omap_hsmmc.c \
-        drivers/net/ethernet/ti/omap_mdio.c \
-        drivers/net/ethernet/ti/omap_cpsw.c \
-        drivers/net/net_core.c \
-        drivers/net/skbuff.c \
-        drivers/net/ipv4/ip.c \
-        drivers/net/ipv4/tcp.c \
-        drivers/net/app/http.c \
-        drivers/net/app/net_task.c \
-        drivers/gpio/omap_gpio.c \
-        drivers/gpio/leds.c \
-        drivers/net/vnet.c \
-        block/partitions/msdos.c \
-        drivers/video/fbdev/fbmem.c \
-        drivers/video/fbdev/fbcon.c \
-        lib/fonts/font_8x16.c \
-        drivers/base/device.c \
-        drivers/base/platform.c \
-        drivers/video/boot_screen.c \
-        fs/char_dev.c \
-        fs/vfs.c \
-        fs/fat32.c \
-        fs/devfs.c \
-        fs/procfs.c \
-        mm/page_alloc.c \
-        mm/slab.c \
-        mm/vmm.c \
-        block/block.c \
-        block/buffer_cache.c \
-        lib/string.c \
-        lib/format.c \
-        lib/test/selftest.c
+KBUILD_AFLAGS := -mcpu=cortex-a8 -marm -D__ASSEMBLY__
+KBUILD_AFLAGS += -I include -I arch/arm/include
 
-# Object names — flatten under build/, basename only (relies on unique names)
-ASM_OBJ     = $(addprefix $(BUILD_DIR)/, $(notdir $(ASM_SRC:.S=.o)))
-C_OBJ       = $(addprefix $(BUILD_DIR)/, $(notdir $(C_SRC:.c=.o)))
-PAYLOAD_OBJ = $(BUILD_DIR)/payload.o
-OBJS        = $(ASM_OBJ) $(C_OBJ) $(PAYLOAD_OBJ)
+LDSCRIPT := arch/arm/kernel/kernel.ld
+LDFLAGS  := -nostdlib -T $(LDSCRIPT) -Map $(BUILD_DIR)/kernel.map
 
-# VPATH lets Make find sources by basename across directory tree
-VPATH = arch/arm/entry:arch/arm/exceptions:arch/arm/scheduler:arch/arm/mm:arch/arm/kernel:arch/arm/mach-omap2:init:kernel:kernel/irq:kernel/irqchip:kernel/printk:kernel/time:kernel/sched:kernel/locking:drivers/base:drivers/video:drivers/video/fbdev:drivers/tty:drivers/tty/serial:drivers/irqchip:drivers/clocksource:drivers/i2c:drivers/i2c/busses:drivers/mmc/core:drivers/mmc/host:drivers/watchdog:drivers/gpio:drivers/net:drivers/net/ipv4:drivers/net/app:drivers/net/ethernet/ti:drivers/gpu/drm/tilcdc:drivers/gpu/drm/i2c:fs:mm:block:block/partitions:lib:lib/fonts:lib/test
+OBJS := $(BUILD_DIR)/arch/arm/kernel/vectors.o
+OBJS += $(BUILD_DIR)/arch/arm/kernel/traps.o
+OBJS += $(BUILD_DIR)/arch/arm/kernel/head.o
+OBJS += $(BUILD_DIR)/arch/arm/kernel/switch_to.o
+OBJS += $(BUILD_DIR)/arch/arm/mm/mmu.o
+OBJS += $(BUILD_DIR)/arch/arm/mm/mmu_enable.o
+OBJS += $(BUILD_DIR)/arch/arm/mm/pgd.o
+OBJS += $(BUILD_DIR)/arch/arm/mm/uaccess.o
+OBJS += $(BUILD_DIR)/drivers/irqchip/irq-omap-intc.o
+OBJS += $(BUILD_DIR)/kernel/irq/irq_core.o
+OBJS += $(BUILD_DIR)/drivers/tty/serial/omap-serial.o
+OBJS += $(BUILD_DIR)/drivers/clocksource/timer-ti-dm.o
+OBJS += $(BUILD_DIR)/kernel/printk.o
+OBJS += $(BUILD_DIR)/kernel/time/delay.o
+OBJS += $(BUILD_DIR)/kernel/time/timer.o
+OBJS += $(BUILD_DIR)/mm/page_alloc.o
+OBJS += $(BUILD_DIR)/mm/slab.o
+OBJS += $(BUILD_DIR)/kernel/spawn.o
+OBJS += $(BUILD_DIR)/kernel/sched/core.o
+OBJS += $(BUILD_DIR)/kernel/sched/rt.o
+OBJS += $(BUILD_DIR)/kernel/sched/wait.o
+OBJS += $(BUILD_DIR)/kernel/sched/completion.o
+OBJS += $(BUILD_DIR)/kernel/syscall.o
+OBJS += $(BUILD_DIR)/kernel/exit.o
+OBJS += $(BUILD_DIR)/init/main.o
+OBJS += $(BUILD_DIR)/kernel/userspace_blobs.o
+OBJS += $(BUILD_DIR)/kernel/vfs/vfs.o
+OBJS += $(BUILD_DIR)/drivers/block/genhd.o
+OBJS += $(BUILD_DIR)/kernel/fs/fat/fat.o
+OBJS += $(BUILD_DIR)/kernel/fs/fat/dir.o
+OBJS += $(BUILD_DIR)/kernel/fs/fat/file.o
+OBJS += $(BUILD_DIR)/drivers/base/bus.o
+OBJS += $(BUILD_DIR)/drivers/base/platform.o
+OBJS += $(BUILD_DIR)/drivers/base/init.o
+OBJS += $(BUILD_DIR)/drivers/base/cdev.o
+OBJS += $(BUILD_DIR)/drivers/gpio/gpiolib.o
+OBJS += $(BUILD_DIR)/drivers/gpio/gpio-omap.o
+OBJS += $(BUILD_DIR)/drivers/pinctrl/pinctrl-am335x.o
+OBJS += $(BUILD_DIR)/kernel/fs/devfs/devfs.o
+OBJS += $(BUILD_DIR)/drivers/mmc/omap-hsmmc.o
+OBJS += $(BUILD_DIR)/arch/arm/mach-omap2/board-bbb.o
+OBJS += $(BUILD_DIR)/drivers/video/fb.o
+OBJS += $(BUILD_DIR)/drivers/video/lcdc.o
+OBJS += $(BUILD_DIR)/drivers/video/tda19988.o
+OBJS += $(BUILD_DIR)/drivers/input/input.o
+OBJS += $(BUILD_DIR)/drivers/char/phonebus.o
+OBJS += $(BUILD_DIR)/drivers/i2c/i2c-core.o
+OBJS += $(BUILD_DIR)/drivers/i2c/i2c-omap.o
+OBJS += $(BUILD_DIR)/drivers/usb/musb-hcd.o
 
-CFLAGS = -Wall -nostdlib -nostartfiles -ffreestanding \
-         -march=armv7-a -mtune=cortex-a8 \
-         -mfloat-abi=soft -mno-unaligned-access \
-         -fno-builtin -fno-stack-protector \
-         -Iinclude \
-         -Ilib/include \
-         -Iarch/arm/include \
-         -Iarch/arm/mach-omap2/include \
-         -I$(USERSPACE_DIR)/include \
-         -O2 -g
-ASFLAGS = -march=armv7-a -mfloat-abi=soft
-LDFLAGS = -T arch/arm/kernel.ld -nostdlib -Wl,-Map=$(BUILD_DIR)/kernel.map
+KERNEL_ELF := $(BUILD_DIR)/kernel.elf
+KERNEL_BIN := $(BUILD_DIR)/kernel.bin
 
-all: $(BUILD_DIR)/kernel.bin
+# Default target: build kernel binary
+.PHONY: all
+all: $(KERNEL_BIN)
+
+# User-space binary blobs (embedded into kernel image)
+USER_SHELL_BIN := $(BUILD_DIR)/shell.usr
+USER_GUI_BIN   := $(BUILD_DIR)/gui.usr
+USER_PHONE_DAEMON_BIN := $(BUILD_DIR)/phone_daemon.usr
+
+.PHONY: userspace
+userspace:
+	$(MAKE) -C ../userspace
+
+$(USER_SHELL_BIN): userspace | $(BUILD_DIR)
+	cp ../userspace/build/shell.bin $@
+
+$(USER_GUI_BIN): userspace | $(BUILD_DIR)
+	cp ../userspace/build/gui.bin $@
+
+$(USER_PHONE_DAEMON_BIN): userspace | $(BUILD_DIR)
+	cp ../userspace/build/phone_daemon.bin $@
+
+$(BUILD_DIR)/kernel/userspace_blobs.o: kernel/userspace_blobs.S \
+	$(USER_SHELL_BIN) $(USER_GUI_BIN) $(USER_PHONE_DAEMON_BIN) | $(BUILD_DIR)
+	@mkdir -p $(dir $@)
+	$(CC) $(KBUILD_AFLAGS) -c -o $@ $<
+
+$(KERNEL_BIN): $(KERNEL_ELF)
+	$(OBJCOPY) -O binary $< $@
+
+$(KERNEL_ELF): $(OBJS) $(LDSCRIPT) | $(BUILD_DIR)
+	$(LD) $(LDFLAGS) -o $@ $(OBJS)
+
+$(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
+	@mkdir -p $(dir $@)
+	$(CC) $(KBUILD_CFLAGS) -c -o $@ $<
+
+$(BUILD_DIR)/%.o: %.S | $(BUILD_DIR)
+	@mkdir -p $(dir $@)
+	$(CC) $(KBUILD_AFLAGS) -c -o $@ $<
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-# Userspace shell payload (embedded into kernel image)
-PAYLOAD_BIN = $(USERSPACE_DIR)/build/apps/shell/shell.bin
-$(PAYLOAD_BIN):
-	$(MAKE) -C $(USERSPACE_DIR)
-
-$(PAYLOAD_OBJ): init/payload.S $(PAYLOAD_BIN) | $(BUILD_DIR)
-	$(CC) $(ASFLAGS) -c $< -o $@
-
-# Generic pattern rules — VPATH locates the source
-$(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/%.o: %.S | $(BUILD_DIR)
-	$(CC) $(ASFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/kernel.elf: $(OBJS)
-	$(CC) $(LDFLAGS) -o $@ $^ -lgcc
-	@echo "=== Kernel sections ==="
-	@$(CROSS_COMPILE)size $@
-
-$(BUILD_DIR)/kernel.bin: $(BUILD_DIR)/kernel.elf
-	$(OBJCOPY) -O binary $< $@
-	@echo ""
-	@echo "Build complete: $@"
-	@ls -lh $@
-
+.PHONY: clean
 clean:
-	@echo "  CLEAN   kernel objects and elf"
-	@rm -rf $(BUILD_DIR) *.o *.elf *.bin *.map uImage
-	@echo "  CLEAN   userspace payload"
-	@$(MAKE) -C $(USERSPACE_DIR) clean
-
-.PHONY: all clean
+	rm -rf $(BUILD_DIR)

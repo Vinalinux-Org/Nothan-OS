@@ -1,49 +1,32 @@
-/*
- * include/nothan/fb.h — framebuffer subsystem interface
- *
- * fb_info wraps a framebuffer and its ops vtable.
- * Drivers fill fb_info and call register_framebuffer().
- */
+#ifndef _NOTHAN_FB_H
+#define _NOTHAN_FB_H
 
-#ifndef NOTHAN_FB_H
-#define NOTHAN_FB_H
+#include <nothan/ioctl.h>
 
-#include "types.h"
+#define FB_MAGIC        'F'
+#define FB_GET_INFO     _IOR(FB_MAGIC, 0, struct fb_info)
+#define FB_FLUSH        _IOW(FB_MAGIC, 1, struct fb_flush)
+#define FB_FLIP         _IO(FB_MAGIC,  2)
 
-struct fb_info;
-
-struct fb_var_screeninfo {
-    uint32_t  xres;
-    uint32_t  yres;
-    uint32_t  bits_per_pixel;
-    uint32_t  pixclock;       /* picoseconds per pixel */
-    uint32_t  left_margin, right_margin, upper_margin, lower_margin;
-    uint32_t  hsync_len, vsync_len;
+struct fb_info {
+	int width;
+	int height;
+	int bpp;
 };
 
-struct fb_fix_screeninfo {
-    char      id[16];
-    uint32_t  smem_start;     /* physical address of frame buffer */
-    uint32_t  smem_len;
-    uint32_t  line_length;
+struct fb_flush {
+	int x1, y1;
+	int x2, y2;
+	unsigned long data;
+	unsigned int  len;
 };
 
 struct fb_ops {
-    int (*fb_check_var)(struct fb_var_screeninfo *var, struct fb_info *info);
-    int (*fb_set_par)  (struct fb_info *info);
-    int (*fb_blank)    (int blank, struct fb_info *info);
+	void (*flush)(int x1, int y1, int x2, int y2,
+		      const void *data, unsigned int len);
+	void (*flip)(void);
 };
 
-struct fb_info {
-    int                          node;
-    struct fb_var_screeninfo     var;
-    struct fb_fix_screeninfo     fix;
-    void                        *screen_base;   /* virt mapping */
-    const struct fb_ops         *fbops;
-    void                        *priv;
-};
+void fb_register_ops(struct fb_ops *ops);
 
-int register_framebuffer(struct fb_info *fb);
-int unregister_framebuffer(struct fb_info *fb);
-
-#endif /* NOTHAN_FB_H */
+#endif /* _NOTHAN_FB_H */

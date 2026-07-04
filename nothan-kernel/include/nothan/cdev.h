@@ -1,26 +1,34 @@
 /*
- * include/nothan/cdev.h — character device descriptor
+ * include/nothan/cdev.h - Character device framework
  *
- * A driver fills struct cdev (name, fops, priv) and calls
- * cdev_register(); devfs enumerates the registry and dispatches
- * read/write/ioctl through fops with an ephemeral struct file.
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 
-#ifndef NOTHAN_CDEV_H
-#define NOTHAN_CDEV_H
+#ifndef _NOTHAN_CDEV_H
+#define _NOTHAN_CDEV_H
 
-#include "types.h"
-#include "nothan/fs.h"
+#include <nothan/types.h>
+#include <nothan/fs.h>
+
+typedef u32 dev_t;
+
+#define MAJOR(dev)       ((dev) >> 20)
+#define MINOR(dev)       ((dev) & 0xFFFFFU)
+#define MKDEV(ma, mi)    (((u32)(ma) << 20) | ((u32)(mi) & 0xFFFFFU))
+
+#define CDEV_NAME_LEN    16
+#define CDEV_TABLE_SIZE  32
 
 struct cdev {
-    const char                   *name;   /* e.g. "tty", "null" */
-    const struct file_operations *fops;
-    void                         *priv;   /* copied to file->private_data */
+	dev_t                         dev;
+	const struct file_operations *fops;
+	char                          name[CDEV_NAME_LEN];
 };
 
-int               cdev_register(const struct cdev *cd);
-int               cdev_count(void);
-const struct cdev *cdev_at(uint32_t index);
-int               cdev_find(const char *name);
+int  cdev_register(struct cdev *cdev);
+void cdev_unregister(struct cdev *cdev);
+struct cdev *cdev_lookup_by_name(const char *name);
+struct cdev *cdev_lookup_by_dev(dev_t dev);
+struct cdev *cdev_lookup_by_index(int index);
 
-#endif /* NOTHAN_CDEV_H */
+#endif /* _NOTHAN_CDEV_H */

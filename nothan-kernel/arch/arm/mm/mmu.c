@@ -1,267 +1,327 @@
 /*
- * arch/arm/mm/mmu.c — ARMv7-A MMU initialization
+ * arch/arm/mm/mmu.c - ARMv7 MMU setup (page tables, TTBR, DACR)
  *
- * Manages the kernel's first-level page table (L1, 4096 section entries).
- * Provides helpers to build the boot page table at physical address,
- * activate and tear down the identity map, and switch TTBR0 per task.
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 
-#include "mmu.h"
-#include "page_alloc.h"
-#include "uart.h"
-#include "types.h"
+#include <nothan/types.h>
+#include <nothan/printk.h>
+#include <nothan/mm.h>
+#include <nothan/slab.h>
+#include <asm/memory.h>
+#include <asm/pgtable.h>
+#include <asm/barrier.h>
 
-/* 4096 entries × 4 bytes = 16KB, must be 16KB aligned.
- * Placed in .pgd section (kernel VA space).
- * Boot code accesses this at PA via mmu_build_page_table_boot().
+#define MMU_OFFSET	(PAGE_OFFSET - PHYS_OFFSET)
+
+extern u32 __pgd_start;
+extern void __turn_mmu_on(u32 pgd_phys);
+
+/* Symbols in .idmap.text section. */
+extern u32 __idmap_start;
+extern u32 __idmap_end;
+
+static void map_section(u32 *pgd, u32 va, u32 pa, u32 flags)
+{
+	pgd[va >> 20] = (pa & 0xFFF00000) | PMD_TYPE_SECT | flags;
+}
+
+/**
+ * mmu_init() - Initialize the MMU page tables and enable MMU
  *
- * 'used' attribute prevents compiler from eliminating this array:
- * mmu_build_page_table_boot() populates it through a PA pointer,
- * and mmu_init() accesses it via this static symbol at VA.
- * Without 'used', compiler considers pgd dead code. */
-static uint32_t pgd[MMU_L1_ENTRIES]
-    __attribute__((aligned(MMU_L1_ALIGN), section(".pgd"), used));
-
-extern uint32_t _boot_start; /* PA 0x80000000 — vector table */
-
+ * Sets up a 1:1 map for the kernel image and identity map for .idmap.text,
+ * configures MMIO device mappings, and then turns on the MMU.
+ */
 void mmu_init(void)
 {
-    uint32_t i, pa;
+	u32 pgd_phys = (u32)&__pgd_start - MMU_OFFSET;
+	u32 *pgd = (u32 *)pgd_phys;
 
-    for (i = 0; i < BOOT_IDENTITY_MB; i++)
-    {
-        pa = BOOT_IDENTITY_PA + (i * MMU_SECTION_SIZE);
-        pgd[pa >> MMU_SECTION_SHIFT] = 0; /* FAULT */
-    }
+	/* Zero entire L1 table. */
+	for (unsigned int i = 0; i < 4096; i++)
+		pgd[i] = 0;
 
-    /* Re-add framebuffer mapping — cleared by identity map removal above
-     * (FB_PA_BASE falls within the 128MB DDR identity range) */
-    for (i = 0; i < FB_SECTIONS; i++)
-    {
-        pa = FB_PA_BASE + (i * MMU_SECTION_SIZE);
-        pgd[pa >> MMU_SECTION_SHIFT] = pa | MMU_SECT_FB_RAM;
-    }
+	/* Kernel direct: VA 0xC0000000 -> PA 0x80000000. */
+	for (unsigned int i = 0; i < 512; i++)
+		map_section(pgd, 0xC0000000 + (i << 20), 0x80000000 + (i << 20),
+			    MT_NORMAL | PMD_SECT_DOMAIN(DOMAIN_KERNEL) |
+			    PMD_SECT_AP_RW);
 
-    __asm__ __volatile__(
-        "mov r0, #0\n\t"
-        "mcr p15, 0, r0, c8, c7, 0\n\t" /* TLBIALL */
-        "dsb\n\t"
-        "isb\n\t" ::: "r0", "memory");
+	/* MMIO: L4_PER (32 MB: 0x48000000-0x49FFFFFF) */
+	for (unsigned int i = 0; i < 32; i++)
+		map_section(pgd, 0xF0000000 + (i << 20), L4_PER_BASE + (i << 20),
+			    MT_DEVICE | PMD_SECT_DOMAIN(DOMAIN_IO) |
+			    PMD_SECT_AP_RW | PMD_SECT_XN);
 
-    /* VBAR: same physical memory now reachable at VA 0xC0000000 via high map. */
-    uint32_t vbar_va = (uint32_t)&_boot_start + VA_OFFSET;
+	/* MMIO: L4_WKUP (16 MB: 0x44E00000-0x44FFFFFF) */
+	for (unsigned int i = 0; i < 16; i++)
+		map_section(pgd, 0xF0E00000 + (i << 20), L4_WKUP_BASE + (i << 20),
+			    MT_DEVICE | PMD_SECT_DOMAIN(DOMAIN_IO) |
+			    PMD_SECT_AP_RW | PMD_SECT_XN);
 
-    __asm__ __volatile__(
-        "mcr p15, 0, %0, c12, c0, 0\n\t" /* Write VBAR */
-        "isb\n\t" ::"r"(vbar_va) : "memory");
+	/* MMIO: L4_FAST (2 MB: 0x4A000000-0x4A1FFFFF) */
+	for (unsigned int i = 0; i < 2; i++)
+		map_section(pgd, 0xF2000000 + (i << 20), L4_FAST_BASE + (i << 20),
+			    MT_DEVICE | PMD_SECT_DOMAIN(DOMAIN_IO) |
+			    PMD_SECT_AP_RW | PMD_SECT_XN);
 
-    pr_info("[MMU] True 3G/1G Virtual Memory Split\n");
-    pr_info("[MMU] User Space:  VA 0x%x -> PA 0x%x (%d MB) [Cached, User RW]\n",
-                USER_SPACE_VA, USER_SPACE_PA, USER_SPACE_MB);
-    pr_info("[MMU] Kernel DDR:  VA 0x%x -> PA 0x%x (%d MB) [Cached, Kernel-only]\n",
-                KERNEL_DDR_VA, KERNEL_DDR_PA, KERNEL_DDR_MB);
-    pr_info("[MMU] Page Pool:   VA 0x%x -> PA 0x%x (%d MB) [Cached, Kernel-only]\n",
-                POOL_KERNEL_VA_BASE, POOL_KERNEL_PA_BASE, POOL_KERNEL_MB);
-    pr_info("[MMU] Peripheral L4_WKUP: PA 0x%x (%d MB) [Strongly Ordered, Identity]\n",
-                PERIPH_L4_WKUP_PA, PERIPH_L4_WKUP_SECTIONS);
-    pr_info("[MMU] Peripheral L4_PER:  PA 0x%x (%d MB) [Strongly Ordered, Identity]\n",
-                PERIPH_L4_PER_PA, PERIPH_L4_PER_SECTIONS);
-    pr_info("[MMU] Peripheral L4_FAST: PA 0x%x (%d MB) [Strongly Ordered, Identity]\n",
-                PERIPH_L4_FAST_PA, PERIPH_L4_FAST_SECTIONS);
-    pr_info("[MMU] Framebuffer:        PA 0x%x – 0x%x (%d MB) [Non-Cacheable, Identity]\n",
-                FB_PA_BASE, FB_PA_BASE + (FB_SECTIONS * MMU_SECTION_SIZE) - 1, FB_SECTIONS);
-    pr_info("[MMU] Identity mapping removed (VA 0x80000000 now unmapped)\n");
-    pr_info("[MMU] VBAR = 0x%x\n", vbar_va);
-    pr_info("[MMU] DACR = 0x%x (D0=CLIENT, D1=CLIENT)\n", MMU_DACR_VALUE);
-    pr_info("[MMU] MMU enabled, running at high VA!\n");
+	/* MMIO: USB subsystem (1 MB: 0x47400000-0x474FFFFF) — USBSS + usb0/usb1
+	 * MUSB cores + PHYs. Sits below L4_PER, so it needs its own window. */
+	map_section(pgd, 0xF3000000, 0x47400000,
+		    MT_DEVICE | PMD_SECT_DOMAIN(DOMAIN_IO) |
+		    PMD_SECT_AP_RW | PMD_SECT_XN);
+
+	/* Identity map for .idmap.text -- use phys addresses. */
+	unsigned int i = ((u32)&__idmap_start - MMU_OFFSET) >> 20;
+	while (i <= (((u32)&__idmap_end - MMU_OFFSET) >> 20)) {
+		map_section(pgd, i << 20, i << 20,
+			    MT_NORMAL | PMD_SECT_DOMAIN(DOMAIN_KERNEL) | PMD_SECT_AP_RW);
+		i++;
+	}
+
+	dsb();
+
+	__turn_mmu_on(pgd_phys);
 }
 
-void mmu_flush_tlb(void)
+/**
+ * mmu_log_config() - Print the current MMU mapping configuration
+ *
+ * Logs the virtual-to-physical address mapping layout for kernel,
+ * MMIO regions, and DACR domain configuration to the kernel console.
+ */
+void mmu_log_config(void)
 {
-    __asm__ __volatile__(
-        "mov r0, #0\n\t"
-        "mcr p15, 0, r0, c8, c7, 0\n\t"   /* TLBIALL */
-        "dsb\n\t"
-        "isb\n\t" ::: "r0", "memory");
-}
-
-void mmu_install_page_table(uint32_t section_va, uint32_t *l2_table_va,
-                             uint32_t domain)
-{
-    uint32_t l2_pa = (uint32_t)l2_table_va - VA_OFFSET;
-    uint32_t idx   = section_va >> MMU_SECTION_SHIFT;
-
-    pgd[idx] = (l2_pa & 0xFFFFFC00) | ((domain & 0xF) << 5) | 0x01;
-
-    __asm__ __volatile__("dsb\n\t" ::: "memory");
-    mmu_flush_tlb();
-}
-
-/* Kernel-space start index: sections >= this mirror the current pgd. */
-#define PGD_KERNEL_START_IDX  (KERNEL_VA_BASE >> MMU_SECTION_SHIFT)
-
-uint32_t mmu_new_pgd(void)
-{
-    /* Order-2 = 4 pages = 16 KB, which is also the TTBR alignment. */
-    uint32_t pa = alloc_pages(GFP_KERNEL, 2);
-    if (pa == 0)
-    {
-        return 0;
-    }
-
-    uint32_t *new_pgd = (uint32_t *)(pa + VA_OFFSET);
-
-    for (uint32_t i = 0; i < PGD_KERNEL_START_IDX; i++)
-    {
-        new_pgd[i] = 0;
-    }
-    for (uint32_t i = PGD_KERNEL_START_IDX; i < MMU_L1_ENTRIES; i++)
-    {
-        new_pgd[i] = pgd[i];
-    }
-
-    /* Peripheral + framebuffer identity entries sit in user VA range
-     * but must remain accessible from kernel mode after a TTBR switch. */
-    uint32_t wkup_idx = PERIPH_L4_WKUP_PA >> MMU_SECTION_SHIFT;
-    new_pgd[wkup_idx] = pgd[wkup_idx];
-
-    for (uint32_t i = 0; i < PERIPH_L4_PER_SECTIONS; i++)
-    {
-        uint32_t idx = (PERIPH_L4_PER_PA >> MMU_SECTION_SHIFT) + i;
-        new_pgd[idx] = pgd[idx];
-    }
-
-    for (uint32_t i = 0; i < PERIPH_L4_FAST_SECTIONS; i++)
-    {
-        uint32_t idx = (PERIPH_L4_FAST_PA >> MMU_SECTION_SHIFT) + i;
-        new_pgd[idx] = pgd[idx];
-    }
-
-    for (uint32_t i = 0; i < FB_SECTIONS; i++)
-    {
-        uint32_t idx = (FB_PA_BASE >> MMU_SECTION_SHIFT) + i;
-        new_pgd[idx] = pgd[idx];
-    }
-
-    return pa;
-}
-
-void mmu_free_pgd(uint32_t pgd_pa)
-{
-    free_pages(pgd_pa, 2);
-}
-
-uint32_t mmu_kernel_pgd_pa(void)
-{
-    return (uint32_t)pgd - VA_OFFSET;
-}
-
-void mmu_switch_pgd(uint32_t pgd_pa)
-{
-    /* Same TTBR0 attributes as boot: Inner/Outer WB/WA + Shareable (0x4A). */
-    uint32_t ttbr0 = pgd_pa | 0x4A;
-
-    __asm__ __volatile__(
-        "mcr p15, 0, %0, c2, c0, 0\n\t"   /* TTBR0 */
-        "dsb\n\t"
-        "mov r0, #0\n\t"
-        "mcr p15, 0, r0, c8, c7, 0\n\t"   /* TLBIALL */
-        "dsb\n\t"
-        "isb\n\t"
-        :: "r" (ttbr0) : "r0", "memory");
-}
-
-void mmu_install_user_section(uint32_t *pgd_va, uint32_t user_va,
-                               uint32_t user_pa)
-{
-    uint32_t idx = user_va >> MMU_SECTION_SHIFT;
-    pgd_va[idx] = user_pa | MMU_SECT_USER_RAM;
-    __asm__ __volatile__("dsb\n\t" ::: "memory");
+	printk("[MMU] 3G/1G split: PAGE_OFFSET=0x%lx PHYS_OFFSET=0x%lx\n",
+	       PAGE_OFFSET, PHYS_OFFSET);
+	printk("[MMU] Kernel VA 0xC0000000 -> PA 0x80000000 (512 MB)\n");
+	printk("[MMU] L4_PER  VA 0xF0000000 -> PA 0x48000000 (32 MB, Device)\n");
+	printk("[MMU] L4_WKUP VA 0xF0E00000 -> PA 0x44E00000 (16 MB, Device)\n");
+	printk("[MMU] L4_FAST VA 0xF2000000 -> PA 0x4A000000 (2 MB, Device)\n");
+	printk("[MMU] USB     VA 0xF3000000 -> PA 0x47400000 (1 MB, Device)\n");
+	printk("[MMU] DACR=0x%x (D%d=Mgr D%d=Client D%d=Client)\n",
+	       DACR_INIT, DOMAIN_KERNEL, DOMAIN_USER, DOMAIN_IO);
+	printk("[MMU] enabled\n");
 }
 
 /*
- * mmu_build_page_table_boot - populate the L1 page table before MMU enable
- * @pgd_pa: physical address of the 4096-entry L1 table (16KB aligned)
+ * pgd_kva() - return kernel VA of the global L1 page table (swapper)
  *
- * Called from the boot trampoline while the MMU is off.  Must reside in
- * .text.boot_entry so that its VMA equals its LMA (physical address).
- * The pgd_pa argument is the physical address of the table; the VA symbol
- * _pgd_start is not usable here because the MMU is not yet active.
- *
- * Mappings installed:
- *   PA 0x80000000 → VA 0xC0000000  (kernel DDR, cached, kernel-only)
- *   PA 0x80000000 → VA 0x80000000  (identity map, temporary, removed by mmu_init)
- *   PA 0x44E00000 → VA 0x44E00000  (L4_WKUP peripherals, strongly ordered)
- *   PA 0x48000000 → VA 0x48000000  (L4_PER peripherals, strongly ordered)
- *   framebuffer PA → same VA        (normal non-cacheable)
+ * After MMU is on, the PGD physical address is biased by MMU_OFFSET.
+ * We access it through the kernel direct-map. This master table holds
+ * the kernel-half entries every process page table shares.
  */
-void __attribute__((section(".text.boot_entry")))
-mmu_build_page_table_boot(uint32_t *pgd_pa)
+static inline u32 *pgd_kva(void)
 {
-    uint32_t i;
-    uint32_t pa, va_idx;
+	u32 pgd_phys = (u32)&__pgd_start - MMU_OFFSET;
+	return (u32 *)((unsigned long)pgd_phys + (PAGE_OFFSET - PHYS_OFFSET));
+}
 
-    for (i = 0; i < MMU_L1_ENTRIES; i++)
-    {
-        pgd_pa[i] = 0;
-    }
+/* ===================================================================
+ * Per-process page tables
+ *
+ * Each user task owns a private 16 KB L1 (@mm->pgd). The kernel half
+ * (L1 indices >= 0xC00, i.e. VA >= 0xC0000000) is copied from the
+ * swapper table so kernel/MMIO mappings stay valid while the task's
+ * TTBR0 is active. The user half is built from 1 KB L2 tables, one per
+ * touched 1 MB window. A context switch loads @mm->pgd_pa into TTBR0.
+ * =================================================================== */
 
-    /* L4_WKUP: UART0, CM_PER, WDT1 (1MB) */
-    for (i = 0; i < PERIPH_L4_WKUP_SECTIONS; i++)
-    {
-        pa = PERIPH_L4_WKUP_PA + (i * MMU_SECTION_SIZE);
-        pgd_pa[pa >> MMU_SECTION_SHIFT] = pa | MMU_SECT_PERIPHERAL;
-    }
+#define USER_L1_END	0xC00		/* first kernel L1 index (VA 0xC0000000) */
+/* USER_CODE_VA now lives in <nothan/mm.h> (shared with uaccess). */
+#define TTBR0_FLAGS	0x4A		/* walk attributes — same as boot TTBR0 */
 
-    /* L4_PER: INTC, DMTimer, GPIO (3MB) */
-    for (i = 0; i < PERIPH_L4_PER_SECTIONS; i++)
-    {
-        pa = PERIPH_L4_PER_PA + (i * MMU_SECTION_SIZE);
-        pgd_pa[pa >> MMU_SECTION_SHIFT] = pa | MMU_SECT_PERIPHERAL;
-    }
+/*
+ * Normal, Inner+Outer Write-Back Write-Allocate (TEX=001, C=1, B=1) — must
+ * MATCH the kernel's MT_NORMAL section attributes for RAM. The kernel writes
+ * a task's code/bss through its own cacheable kernel mapping; if the user
+ * mapping of the same physical page used a different memory type the two
+ * views are an architecturally "mismatched memory attribute" pair.
+ */
+#define L2_ATTR_MEM	(PTE_SMALL_TEX(1) | PTE_SMALL_C | PTE_SMALL_B)
+#define L2_USER_RW	(PTE_SMALL_AP_BOTH | PTE_SMALL_NG)
+#define PTE_USER_CODE	(L2_ATTR_MEM | L2_USER_RW)			/* RW + exec */
+#define PTE_USER_DATA	(PTE_SMALL_XN | L2_ATTR_MEM | L2_USER_RW)	/* RW + XN  */
 
-    /* L4_FAST: CPSW, MDIO (2MB) */
-    for (i = 0; i < PERIPH_L4_FAST_SECTIONS; i++)
-    {
-        pa = PERIPH_L4_FAST_PA + (i * MMU_SECTION_SIZE);
-        pgd_pa[pa >> MMU_SECTION_SHIFT] = pa | MMU_SECT_PERIPHERAL;
-    }
+static inline unsigned long kva_to_phys(void *kva)
+{
+	return (unsigned long)kva - MMU_OFFSET;
+}
 
-    /* Framebuffer: identity mapped, normal non-cacheable (CPU writes, LCDC DMA reads) */
-    for (i = 0; i < FB_SECTIONS; i++)
-    {
-        pa = FB_PA_BASE + (i * MMU_SECTION_SIZE);
-        pgd_pa[pa >> MMU_SECTION_SHIFT] = pa | MMU_SECT_FB_RAM;
-    }
+/* Clean a page-table region to PoC so the MMU table walker sees writes. */
+static inline void pt_clean(void *addr, unsigned int size)
+{
+	clean_dcache_range((unsigned long)addr, (unsigned long)addr + size);
+}
 
-    for (i = 0; i < USER_SPACE_MB; i++)
-    {
-        pa = USER_SPACE_PA + (i * MMU_SECTION_SIZE);
-        va_idx = (USER_SPACE_VA + (i * MMU_SECTION_SIZE)) >> MMU_SECTION_SHIFT;
-        pgd_pa[va_idx] = pa | MMU_SECT_USER_RAM;
-    }
+/**
+ * pgd_alloc() - allocate a private L1 table for @mm
+ *
+ * 16 KB, naturally 16 KB-aligned (buddy order 2) as TTBR0 requires.
+ * User half is zeroed; kernel half is copied from the swapper table.
+ */
+int pgd_alloc(struct mm_struct *mm)
+{
+	struct zone *zone = get_zone();
+	struct page *pg = alloc_pages(GFP_KERNEL, 2);	/* 4 pages = 16 KB */
+	if (!pg) {
+		printk("[MMU] pgd_alloc: out of memory\n");
+		return -1;
+	}
 
-    for (i = 0; i < KERNEL_DDR_MB; i++)
-    {
-        pa = KERNEL_DDR_PA + (i * MMU_SECTION_SIZE);
-        va_idx = (KERNEL_DDR_VA + (i * MMU_SECTION_SIZE)) >> MMU_SECTION_SHIFT;
-        pgd_pa[va_idx] = pa | MMU_SECT_KERNEL_RAM;
-    }
+	unsigned long pa = page_to_phys(zone, pg);
+	u32 *pgd = (u32 *)phys_to_kva(pa);
+	u32 *swapper = pgd_kva();
 
-    /* Page pool: VA 0xC1000000 -> PA 0x81000000 (112 MB, Kernel-only) */
-    for (i = 0; i < POOL_KERNEL_MB; i++)
-    {
-        pa = POOL_KERNEL_PA_BASE + (i * MMU_SECTION_SIZE);
-        va_idx = (POOL_KERNEL_VA_BASE + (i * MMU_SECTION_SIZE)) >> MMU_SECTION_SHIFT;
-        pgd_pa[va_idx] = pa | MMU_SECT_KERNEL_RAM;
-    }
+	if (pa & 0x3FFF)
+		printk("[MMU] WARNING pgd_pa 0x%lx not 16KB-aligned\n", pa);
 
-    /* Temporary identity map: PA 0x80000000 → VA 0x80000000
-     * Allows CPU to continue executing at PA after MMU enable.
-     * Removed later by mmu_init() once we are at high VA. */
-    for (i = 0; i < BOOT_IDENTITY_MB; i++)
-    {
-        pa = BOOT_IDENTITY_PA + (i * MMU_SECTION_SIZE);
-        pgd_pa[pa >> MMU_SECTION_SHIFT] = pa | MMU_SECT_KERNEL_RAM;
-    }
+	for (unsigned int i = 0; i < USER_L1_END; i++)
+		pgd[i] = 0;				/* user half: empty */
+	for (unsigned int i = USER_L1_END; i < 4096; i++)
+		pgd[i] = swapper[i];			/* kernel half: shared */
+
+	pt_clean(pgd, 16384);
+
+	mm->pgd    = pgd;
+	mm->pgd_pa = pa;
+	mm->nr_l2  = 0;
+	return 0;
+}
+
+/* Find the L2 table for @l1_idx in @mm, creating + installing one if needed. */
+static u32 *l2_for(struct mm_struct *mm, unsigned int l1_idx)
+{
+	for (unsigned int i = 0; i < mm->nr_l2; i++)
+		if (mm->l2s[i].l1_idx == l1_idx)
+			return mm->l2s[i].l2;
+
+	if (mm->nr_l2 >= MM_MAX_L2) {
+		printk("[MMU] l2_for: out of L2 slots (l1_idx=0x%x)\n", l1_idx);
+		return NULL;
+	}
+
+	/* 1 KB slab class is 1 KB-aligned, which L2 coarse tables require. */
+	u32 *l2 = (u32 *)kmalloc(1024, GFP_KERNEL);
+	if (!l2) {
+		printk("[MMU] l2_for: kmalloc failed\n");
+		return NULL;
+	}
+	for (unsigned int i = 0; i < 256; i++)
+		l2[i] = 0;
+
+	unsigned long l2_pa = kva_to_phys(l2);
+	mm->pgd[l1_idx] = (l2_pa & 0xFFFFFC00)
+			| PMD_SECT_DOMAIN(DOMAIN_USER) | PMD_TYPE_TABLE;
+	pt_clean(&mm->pgd[l1_idx], 4);
+
+	mm->l2s[mm->nr_l2].l2     = l2;
+	mm->l2s[mm->nr_l2].l1_idx = l1_idx;
+	mm->nr_l2++;
+	return l2;
+}
+
+/* Map @npages of [@pa..] at user VA [@va..] with @pte_flags. */
+static int map_user_range(struct mm_struct *mm, unsigned long va,
+			  unsigned long pa, unsigned int npages, u32 pte_flags)
+{
+	for (unsigned int i = 0; i < npages; i++) {
+		u32 *l2 = l2_for(mm, va >> 20);
+		if (!l2)
+			return -1;
+		l2[(va >> 12) & 0xFF] = (pa & 0xFFFFF000) | PTE_TYPE_SMALL | pte_flags;
+		va += PAGE_SIZE;
+		pa += PAGE_SIZE;
+	}
+	return 0;
+}
+
+/**
+ * mmu_map_user() - build a task's user mappings into its private L1
+ * @mm: mm with pgd allocated and code/bss/stack pages + sizes + sp_top set.
+ *
+ * Code (RW+exec) at USER_CODE_VA, bss (RW+XN) immediately after it, and
+ * the stack (RW+XN) just below sp_top — the stack lives high (near
+ * TASK_SIZE) so it can never collide with a growing bss/heap.
+ */
+int mmu_map_user(struct mm_struct *mm)
+{
+	unsigned long code_va  = USER_CODE_VA;
+	unsigned long bss_va   = USER_CODE_VA +
+				 (unsigned long)mm->code_pages * PAGE_SIZE;
+	unsigned long stack_va = mm->sp_top -
+				 (unsigned long)mm->stack_pages * PAGE_SIZE;
+
+	if (map_user_range(mm, code_va, mm->code_pa, mm->code_pages, PTE_USER_CODE))
+		return -1;
+
+	/* bss: lay each scatter-allocated chunk into consecutive VAs above code. */
+	unsigned long va = bss_va;
+	for (unsigned int i = 0; i < mm->nr_bss_chunks; i++) {
+		unsigned int npages = 1u << mm->bss_chunks[i].order;
+		if (map_user_range(mm, va, mm->bss_chunks[i].pa, npages, PTE_USER_DATA))
+			return -1;
+		va += (unsigned long)npages * PAGE_SIZE;
+	}
+
+	if (map_user_range(mm, stack_va, mm->stack_pa, mm->stack_pages, PTE_USER_DATA))
+		return -1;
+
+	/* Clean every L2 table to PoC for the walker. */
+	for (unsigned int i = 0; i < mm->nr_l2; i++)
+		pt_clean(mm->l2s[i].l2, 1024);
+	return 0;
+}
+
+/**
+ * mmu_switch_mm() - install a task's address space into TTBR0
+ * @mm: the next task's mm (NULL for a kernel thread → swapper table)
+ *
+ * Loads the per-process L1 into TTBR0 and flushes the whole TLB (no
+ * ASIDs yet) plus the branch predictor (Cortex-A8 erratum 430973), so
+ * no stale user translations survive the switch. The kernel half is
+ * identical in every table, so kernel code keeps running across it.
+ */
+void mmu_switch_mm(struct mm_struct *mm)
+{
+	unsigned long pgd_pa = (mm && mm->pgd_pa)
+			     ? mm->pgd_pa
+			     : ((unsigned long)&__pgd_start - MMU_OFFSET);
+	unsigned long ttbr0 = (pgd_pa & 0xFFFFC000) | TTBR0_FLAGS;
+
+	__asm__ __volatile__(
+		"mov	r0, #0\n"
+		"mcr	p15, 0, r0, c13, c0, 1\n"	/* CONTEXTIDR = 0 (no ASID) */
+		"isb\n"
+		"mcr	p15, 0, %0, c2, c0, 0\n"	/* TTBR0 = pgd | flags */
+		"isb\n"
+		"mcr	p15, 0, r0, c8, c7, 0\n"	/* TLBIALL  — flush all TLB */
+		"mcr	p15, 0, r0, c7, c5, 6\n"	/* BPIALL   — flush branch pred */
+		"dsb\n"
+		"isb\n"
+		: : "r" (ttbr0) : "r0", "memory");
+}
+
+/**
+ * pgd_free() - release a task's private page tables
+ *
+ * Frees the owned L2 tables and the 16 KB L1. The user code/bss/stack
+ * physical pages are freed separately by the caller (do_exit).
+ */
+void pgd_free(struct mm_struct *mm)
+{
+	struct zone *zone = get_zone();
+
+	for (unsigned int i = 0; i < mm->nr_l2; i++)
+		kfree(mm->l2s[i].l2);
+	mm->nr_l2 = 0;
+
+	if (mm->pgd_pa) {
+		struct page *pg = pfn_to_page(zone,
+			(mm->pgd_pa - zone->base_pa) >> PAGE_SHIFT);
+		if (pg)
+			__free_pages(pg, 2);
+		mm->pgd_pa = 0;
+		mm->pgd = NULL;
+	}
 }

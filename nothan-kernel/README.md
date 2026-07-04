@@ -1,308 +1,237 @@
-# NothanOS
+# NothanOS Kernel
 
-Hệ điều hành tối giản cho ARMv7-A, chạy trên BeagleBone Black.
+Kernel chính của NothanOS. Monolithic, ARMv7-A, viết từ đầu cho AM3358 trên BeagleBone Black.
 
-## Tổng Quan
+Tài liệu này dành cho người đọc, sửa, hoặc thêm code vào kernel. Người chỉ muốn build và chạy nên đọc [README ở root](../README.md).
 
-NothanOS là bare-metal monolithic kernel tự viết 100% từ zero — không dựa trên Unix/Linux/BSD. API shape theo convention Linux để dễ đọc/audit, nhưng mọi dòng code là của NothanOS:
+---
 
-- Boot chain: ROM → MLO → kernel, 4-layer HAL (kernel / arch / platform / drivers)
-- Memory: bitmap page allocator, slab (`kmem_cache_*`), `kmalloc/kfree`, VMM, L1 section + L2 page table, per-process TTBR0
-- Concurrency: `spinlock_t`, `atomic_t`, `wait_queue_head_t`, `wait_event/wake_up`, preemptive scheduler, blocking I/O
-- Process: `fork` / `exec` / `wait` / `exit` / `kill`, SIGSEGV isolation, per-process fd table, MAX_TASKS = 5
-- Syscalls (22): AAPCS-compliant SVC interface, `copy_from/to_user`, negative errno
-- VFS + FAT32 (subdir read + unlink + rename) + devfs (`/dev/tty`, `/dev/null`) + procfs (`/proc/...`) + block layer + LRU buffer cache
-- Driver model: Linux-style `platform_device/driver` + `platform_get_resource` matching engine
-- Userspace: init (PID 1) + shell fork+exec + 10 external coreutils + nothanlibc POSIX subset
+## Bản đồ bộ nhớ
 
-**Target Hardware**: BeagleBone Black (TI AM335x, Cortex-A8)
+Kernel chạy ở virtual address cao, tách biệt hoàn toàn với userspace ở virtual address thấp.
 
-## Tính Năng
+| Vùng | Địa chỉ | Mô tả |
+| --- | --- | --- |
+| User VA | `0x40000000` – `0xBFFFFFFF` | Per-process: text, stack, heap. Mapping theo TTBR0. |
+| Kernel VA | `0xC0000000` – `0xDFFFFFFF` | Kernel image + linear map của DDR3. TTBR1, shared. |
+| Peripherals | `0x44000000` – `0x4A000000` | Mapped device memory: INTC, UART, MMC, GPIO, Control Module. |
+| DDR3 (phys) | `0x80000000` – `0x9FFFFFFF` | 512 MB RAM thật. Linear-mapped vào `0xC0000000`. |
 
-- Boot chain hoàn chỉnh: ROM → MLO → Kernel
-- MMU-based virtual memory (User: 0x40000000, Kernel: 0xC0000000), L1 section + L2 4KB pages, per-process TTBR0
-- Exception handling (7 types, DFSR/DFAR decode, user page fault → SIGSEGV, kernel fault → PANIC)
-- Preemptive round-robin scheduler (10ms tick, single priority, wait queue + sleep)
-- 22 syscalls qua SVC: `fork/exec/wait/exit/kill`, `open/read/write/close/lseek/dup/dup2`, `unlink/rename/listdir`, `getpid/getppid`, `yield`, `get_tasks/get_meminfo`, `devlist`
-- Process model: `task_struct`, `current`, MAX_TASKS=5, fork+exec ELF loader, per-process fd table, SIGSEGV/SIGKILL isolation
-- Memory: page allocator + slab + `kmalloc(GFP_KERNEL)` + VMM (`vm_area_struct`, `mm_struct`), stack canary
-- Concurrency: `spinlock_t` (LDREX/STREX), `atomic_t`, `wait_event`/`wake_up`, blocking `sys_read` qua UART RX wait queue
-- VFS multi-FS: FAT32 rootfs (subdir read + unlink + rename) + devfs (`/dev/tty`, `/dev/null`) + procfs (`/proc/meminfo`, `/version`, `/mounts`, `/<pid>/status`)
-- Block layer + buffer cache LRU 64×512 B write-back
-- Driver model: Linux-style `platform_device/driver`, `platform_get_resource`, bus matching, 4 drivers wired (uart/timer/intc/mmc)
-- Userspace: init (PID 1) + shell + 10 external ELFs (`ls cat echo ps kill pwd free uname rm mv`) + nothanlibc POSIX subset (~1.4 KLOC)
-- HDMI 800×600 RGB565 via TDA19988 + LCDC framebuffer, UART console 115200 8N1
-
-## Cấu Trúc Project
+Macro trong linker script:
 
 ```text
-nothan-kernel/
-├── bootloader/              # MLO (SRAM stage, boots kernel from SD sector 2048)
-├── arch/arm/                # entry.S, MMU asm, context switch, exception vectors
-│   └── mach-omap2/          # BBB/AM3358 board: memory map, IRQ numbers, platform device table
-├── init/                    # main.c, initcall.c, payload.S
-├── kernel/                  # core kernel: sched, locking, irq, time, printk, fork/exec/wait
-├── drivers/                 # HW drivers + subsystem cores:
-│   ├── tty/                 # serial_core.c, serial/omap_serial.c
-│   ├── irqchip/             # irq-omap-intc.c
-│   ├── clocksource/         # timer-omap-dm.c
-│   ├── mmc/                 # core/core.c, core/mmc_block.c, host/omap_hsmmc.c
-│   ├── i2c/                 # i2c-core.c, busses/i2c-omap.c
-│   ├── gpu/drm/             # tilcdc, tda998x
-│   ├── video/               # boot_screen.c, fbdev/fbmem.c, fbdev/fbcon.c
-│   ├── watchdog/            # omap_wdt.c
-│   ├── base/                # device.c, platform.c (driver model)
-│   └── char/                # char_dev.c
-├── fs/                      # vfs.c, fat32.c, devfs.c, procfs.c
-├── mm/                      # page_alloc.c, slab.c, vmm.c
-├── block/                   # block.c, buffer_cache.c, partitions/msdos.c
-├── lib/                     # string.c, format.c, fonts/, test/selftest.c
-├── include/                 # kernel headers
-│   └── nothan/               # subsystem headers (i2c.h, mmc/host.h, serial_core.h, ...)
-├── userspace/
-│   ├── apps/                # init, shell, ls, cat, echo, ps, kill, pwd, free, uname, rm, mv, hello
-│   ├── lib/                 # crt0.S, syscall.c
-│   └── nothanlibc/           # POSIX subset: string, stdio, stdlib, unistd, fcntl, ctype, signal, sys/*
-└── Documentation/           # tài liệu kỹ thuật
+PHYS_OFFSET = 0x80000000   # DDR3 base
+PAGE_OFFSET = 0xC0000000   # Kernel VA base
+MMU_OFFSET  = PAGE_OFFSET - PHYS_OFFSET
 ```
 
-## Yêu Cầu Hệ Thống
+Page table dùng ARMv7 short-descriptor format: L1 sections 1 MB cho linear map và peripherals, L2 pages 4 KB cho per-process userspace.
 
-**OS**: Ubuntu 22.04 LTS (khuyến nghị)
+---
 
-**Hardware**:
-- BeagleBone Black board
-- microSD card (tối thiểu 128MB)
-- USB-to-Serial adapter (3.3V TTL, 115200 8N1)
+## Boot flow
 
-**Software**:
-```bash
-# Cài dependencies
-sudo apt-get update
-sudo apt-get install gcc-arm-none-eabi binutils-arm-none-eabi
-sudo apt-get install python3 python3-pip make screen
+1. **`arch/arm/kernel/head.S`** — kernel entry. CPU đang chạy ở physical address `0x80000000` với MMU off. Setup stack tạm, gọi `mmu_init`.
+2. **`arch/arm/mm/mmu.c`** — dựng page table ban đầu: identity-map vùng `.idmap.text` (để code chạy được tại cả PA lẫn VA trong lúc bật MMU), map kernel vào `0xC0000000`, map peripherals.
+3. **`arch/arm/mm/mmu_enable.S`** — bật MMU, nhảy lên VA cao.
+4. **`init/main.c::kernel_main`** — chạy ở VA cao, MMU đã active. Init platform, gọi `do_initcalls()`.
+5. **`drivers/base/init.c`** — duyệt initcall theo 3 level: `EARLY` (UART, INTC, timer), `NORMAL` (MMC, GPIO, pinctrl), `LATE` (filesystem mount, userspace spawn).
+6. **`kernel/spawn.c`** — spawn `/sbin/init` (PID 1) từ payload nhúng trong kernel.
+7. Scheduler bắt đầu tick, init exec sang `/bin/sh`.
 
-# Hoặc dùng script tự động (chạy từ thư mục gốc RefARM-OS/)
-sudo bash scripts/setup-environment.sh
-```
+---
 
-## Build
+## Kiến trúc subsystem
 
-```bash
-# Build toàn bộ (bootloader + kernel + userspace)
-make
-
-# Hoặc build riêng
-make -C bootloader
-make -C userspace
-make -C kernel
-```
-
-## Deploy Lên SD Card
-
-```bash
-# One-shot: build + deploy userspace ELFs vào FAT32 + flash MLO/kernel
-sudo ./scripts/deploy_and_flash.sh /dev/sdX
-
-# Chỉ ghi đè MLO + kernel (không đụng FAT32 rootfs):
-sudo ./scripts/flash_sdcard.sh /dev/sdX
-```
-
-## Chạy
-
-1. Cắm SD card vào BeagleBone Black
-2. Kết nối serial console:
-   ```bash
-   screen /dev/ttyUSB0 115200
-   ```
-3. Bật nguồn
-4. Tương tác với shell
-
-## Shell Commands
-
-Shell fork+exec ELF từ `/bin/` — auto-prepend `/bin/` nếu command không có `/`.
+Kernel chia thành các nhóm chức năng lớn, mỗi nhóm có mục tiêu rõ ràng và ranh giới chặt chẽ với các nhóm khác. Phần này mô tả từng nhóm: vai trò của nó trong kernel, các module bên trong, và trạng thái hiện tại.
 
 ```text
-# Built-ins
-$ help                    # list built-ins
-$ cd /etc
-$ pwd
-$ exit
-
-# External ELFs trên FAT32 (/bin/)
-$ ls /                    # root: bin sbin etc
-$ ls /bin                 # 10 utilities + hello
-$ cat /etc/motd
-$ echo "hi" > /tmp/a      # redirect >, >>, <
-$ ps                      # liệt kê task đang chạy
-$ kill <pid>              # SIGKILL
-$ free                    # đọc /proc/meminfo
-$ uname                   # NothanOS
-$ rm /tmp/a
-$ mv /tmp/x /tmp/y
-
-# procfs introspection
-$ cat /proc/meminfo
-$ cat /proc/mounts
-$ cat /proc/1/status      # init
+                       ┌───────────────────────────────────────┐
+                       │             Userspace (ELF)            │
+                       └──────────────────┬─────────────────────┘
+                                          │ SVC
+              ┌───────────────────────────┴───────────────────────────┐
+              │                    Syscall layer                       │
+              └───────────────────────────┬───────────────────────────┘
+                                          │
+   ┌──────────────┬───────────────┬───────┴────────┬─────────────────┐
+   │   Process    │    Memory     │  Filesystem    │  Driver model   │
+   │  & Scheduler │   Management  │     & VFS      │ (platform bus)  │
+   └──────┬───────┴──────┬────────┴────────┬───────┴────────┬────────┘
+          │              │                 │                │
+   ┌──────┴──────────────┴─────────────────┴────────────────┴────────┐
+   │                  IRQ / Exception / Time                          │
+   └─────────────────────────────┬────────────────────────────────────┘
+                                 │
+   ┌─────────────────────────────┴────────────────────────────────────┐
+   │         arch/arm: boot, MMU, vectors, context switch              │
+   └──────────────────────────────────────────────────────────────────┘
 ```
 
-## Memory Map
+### 1. Nền tảng kiến trúc (`arch/arm/`)
 
-### Physical Memory
+Lớp dưới cùng, phụ thuộc trực tiếp vào ARMv7-A. Mọi thứ liên quan đến CPU, MMU, exception vectors, context switch đều nằm ở đây. Đổi sang SoC khác cùng ARMv7-A chỉ cần đổi `mach-*/`; đổi sang kiến trúc khác (ARMv8, RISC-V) cần thay toàn bộ `arch/`.
 
-```text
-0x80000000 - 0x807FFFFF: Kernel image + DDR pool (first 8 MB)
-0x80800000 - 0x80BFFFFF: HDMI framebuffer (4 MB, non-cacheable)
-0x80C00000 - 0x87FFFFFF: Page allocator pool (112 MB bitmap)
-0x44E00000 - 0x44E0FFFF: L4_WKUP peripherals (PRCM, UART0, WDT1, Control Module)
-0x48000000 - 0x482FFFFF: L4_PER peripherals (INTC, DMTimer, MMC0, I2C0)
-0x4830E000 - 0x4830EFFF: LCDC
-```
+| Module | Vai trò |
+| --- | --- |
+| `kernel/head.S` | Kernel entry sau khi bootloader bàn giao quyền điều khiển |
+| `kernel/vectors.S` | Bảng exception vector (7 entry) |
+| `kernel/traps.c` | C-side exception handler, register dump |
+| `kernel/switch_to.S` | Context switch: save/restore r4–r11, sp, lr, swap TTBR0 |
+| `mm/mmu.c` | Dựng page table, vmap, unmap |
+| `mm/mmu_enable.S` | Bật MMU và nhảy lên VA cao |
+| `mach-omap2/board-bbb.c` | Board data: platform device table, IRQ, pin mux init cho BBB |
+| `kernel.ld` | Linker script — layout của kernel image |
 
-### Virtual Memory
+Trạng thái: hoàn chỉnh. MMU 2-level page table chạy ổn, exception vectors phục hồi được userspace fault mà không kill kernel.
 
-```text
-0x40000000 - 0x400FFFFF: User space — 1 MB per process, per-process L2 + TTBR0
-0xC0000000 - 0xC04FFFFF: Kernel DDR (5 MB, kernel-only, cached)
-0xC1000000 - 0xC7FFFFFF: Kernel page pool (112 MB, slab + kmalloc + VMM allocations)
-0x44E00000 / 0x48000000: Peripherals (identity mapped, Strongly Ordered)
-```
+### 2. Quản lý tiến trình & lập lịch (`kernel/sched/`, `kernel/spawn.c`, `kernel/exit.c`, `kernel/syscall.c`)
 
-## Kiến Trúc
+Tạo, lập lịch, chuyển đổi và huỷ tiến trình. Cung cấp ABI giữa userspace và kernel.
 
-### Boot Sequence
+| Module | Vai trò |
+| --- | --- |
+| `sched/core.c` | Preemptive round-robin, time slice 10 ms, single run queue |
+| `sched/rt.c` | O(1) priority queue |
+| `sched/wait.c` | Wait queue cho blocking I/O |
+| `sched/completion.c` | Completion primitive cho đồng bộ giữa task và IRQ |
+| `spawn.c` | Tạo task mới từ ELF blob (payload nhúng hoặc đọc từ FS) |
+| `exit.c` | Process termination, zombie handling, reap |
+| `syscall.c` | SVC dispatch, 22 syscall |
 
-```
-Power On → ROM Code → MLO → Kernel (entry.S) → kernel_main() → Scheduler
-```
+Trạng thái: `MAX_TASKS = 5`, đủ cho init + shell + vài background job. Task state machine `READY`/`RUNNING`/`BLOCKED`/`ZOMBIE` hoạt động ổn định.
 
-**MLO** khởi tạo:
+### 3. Quản lý bộ nhớ (`mm/`)
 
-- Clock configuration (DDR PLL @ 400 MHz)
-- DDR3 memory (128 MB)
-- MMC/SD interface
-- Load `kernel.bin` từ SD sector 2048 vào DDR `0x80000000`
+Cấp phát physical page, object kernel, page table cho process.
 
-**Kernel entry**:
+| Module | Vai trò |
+| --- | --- |
+| `page_alloc.c` | Buddy allocator, order 0 (4 KB) đến order 10 (4 MB) |
+| `slab.c` | Slab cache cho fixed-size object trên top của buddy |
 
-- Clear BSS, setup L1 section table (MMU Phase A — identity + high VA)
-- Enable MMU, reload stack pointers, trampoline sang VA `0xC0000000`
-- `platform_init()` → `driver_init_all()` (Linux-style platform bus matching)
-- Init `page_alloc → slab → kmalloc → vmm` (memory foundation)
-- Init sync primitives, scheduler, VFS + mount FAT32 / devfs / procfs
-- Spawn init (PID 1 từ embedded payload), scheduler takeover
+Trạng thái: buddy + slab chạy ổn. Per-process page table riêng, context switch swap TTBR0 và flush toàn bộ TLB (không dùng ASID — đơn giản, đổi performance lấy correctness).
 
-### MMU Configuration
+### 4. Xử lý ngắt & ngoại lệ (`kernel/irq/`, `arch/arm/kernel/traps.c`)
 
-- **L1 section table** (4096 × 1 MB): kernel VA 0xC0000000, peripherals identity-mapped
-- **L2 page table** 4 KB granularity cho user VA 0x40000000 — mỗi process có L2 + pgd riêng
-- TTBR0 switch trong `context_switch.S` khi task có `mm` khác
-- User AP = User RW, Kernel AP = Kernel-only, Peripherals Strongly Ordered
+Tiếp nhận signal từ hardware và CPU exception, dispatch về handler đăng ký.
 
-### Task Scheduling
+| Module | Vai trò |
+| --- | --- |
+| `irq/irq_core.c` | IRQ handler registration và dispatch |
+| `arch/arm/kernel/vectors.S` | Bảng vector 7 entry |
+| `arch/arm/kernel/traps.c` | Xử lý undef / abort, decode DFSR/DFAR |
 
-- Round-robin preemptive, single priority, 10 ms tick (DMTimer2)
-- MAX_TASKS = 5 (idle + init + shell + 2 dynamic slot cho fork/exec)
-- States: `TASK_RUNNING`, `TASK_INTERRUPTIBLE`, `TASK_UNINTERRUPTIBLE`, `TASK_STOPPED`, `TASK_ZOMBIE`
-- Context switch: save/restore r0–r12, SP, LR, SPSR, SP_usr, LR_usr, TTBR0 nếu `mm` khác
-- Blocking I/O qua `wait_event` / `wake_up` (ví dụ `sys_read` trên UART RX)
+Trạng thái: 7 vector đầy đủ. Userspace fault → SIGSEGV; kernel fault → PANIC dump. Không nested interrupt.
 
-### System Calls
+### 5. Time (`kernel/time/`)
 
-**ABI**: AAPCS-compliant qua SVC
+Cung cấp tick định kỳ cho scheduler và API delay.
 
-- r7 = syscall number (0–21)
-- r0–r3 = arguments (copy_from_user/copy_to_user cho con trỏ)
-- r0 = return value (negative errno nếu lỗi)
+| Module | Vai trò |
+| --- | --- |
+| `time/timer.c` | DMTimer2 tick 10 ms, jiffies counter |
+| `time/delay.c` | `udelay` busy-wait, `msleep` blocking |
 
-**22 syscalls** (`kernel/include/syscalls.h`):
+Trạng thái: 10 ms tick ổn định. Chưa có high-resolution timer.
+
+### 6. Hệ thống file & block I/O (`kernel/vfs/`, `kernel/fs/`)
+
+VFS layer trừu tượng nhiều filesystem dưới một giao diện chung. Block layer trừu tượng phần cứng lưu trữ.
+
+| Module | Vai trò |
+| --- | --- |
+| `vfs/vfs.c` | Mount, lookup theo longest-prefix, dentry cache |
+| `vfs/block.c` | Block device interface |
+| `fs/fat/` | FAT32 driver — đọc/ghi, subdirectory, 8.3 filename |
+| `fs/devfs/` | `/dev` — virtual character device filesystem |
+
+Trạng thái: mount rootfs FAT32 từ SD, `/dev` cho UART và null device. Đã có procfs cơ bản (`/proc/meminfo`, `/proc/<pid>/status`). Buffer cache LRU + write-back đang hoạt động.
+
+### 7. Driver model & device drivers (`drivers/`)
+
+Driver model theo pattern platform bus của Linux: driver mô tả khả năng, device mô tả tài nguyên cụ thể, bus core ghép cặp dựa trên tên. Driver phải portable — không hardcode base address hay IRQ. Mọi giá trị board-specific nằm trong `arch/arm/mach-omap2/board-bbb.c`. Driver lấy tài nguyên qua `platform_get_resource()`. Mọi hardware init xảy ra trong `probe()`, không có `xxx_init()` public.
+
+**Driver framework (`drivers/base/`)**
+
+| Module | Vai trò |
+| --- | --- |
+| `platform.c` | `platform_device`, `platform_driver`, bus matching |
+| `bus.c` | Device/driver bus framework chung |
+| `init.c` | 3-level initcall (`EARLY` / `NORMAL` / `LATE`) |
+| `cdev.c` | Character device framework |
+
+**Console (`drivers/tty/`, `drivers/irqchip/`)**
+
+| Module | Vai trò |
+| --- | --- |
+| `tty/serial/omap-serial.c` | UART0 driver — 115200 8N1, RX ring buffer qua IRQ |
+| `irqchip/irq-omap-intc.c` | INTC interrupt controller (128 IRQ, priority queue) |
+
+**Timer (`drivers/clocksource/`)**
+
+| Module | Vai trò |
+| --- | --- |
+| `clocksource/timer-ti-dm.c` | DMTimer2 — clock source cho scheduler tick |
+
+**Storage (`drivers/mmc/`, `drivers/block/`)**
+
+| Module | Vai trò |
+| --- | --- |
+| `mmc/omap-hsmmc.c` | MMC0 SD card controller — polled I/O, 512B sector |
+| `block/genhd.c` | Generic disk framework + MBR parser |
+
+**GPIO & Pin control (`drivers/gpio/`, `drivers/pinctrl/`)**
+
+| Module | Vai trò |
+| --- | --- |
+| `gpio/gpiolib.c` | GPIO framework chung |
+| `gpio/gpio-omap.c` | AM335x GPIO driver — 4 bank (`gpio0..3`) |
+| `pinctrl/pinctrl-am335x.c` | Pin mux qua Control Module |
+
+Trạng thái: tất cả driver trên đã probe và chạy ổn định trên BBB thật. Chưa có driver cho ethernet (CPSW), USB, framebuffer, audio, ADC.
+
+### 8. Đồng bộ hoá
+
+Primitive chia sẻ giữa các nhóm trên — không phải subsystem độc lập, mà là toolbox dùng xuyên suốt.
+
+- **Spinlock** (`spinlock_t`) — LDREX/STREX, dùng trong critical section ngắn, không sleep
+- **Atomic ops** (`atomic_t`) — `atomic_read`/`set`/`add_return`/`cmpxchg`
+- **Memory barriers** — `smp_mb`, `dmb`, `dsb`, `isb` cho ordering
+- **Wait queue** — blocking, đánh thức khi sự kiện xảy ra
+- **Completion** — đồng bộ giữa task và IRQ handler
+
+### 9. Logging (`kernel/printk.c`)
+
+Một kênh duy nhất ra UART0. Driver dùng `pr_info` / `pr_err` / `pr_warn` / `pr_debug` với prefix `[<MODULE>]` để dễ trace. Đây là công cụ debug chính của kernel — không có JTAG.
+
+---
+
+## Syscall ABI
+
+22 syscalls, dispatch qua instruction `svc #0`. Theo AAPCS:
+
+- `r7` chứa syscall number
+- `r0`–`r5` chứa argument
+- `r0` trả về kết quả (âm = `-errno`)
+
+Bảng syscall đầy đủ trong `include/nothan/syscall.h`. Phân nhóm:
 
 | Nhóm | Syscalls |
-| ------ | ---------- |
-| I/O | `write`, `read`, `open`, `close`, `dup`, `dup2` |
-| File | `read_file`, `write_file`, `listdir`, `unlink`, `rename` |
-| Process | `fork`, `exec`, `wait`, `exit`, `kill`, `getpid`, `getppid`, `yield` |
-| Info | `get_tasks`, `get_meminfo`, `devlist` |
+| --- | --- |
+| Process | `fork`, `exec`, `exit`, `wait`, `yield`, `getpid`, `getppid`, `kill` |
+| I/O | `read`, `write`, `open`, `close`, `dup`, `dup2` |
+| Filesystem | `read_file`, `write_file`, `listdir`, `unlink`, `rename`, `chdir`, `getcwd` |
+| Introspection | `get_tasks`, `get_meminfo`, `devlist` |
 
-### Filesystem
+Mọi con trỏ từ userspace phải đi qua `copy_from_user` / `copy_to_user`. Không dereference trực tiếp.
 
-- VFS: Abstraction layer (open/read/write/close/lookup ops)
-- FAT32: Rootfs trên SD card (subdir read, unlink, rename)
-- devfs: `/dev/tty`, `/dev/null`
-- procfs: `/proc/meminfo`, `/proc/version`, `/proc/mounts`, `/proc/<pid>/status`
-- Block layer + buffer cache LRU 64×512 B write-back
+---
 
-## Tài Liệu
+## Tham chiếu
 
-Tài liệu kỹ thuật chi tiết trong `Documentation/`:
-
-1. `01-boot-and-bringup.md` - Boot sequence
-2. `02-kernel-initialization.md` - Kernel startup
-3. `03-memory-and-mmu.md` - Memory management
-4. `04-interrupt-and-exception.md` - Exception handling
-5. `05-task-and-scheduler.md` - Task scheduling
-6. `06-syscall-mechanism.md` - Syscall interface
-7. `08-userspace-application.md` - User applications
-8. `99-system-overview.md` - Big picture
-
-## Development
-
-### Thêm File Vào Rootfs
-
-1. Copy file vào FAT32 partition đã mount (`/media/$USER/NOTHAN/...`)
-2. `sync` + `umount` trước khi rút SD
-
-### Tạo User Application Mới
-
-1. Tạo app directory `userspace/apps/<name>/` với `<name>.c`
-2. `#include <stdio.h>`/`<unistd.h>`/... (nothanlibc headers)
-3. `main(int argc, char **argv)` nhận argv từ shell
-4. Build: `make -C userspace` — ELF tự động xuất hiện ở `userspace/build/apps/<name>/<name>.elf`
-5. Deploy: `sudo ./scripts/deploy_and_flash.sh /dev/sdX` — copy ELF vào `/bin/<name>` trên FAT32
-6. Trên BBB: `$ /bin/<name>` hoặc `$ <name>` (shell auto-prepend `/bin/`)
-
-## Debugging
-
-**Serial Console**:
-```bash
-screen /dev/ttyUSB0 115200
-# hoặc
-minicom -D /dev/ttyUSB0 -b 115200
-```
-
-**Common Issues**:
-
-- Boot hang trước `[TIMER]`: UART connection lỗi, MLO sai sector trên SD
-- Data Abort / Prefetch Abort: exception handler dump r0–r12, SPSR, DFSR/DFAR để trace
-- User page fault: task bị SIGSEGV, kernel sống; xem `[EXC]` log để debug
-- No shell prompt: init payload load OK chưa (xem `[BOOT] Loading User App Payload`), `/bin/sh` có trên FAT32 chưa
-
-**Debug Output**: `uart_printf` là công cụ chính. Trace macros trong `kernel/include/trace.h` có thể bật/tắt từng subsystem.
-
-## Testing
-
-Selftest chạy tự động mỗi lần boot — `[TEST]` prefix. Test harness ở `kernel/src/kernel/test/selftest.c` — hiện có 2 integration test (bcache hit-rate, procfs content). Thêm test bằng cách append vào `tests[]` array, panic on fail.
-
-## Nguyên Tắc Thiết Kế
-
-1. **100% hand-written** — không copy/fork/port từ Linux/musl/BusyBox/lwIP. Mọi dòng code là của NothanOS.
-2. **Linux-inspired API shape** — `task_struct`, `platform_driver`, `spinlock_t`, `wait_event`, `kmalloc(GFP_KERNEL)` — dễ đọc cho người biết Linux nhưng không dính dáng upstream.
-3. **Userspace-driven kernel** — mỗi feature kernel phải có consumer trong userspace/demo. Không consumer → defer.
-4. **Correctness over performance** — flush toàn bộ TLB, no nested interrupts, `-O2` không aggressive.
-5. **Explicit over implicit** — explicit MMU setup, explicit stack reload, explicit pointer validation (`copy_from_user`).
-6. **Real hardware, no emulation** — mọi DoD pass trên BeagleBone Black thật.
-
-## Giới Hạn (MVP scope)
-
-- Single-core only (ARMv7-A Cortex-A8, chưa test SMP)
-- MAX_TASKS = 5 (idle + init + shell + 2 dynamic slot)
-- Single-user (no setuid/getuid), no cgroup/namespace
-- No pipe syscall `|` (defer v1.1)
-- No TCP (UDP/ICMP/ARP only khi P7 xong)
-- No USB host, no wifi/BT, no GPU
-- No secure boot, no signal handler userspace (chỉ SIGKILL/SIGSEGV)
-- Không có editor on device — edit config trên host, flash lại
-- Signal set chỉ gồm SIGKILL + SIGSEGV, không SIGTERM/SIGCHLD
-
-Các giới hạn này giữ codebase đơn giản và tập trung vào core OS concepts.
+- [Root README](../README.md) — bối cảnh project, mục tiêu, build & flash
+- [CLAUDE.md](../CLAUDE.md) — hard rules dành cho contributor
+- [reference/am335x/](../reference/am335x/) — TRM theo subsystem
+- [reference/arm-arch/](../reference/arm-arch/) — ARM ARM (instruction set, exception model)
+- [reference/hardware-beagleboneblack/](../reference/hardware-beagleboneblack/) — BBB schematic, pinout

@@ -1,44 +1,34 @@
-/* ============================================================
- * utils.c
- * Utility functions for bootloader
- * ============================================================ */
+/*
+ * bootloader/src/utils.c - Memory and delay utilities
+ *
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
+ */
 
 #include "boot.h"
 
-/* ============================================================
- * Memory copy function
- * ============================================================ */
 void *memcpy(void *dest, const void *src, size_t n)
 {
-    char *d = (char *)dest;
-    const char *s = (const char *)src;
-    
-    while (n--) {
-        *d++ = *s++;
-    }
-    
-    return dest;
+	char *d = (char *)dest;
+	const char *s = (const char *)src;
+
+	while (n--)
+		*d++ = *s++;
+	return dest;
 }
 
-/* ============================================================
- * Memory set function
- * ============================================================ */
 void *memset(void *s, int c, size_t n)
 {
-    unsigned char *p = (unsigned char *)s;
-    
-    while (n--) {
-        *p++ = (unsigned char)c;
-    }
-    
-    return s;
+	unsigned char *p = (unsigned char *)s;
+
+	while (n--)
+		*p++ = (unsigned char)c;
+	return s;
 }
 
-/* ============================================================
- * Simple delay loop
- * ============================================================ */
 void delay(uint32_t count)
 {
-    volatile uint32_t i;
-    for (i = 0; i < count; i++);
+	volatile uint32_t i;
+
+	for (i = 0; i < count; i++)
+		;
 }

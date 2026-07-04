@@ -1,32 +1,11 @@
-/*
- * include/nothan/printk.h — kernel log macros
- *
- * KERN_* loglevel prefixes are empty stubs; a future printk
- * dispatcher can parse the leading "<N>" byte to filter by level.
- * Drivers should prefer pr_info/pr_err/pr_warn over plain printk.
- */
+#ifndef _PRINTK_H
+#define _PRINTK_H
 
-#ifndef NOTHAN_PRINTK_H
-#define NOTHAN_PRINTK_H
+#include <stdarg.h>
 
-void printk(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+int printk(const char *fmt, ...)
+	__attribute__((format(printf, 1, 2)));
 
-#define KERN_EMERG   ""
-#define KERN_ALERT   ""
-#define KERN_CRIT    ""
-#define KERN_ERR     ""
-#define KERN_WARN    ""
-#define KERN_NOTICE  ""
-#define KERN_INFO    ""
-#define KERN_DEBUG   ""
+int vsnprintf(char *buf, unsigned long size, const char *fmt, va_list args);
 
-#define pr_emerg(fmt, ...)       printk(KERN_EMERG  fmt, ##__VA_ARGS__)
-#define pr_alert(fmt, ...)       printk(KERN_ALERT  fmt, ##__VA_ARGS__)
-#define pr_crit(fmt, ...)        printk(KERN_CRIT   fmt, ##__VA_ARGS__)
-#define pr_err(fmt, ...)         printk(KERN_ERR    fmt, ##__VA_ARGS__)
-#define pr_warn(fmt, ...)        printk(KERN_WARN   fmt, ##__VA_ARGS__)
-#define pr_notice(fmt, ...)      printk(KERN_NOTICE fmt, ##__VA_ARGS__)
-#define pr_info(fmt, ...)        printk(KERN_INFO   fmt, ##__VA_ARGS__)
-#define pr_debug(fmt, ...)       printk(KERN_DEBUG  fmt, ##__VA_ARGS__)
-
-#endif /* NOTHAN_PRINTK_H */
+#endif /* _PRINTK_H */

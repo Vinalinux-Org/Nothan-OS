@@ -1,180 +1,196 @@
 /*
- * mm/page_alloc.c — bitmap page allocator, 4 KB granularity
+ * mm/page_alloc.c - Physical page allocator (buddy system)
+ *
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 
-#include "page_alloc.h"
-#include "mach/memory.h"
-#include "assert.h"
-#include "uart.h"
-#include "types.h"
+#include <nothan/types.h>
+#include <nothan/mm.h>
+#include <nothan/printk.h>
+#include <asm/memory.h>
 
-/* Pool starts 16 MB into DDR to leave room for kernel image,
- * user bootstrap, and framebuffer. Ends at DDR end (128 MB). */
-#define POOL_PA_BASE    0x81000000
-#define POOL_PA_END     (PLATFORM_DDR_PA_BASE + (PLATFORM_DDR_SIZE_MB * 1024u * 1024u))
-#define POOL_SIZE       (POOL_PA_END - POOL_PA_BASE)
-#define POOL_PAGES      (POOL_SIZE / PAGE_SIZE)
-#define BITMAP_WORDS    ((POOL_PAGES + 31u) / 32u)
+/*
+ * DDR pool end address.
+ * The BeagleBone Black has 512 MB DDR3 at 0x80000000–0x9FFFFFFF.
+ * Pool ends at 0xA0000000.
+ */
+#define DDR_END			0xA0000000UL
+#define PAGE_ARRAY_GAP		(4UL << 20)
 
-static uint32_t bitmap[BITMAP_WORDS];
-static uint32_t free_count;
+extern u32 _end;
 
-static inline int bit_get(uint32_t idx)
+static struct zone mem_zone;
+
+struct zone *get_zone(void)
 {
-    return (bitmap[idx >> 5] >> (idx & 31u)) & 1u;
+	return &mem_zone;
 }
 
-static inline void bit_set(uint32_t idx)
-{
-    bitmap[idx >> 5] |= (1u << (idx & 31u));
-}
-
-static inline void bit_clear(uint32_t idx)
-{
-    bitmap[idx >> 5] &= ~(1u << (idx & 31u));
-}
-
+/**
+ * page_alloc_init() - Initialize the page allocator and memory zone
+ *
+ * Scans the memory layout, reserves space for the struct page array,
+ * and initializes all physical pages into the buddy allocator pool.
+ */
 void page_alloc_init(void)
 {
-    for (uint32_t i = 0; i < BITMAP_WORDS; i++)
-    {
-        bitmap[i] = 0;
-    }
-    free_count = POOL_PAGES;
+	struct zone *zone = &mem_zone;
+	unsigned long kernel_end_pa, pool_start_pa;
+	unsigned long total_pages;
 
-    pr_info("[PAGE] Pool: %d MB @ PA 0x%x (%d pages, bitmap %dB)\n",
-                POOL_SIZE / (1024u * 1024u), POOL_PA_BASE,
-                POOL_PAGES, BITMAP_WORDS * 4u);
+	kernel_end_pa = __virt_to_phys((unsigned long)&_end);
+	zone->page_array = (struct page *)__phys_to_virt(kernel_end_pa);
+
+	pool_start_pa = (kernel_end_pa + PAGE_ARRAY_GAP) & PAGE_MASK;
+	zone->base_pa = pool_start_pa;
+	zone->end_pa  = DDR_END & PAGE_MASK;
+
+	total_pages = (zone->end_pa - zone->base_pa) >> PAGE_SHIFT;
+	zone->managed_pages = total_pages;
+	zone->free_pages = 0;
+
+	/* Initialise free lists. */
+	for (unsigned int order = 0; order < NR_PAGE_ORDERS; order++)
+		list_init(&zone->free_area[order].free_list);
+
+	/*
+	 * Step 1: Initialize metadata for ALL pages.
+	 * DDR memory is not guaranteed to be zeroed, so we must
+	 * explicitly initialize lru, flags, and slab pointers for
+	 * every single page before any buddy operations occur.
+	 */
+	for (unsigned long i = 0; i < total_pages; i++) {
+		struct page *p = &zone->page_array[i];
+		list_init(&p->lru);
+		p->flags = 0;
+		p->private = 0;
+		p->_refcount = 0;
+		p->slab = NULL;
+	}
+
+	/*
+	 * Step 2: Build the buddy free lists using greedy block sizes.
+	 */
+	for (unsigned long i = 0; i < total_pages; ) {
+		unsigned int order = MAX_ORDER;
+
+		/* Find the largest possible buddy block that fits here */
+		while (order > 0) {
+			unsigned long size = 1UL << order;
+			if ((i & (size - 1)) == 0 && i + size <= total_pages)
+				break;
+			order--;
+		}
+
+		struct page *page = &zone->page_array[i];
+		set_page_flag(page, PG_BUDDY);
+		set_page_order(page, order);
+		__add_to_free_list(page, zone, order);
+		zone->free_pages += (1UL << order);
+
+		i += (1UL << order);
+	}
+
+	unsigned long pool_mb = (zone->end_pa - zone->base_pa) >> 20;
+	unsigned long meta_kb = (total_pages * sizeof(struct page)) >> 10;
+	printk("[PAGE] Pool %lu MB at PA 0x%lx (%lu pages, metadata %lu KB)\n",
+	       pool_mb, zone->base_pa, total_pages, meta_kb);
+	printk("[PAGE] Free: %lu pages (%lu MB)\n",
+	       zone->free_pages, (zone->free_pages << PAGE_SHIFT) >> 20);
 }
 
-uint32_t alloc_pages(gfp_t gfp, unsigned int order)
+static void expand(struct page *page, struct zone *zone, unsigned int low, unsigned int high)
 {
-    (void)gfp;
+	unsigned long size = 1UL << high;
 
-    if (order > PAGE_MAX_ORDER)
-    {
-        return 0;
-    }
+	while (high > low) {
+		high--;
+		size >>= 1;
 
-    uint32_t count = 1u << order;
+		struct page *buddy = page + size;
 
-    /* Natural alignment: step by 'count' so returned PA is
-     * aligned to (count * PAGE_SIZE). */
-    for (uint32_t i = 0; i + count <= POOL_PAGES; i += count)
-    {
-        int all_zero = 1;
-        for (uint32_t j = 0; j < count; j++)
-        {
-            if (bit_get(i + j))
-            {
-                all_zero = 0;
-                break;
-            }
-        }
-        if (all_zero)
-        {
-            for (uint32_t j = 0; j < count; j++)
-            {
-                bit_set(i + j);
-            }
-            free_count -= count;
-            return POOL_PA_BASE + (i * PAGE_SIZE);
-        }
-    }
-    return 0;
+		set_page_flag(buddy, PG_BUDDY);
+		set_page_order(buddy, high);
+		__add_to_free_list(buddy, zone, high);
+	}
 }
 
-void free_pages(uint32_t pa, unsigned int order)
+/**
+ * alloc_pages() - Allocate contiguous pages
+ * @gfp: GFP flags (e.g. GFP_KERNEL)
+ * @order: Log2 of the number of pages to allocate
+ *
+ * Return: Pointer to the first struct page, or NULL if out of memory.
+ */
+struct page *alloc_pages(gfp_t gfp, unsigned int order)
 {
-    ASSERT(pa >= POOL_PA_BASE);
-    ASSERT(pa < POOL_PA_END);
-    ASSERT((pa & (PAGE_SIZE - 1u)) == 0);
-    ASSERT(order <= PAGE_MAX_ORDER);
+	struct zone *zone = &mem_zone;
 
-    uint32_t count = 1u << order;
-    uint32_t idx   = (pa - POOL_PA_BASE) / PAGE_SIZE;
+	(void)gfp;
 
-    for (uint32_t j = 0; j < count; j++)
-    {
-        /* Catches double-free. */
-        ASSERT(bit_get(idx + j) == 1);
-        bit_clear(idx + j);
-    }
-    free_count += count;
+	if (order > MAX_ORDER)
+		return NULL;
+
+	for (unsigned int current_order = order; current_order <= MAX_ORDER; current_order++) {
+		struct free_area *area = &zone->free_area[current_order];
+
+		if (list_empty(&area->free_list))
+			continue;
+
+		struct page *page = (struct page *)area->free_list.next;
+		__del_from_free_list(page, zone, current_order);
+		clear_page_flag(page, PG_BUDDY);
+		page->private = 0;
+		page->_refcount = 1;
+
+		zone->free_pages -= (1UL << order);
+
+		if (current_order > order)
+			expand(page, zone, order, current_order);
+
+		return page;
+	}
+
+	return NULL;
 }
 
-uint32_t page_alloc_total_pages(void) { return POOL_PAGES; }
-uint32_t page_alloc_free_pages(void)  { return free_count; }
-
-
-
-#define SELFTEST_ORDER0_N   100
-#define SELFTEST_ORDER3_MASK ((1u << (PAGE_SHIFT + PAGE_MAX_ORDER)) - 1u)
-
-void page_alloc_selftest(void)
+/**
+ * __free_pages() - Free contiguous pages back to the buddy allocator
+ * @page: Pointer to the first struct page to free
+ * @order: Log2 of the number of pages to free
+ */
+void __free_pages(struct page *page, unsigned int order)
 {
-    uint32_t snapshot = free_count;
-    uint32_t pages[SELFTEST_ORDER0_N];
+	struct zone *zone = &mem_zone;
+	unsigned long pfn = page - zone->page_array;
+	unsigned long nr_freed = 1UL << order;	/* pages actually being freed */
 
-    for (int i = 0; i < SELFTEST_ORDER0_N; i++)
-    {
-        pages[i] = alloc_pages(GFP_KERNEL, 0);
-        if (pages[i] == 0)
-        {
-            pr_info("[PAGE] FAIL: alloc #%d returned 0\n", i);
-            return;
-        }
-        if ((pages[i] & (PAGE_SIZE - 1u)) != 0)
-        {
-            pr_info("[PAGE] FAIL: alloc #%d PA 0x%x not page-aligned\n",
-                        i, pages[i]);
-            return;
-        }
-        if (pages[i] < POOL_PA_BASE || pages[i] >= POOL_PA_END)
-        {
-            pr_info("[PAGE] FAIL: alloc #%d PA 0x%x out of pool\n",
-                        i, pages[i]);
-            return;
-        }
-        for (int j = 0; j < i; j++)
-        {
-            if (pages[i] == pages[j])
-            {
-                pr_info("[PAGE] FAIL: alloc #%d duplicate of #%d (PA 0x%x)\n",
-                            i, j, pages[i]);
-                return;
-            }
-        }
-    }
+	while (order < MAX_ORDER) {
+		unsigned long buddy_pfn = __find_buddy_pfn(pfn, order);
+		if (buddy_pfn >= zone->managed_pages)
+			break;
 
-    for (int i = 0; i < SELFTEST_ORDER0_N; i++)
-    {
-        free_page(pages[i]);
-    }
-    if (free_count != snapshot)
-    {
-        pr_info("[PAGE] FAIL: free_count %d != snapshot %d after order-0 free\n",
-                    free_count, snapshot);
-        return;
-    }
+		struct page *buddy = &zone->page_array[buddy_pfn];
+		if (!page_is_buddy(buddy, order))
+			break;
 
-    uint32_t big = alloc_pages(GFP_KERNEL, PAGE_MAX_ORDER);
-    if (big == 0)
-    {
-        pr_info("[PAGE] FAIL: alloc order-%d returned 0\n", PAGE_MAX_ORDER);
-        return;
-    }
-    if ((big & SELFTEST_ORDER3_MASK) != 0)
-    {
-        pr_info("[PAGE] FAIL: order-%d PA 0x%x not %d-byte aligned\n",
-                    PAGE_MAX_ORDER, big, SELFTEST_ORDER3_MASK + 1u);
-        return;
-    }
-    free_pages(big, PAGE_MAX_ORDER);
-    if (free_count != snapshot)
-    {
-        pr_info("[PAGE] FAIL: free_count mismatch after order-%d free\n",
-                    PAGE_MAX_ORDER);
-        return;
-    }
+		__del_from_free_list(buddy, zone, order);
+		clear_page_flag(buddy, PG_BUDDY);
+		buddy->private = 0;
+
+		if (buddy_pfn < pfn) {
+			pfn = buddy_pfn;
+			page = buddy;
+		}
+		order++;
+	}
+
+	set_page_flag(page, PG_BUDDY);
+	set_page_order(page, order);
+	__add_to_free_list(page, zone, order);
+	/* Add only the pages actually freed. The buddies merged in during
+	 * coalescing above were already counted in free_pages when they were
+	 * freed, so adding the full (1<<order) coalesced size double-counts. */
+	zone->free_pages += nr_freed;
+	page->_refcount = 0;
 }

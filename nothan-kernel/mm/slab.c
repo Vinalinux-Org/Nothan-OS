@@ -1,249 +1,168 @@
 /*
- * mm/slab.c — fixed size-class slab allocator and kmalloc/kfree
+ * mm/slab.c - Slab allocator (kmalloc/kfree for fixed-size objects)
+ *
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 
-#include "slab.h"
-#include "mmu.h"
-#include "page_alloc.h"
-#include "assert.h"
-#include "uart.h"
-#include "types.h"
+#include <nothan/types.h>
+#include <nothan/slab.h>
+#include <nothan/mm.h>
+#include <nothan/printk.h>
+#include <asm/memory.h>
 
-#define SLAB_MAX_CACHES      16
-#define SLAB_PAGE_HDR_BYTES  8   /* keeps first obj 8-byte aligned */
+#define SLAB_SIZES		7
 
-/* kfree looks up the cache through this header at the start of each
- * slab page, so obj_size must leave room for at least obj-sized tail. */
-struct slab_page_hdr {
-    struct kmem_cache *cache;
-    uint32_t           pad;
+/**
+ * struct slab_cache - Manages a pool of fixed-size objects
+ * @obj_size: Size of a single object in bytes
+ * @objs_per_page: Number of objects that fit in a single page
+ * @free_objects: Current number of free objects in this cache
+ * @free_list: Pointer to the first available free object
+ */
+struct slab_cache {
+	size_t obj_size;
+	unsigned int objs_per_page;
+	unsigned int free_objects;
+	void *free_list;
 };
 
-struct free_obj {
-    struct free_obj *next;
+static struct slab_cache caches[SLAB_SIZES];
+static const size_t cache_sizes[SLAB_SIZES] = {
+	32, 64, 128, 256, 512, 1024, 2048
 };
 
-struct kmem_cache {
-    const char      *name;
-    uint32_t         obj_size;
-    uint32_t         objs_per_page;
-    struct free_obj *freelist;
-    uint32_t         total_objs;
-    uint32_t         free_objs;
-    int              in_use;
-};
-
-static struct kmem_cache cache_pool[SLAB_MAX_CACHES];
-
-/* kmalloc size-class caches. 2048 is the largest: larger allocations
- * return NULL in MVP (caller should use alloc_pages directly). */
-static const uint32_t kmalloc_sizes[] = {32, 64, 128, 256, 512, 1024, 2048};
-#define KMALLOC_CLASSES  (sizeof(kmalloc_sizes) / sizeof(kmalloc_sizes[0]))
-static struct kmem_cache *kmalloc_caches[KMALLOC_CLASSES];
-
-static uint32_t align_up_8(uint32_t x) { return (x + 7u) & ~7u; }
-
-static int slab_refill(struct kmem_cache *cache)
+/*
+ * Fill a freshly-allocated page with linked free objects.
+ * The first unsigned long of each free object stores the
+ * pointer to the next free object.
+ */
+static void slab_fill_page(struct slab_cache *cache, struct page *page)
 {
-    uint32_t pa = alloc_pages(GFP_KERNEL, 0);
-    if (pa == 0)
-    {
-        return -1;
-    }
+	unsigned long pa = page_to_phys(get_zone(), page);
+	void *base = (void *)__phys_to_virt(pa);
+	page->slab = cache;
 
-    uint8_t *page_va = (uint8_t *)(pa + VA_OFFSET);
-    struct slab_page_hdr *hdr = (struct slab_page_hdr *)page_va;
-    hdr->cache = cache;
-    hdr->pad   = 0;
+	/*
+	 * Build a singly-linked free list through the objects:
+	 * obj[i]->next = obj[i+1]; obj[last]->next = old free_list head.
+	 */
+	for (unsigned int i = 0; i < cache->objs_per_page; i++) {
+		void *obj  = base + i * cache->obj_size;
+		void *next = (i + 1 < cache->objs_per_page)
+			     ? base + (i + 1) * cache->obj_size
+			     : cache->free_list;
+		*(void **)obj = next;
+	}
 
-    uint8_t *obj_base = page_va + SLAB_PAGE_HDR_BYTES;
-    for (uint32_t i = 0; i < cache->objs_per_page; i++)
-    {
-        struct free_obj *obj =
-            (struct free_obj *)(obj_base + i * cache->obj_size);
-        obj->next = cache->freelist;
-        cache->freelist = obj;
-    }
-
-    cache->total_objs += cache->objs_per_page;
-    cache->free_objs  += cache->objs_per_page;
-    return 0;
+	cache->free_list = base;
+	cache->free_objects += cache->objs_per_page;
 }
 
-struct kmem_cache *kmem_cache_create(const char *name, uint32_t obj_size)
-{
-    ASSERT(obj_size >= sizeof(struct free_obj));
-    ASSERT(obj_size <= PAGE_SIZE - SLAB_PAGE_HDR_BYTES);
-
-    uint32_t aligned = align_up_8(obj_size);
-
-    for (uint32_t i = 0; i < SLAB_MAX_CACHES; i++)
-    {
-        if (!cache_pool[i].in_use)
-        {
-            struct kmem_cache *c = &cache_pool[i];
-            c->name          = name;
-            c->obj_size      = aligned;
-            c->objs_per_page = (PAGE_SIZE - SLAB_PAGE_HDR_BYTES) / aligned;
-            c->freelist      = NULL;
-            c->total_objs    = 0;
-            c->free_objs     = 0;
-            c->in_use        = 1;
-            return c;
-        }
-    }
-    return NULL;
-}
-
-void *kmem_cache_alloc(struct kmem_cache *cache, gfp_t gfp)
-{
-    ASSERT(cache != NULL);
-    ASSERT(cache->in_use);
-    (void)gfp;
-
-    if (cache->freelist == NULL)
-    {
-        if (slab_refill(cache) < 0)
-        {
-            return NULL;
-        }
-    }
-
-    struct free_obj *obj = cache->freelist;
-    cache->freelist = obj->next;
-    cache->free_objs--;
-    return obj;
-}
-
-void kmem_cache_free(struct kmem_cache *cache, void *ptr)
-{
-    ASSERT(cache != NULL);
-    ASSERT(ptr != NULL);
-
-    struct free_obj *obj = (struct free_obj *)ptr;
-    obj->next = cache->freelist;
-    cache->freelist = obj;
-    cache->free_objs++;
-}
-
-void *kmalloc(uint32_t size, gfp_t gfp)
-{
-    if (size == 0)
-    {
-        return NULL;
-    }
-    for (uint32_t i = 0; i < KMALLOC_CLASSES; i++)
-    {
-        if (size <= kmalloc_sizes[i])
-        {
-            return kmem_cache_alloc(kmalloc_caches[i], gfp);
-        }
-    }
-    return NULL;
-}
-
-void kfree(void *ptr)
-{
-    if (ptr == NULL)
-    {
-        return;
-    }
-    uint32_t page_va = (uint32_t)ptr & PAGE_MASK;
-    struct slab_page_hdr *hdr = (struct slab_page_hdr *)page_va;
-    ASSERT(hdr->cache != NULL);
-    kmem_cache_free(hdr->cache, ptr);
-}
-
-uint32_t slab_cache_free_count(struct kmem_cache *cache)
-{
-    return cache->free_objs;
-}
-
-uint32_t slab_cache_total_count(struct kmem_cache *cache)
-{
-    return cache->total_objs;
-}
-
+/**
+ * slab_init() - Initialize the slab allocator
+ *
+ * Sets up the caches for various object sizes and pre-allocates
+ * one page for each cache.
+ */
 void slab_init(void)
 {
-    for (uint32_t i = 0; i < KMALLOC_CLASSES; i++)
-    {
-        kmalloc_caches[i] = kmem_cache_create("kmalloc", kmalloc_sizes[i]);
-        ASSERT(kmalloc_caches[i] != NULL);
-    }
-    pr_info("[SLAB] kmalloc classes 32..2048 ready\n");
+	for (unsigned int i = 0; i < SLAB_SIZES; i++) {
+		caches[i].obj_size = cache_sizes[i];
+		caches[i].objs_per_page = 1u << (PAGE_SHIFT - (i + 5));
+		caches[i].free_objects = 0;
+		caches[i].free_list = NULL;
+
+		struct page *page = alloc_pages(GFP_KERNEL, 0);
+		if (page)
+			slab_fill_page(&caches[i], page);
+	}
+
+	printk("[SLAB] kmalloc classes:");
+	for (unsigned int i = 0; i < SLAB_SIZES; i++)
+		printk(" %d", cache_sizes[i]);
+	printk("\n");
 }
 
-
-
-void slab_selftest(void)
+/**
+ * kmalloc() - Allocate memory from the slab allocator or buddy allocator
+ * @size: Number of bytes to allocate
+ * @flags: Allocation flags (e.g. GFP_KERNEL)
+ *
+ * Return: Pointer to the allocated memory, or NULL if out of memory.
+ */
+void *kmalloc(size_t size, unsigned int flags)
 {
-    struct kmem_cache *c = kmem_cache_create("test64", 64);
-    if (c == NULL)
-    {
-        pr_info("[SLAB] FAIL: kmem_cache_create returned NULL\n");
-        return;
-    }
+	(void)flags;
 
-    void *objs[10];
-    for (int i = 0; i < 10; i++)
-    {
-        objs[i] = kmem_cache_alloc(c, GFP_KERNEL);
-        if (objs[i] == NULL)
-        {
-            pr_info("[SLAB] FAIL: cache_alloc #%d NULL\n", i);
-            return;
-        }
-        for (int j = 0; j < i; j++)
-        {
-            if (objs[i] == objs[j])
-            {
-                pr_info("[SLAB] FAIL: obj #%d dup of #%d (ptr 0x%x)\n",
-                            i, j, (uint32_t)objs[i]);
-                return;
-            }
-        }
-    }
+	/* Sizes larger than the biggest cache go to the buddy allocator. */
+	if (size > cache_sizes[SLAB_SIZES - 1]) {
+		unsigned int order = 0;
+		while ((PAGE_SIZE << order) < size)
+			order++;
+		struct page *page = alloc_pages(GFP_KERNEL, order);
+		if (!page)
+			return NULL;
+		page->slab = NULL;
+		/* Stash the order so kfree() can release the block by pointer
+		 * alone. alloc_pages() leaves private=0 and clears PG_BUDDY on the
+		 * head page, so this is free to reuse and won't read as a buddy. */
+		page->private = order;
+		return (void *)__phys_to_virt(page_to_phys(get_zone(), page));
+	}
 
-    for (int i = 0; i < 10; i++)
-    {
-        kmem_cache_free(c, objs[i]);
-    }
+	unsigned int idx = 0;
+	for (; idx < SLAB_SIZES; idx++)
+		if (cache_sizes[idx] >= size)
+			break;
 
-    void *reuse = kmem_cache_alloc(c, GFP_KERNEL);
-    int matched = 0;
-    for (int i = 0; i < 10; i++)
-    {
-        if (reuse == objs[i])
-        {
-            matched = 1;
-            break;
-        }
-    }
-    if (!matched)
-    {
-        pr_info("[SLAB] FAIL: realloc did not reuse freed object\n");
-        return;
-    }
-    kmem_cache_free(c, reuse);
+	struct slab_cache *cache = &caches[idx];
 
-    void *a = kmalloc(16, GFP_KERNEL);
-    void *b = kmalloc(100, GFP_KERNEL);
-    void *d = kmalloc(1000, GFP_KERNEL);
-    void *big = kmalloc(3000, GFP_KERNEL);
+	if (!cache->free_list) {
+		struct page *page = alloc_pages(GFP_KERNEL, 0);
+		if (!page)
+			return NULL;
+		slab_fill_page(cache, page);
+	}
 
-    if (a == NULL || b == NULL || d == NULL)
-    {
-        pr_info("[SLAB] FAIL: kmalloc returned NULL for supported size\n");
-        return;
-    }
-    if (big != NULL)
-    {
-        pr_info("[SLAB] FAIL: kmalloc(3000) should return NULL\n");
-        kfree(big);
-        return;
-    }
-    kfree(a);
-    kfree(b);
-    kfree(d);
+	void *obj = cache->free_list;
+	cache->free_list = *(void **)obj;
+	cache->free_objects--;
+
+	return obj;
+}
+
+/**
+ * kfree() - Free memory previously allocated by kmalloc
+ * @ptr: Pointer to the memory to free
+ */
+void kfree(void *ptr)
+{
+	if (!ptr)
+		return;
+
+	struct zone *zone = get_zone();
+
+	/* Convert VA to PA, then to page. */
+	unsigned long pa = __virt_to_phys((unsigned long)ptr);
+	if (pa < zone->base_pa || pa >= zone->end_pa)
+		return;
+
+	unsigned long pfn = (pa - zone->base_pa) >> PAGE_SHIFT;
+	struct page *page = pfn_to_page(zone, pfn);
+	struct slab_cache *cache = page->slab;
+
+	if (!cache) {
+		/*
+		 * Direct buddy allocation (size > largest cache). kmalloc() stashed
+		 * the order in page->private; release the whole block so large
+		 * allocations (e.g. a task's 16 KB kernel stack) don't leak.
+		 */
+		__free_pages(page, page->private);
+		return;
+	}
+
+	void **head = (void **)ptr;
+	*head = cache->free_list;
+	cache->free_list = ptr;
+	cache->free_objects++;
 }

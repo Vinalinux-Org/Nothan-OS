@@ -1,44 +1,35 @@
+#ifndef _NOTHAN_INIT_H
+#define _NOTHAN_INIT_H
+
 /*
- * include/nothan/init.h — initcall mechanism
+ * Initcall mechanism
  *
- * Boot-time level dispatch via .initcall<N>.init linker sections.
+ * Drivers register init functions into the .initcall section via macros.
+ * do_initcalls() iterates the section in priority order at boot.
+ *
+ * Priority levels (lower number = earlier):
+ *   0  arch          — arch-level init (MMU, IRQ controller)
+ *   1  subsys        — subsystem infrastructure (buses, timers)
+ *   2  fs            — filesystem layer
+ *   3  device        — drivers (UART, MMC, GPIO...)
+ *   4  late          — everything else
  */
-
-#ifndef NOTHAN_INIT_H
-#define NOTHAN_INIT_H
-
-/* Tag function/data as init-only. Lives in .init.* sections —
- * candidate for future free_initmem() reclamation after boot. */
-#define __init      __attribute__((section(".init.text"), used))
-#define __initdata  __attribute__((section(".init.data"), used))
 
 typedef int (*initcall_t)(void);
 
-/* Place a function pointer into .initcall<level>.init section.
- * do_initcalls(level) iterates that section at boot. */
-#define __define_initcall(fn, level) \
-    static initcall_t __initcall_##fn##level \
-        __attribute__((used, section(".initcall" #level ".init"))) = (fn)
+#define __init __attribute__((__section__(".init.text")))
 
-#define core_initcall(fn)      __define_initcall(fn, 1)
-#define postcore_initcall(fn)  __define_initcall(fn, 2)
-#define arch_initcall(fn)      __define_initcall(fn, 3)
-#define subsys_initcall(fn)    __define_initcall(fn, 4)
-#define fs_initcall(fn)        __define_initcall(fn, 5)
-#define device_initcall(fn)    __define_initcall(fn, 6)
-#define late_initcall(fn)      __define_initcall(fn, 7)
+#define __initcall_fn(fn, lvl) \
+	static initcall_t __initcall_##fn __attribute__((__section__(".initcall." #lvl), __used__)) = fn
 
-/* Convenience for platform drivers — equivalent to a device_initcall
- * that calls platform_driver_register(&__pdrv).
- *
- * Differs from Linux: no module_exit / MODULE_LICENSE pair (NothanOS
- * does not support module unload). Macro name kept for habit pattern. */
-#define module_platform_driver(__pdrv) \
-    static int __init __pdrv##_init(void) { \
-        return platform_driver_register(&(__pdrv)); \
-    } \
-    device_initcall(__pdrv##_init)
+#define early_initcall(fn)   __initcall_fn(fn, early)
+#define arch_initcall(fn)    __initcall_fn(fn, 0)
+#define subsys_initcall(fn)  __initcall_fn(fn, 1)
+#define fs_initcall(fn)      __initcall_fn(fn, 2)
+#define device_initcall(fn)  __initcall_fn(fn, 3)
+#define late_initcall(fn)    __initcall_fn(fn, 4)
 
-void do_initcalls(int level);
+/* Called from kernel_main: scans .initcall section and runs all entries. */
+void do_initcalls(void);
 
-#endif /* NOTHAN_INIT_H */
+#endif /* _NOTHAN_INIT_H */

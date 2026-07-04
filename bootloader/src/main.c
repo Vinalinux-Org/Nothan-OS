@@ -1,211 +1,199 @@
-/* ============================================================
- * main.c
- * ------------------------------------------------------------
- * Bootloader entry — clocks, DDR, MMC, jump to kernel.
- * ============================================================ */
+/*
+ * bootloader/src/main.c - Bootloader entry: clocks, DDR, MMC, jump to kernel
+ *
+ * Written by Doan Phu Hai <haidoan2098@gmail.com>
+ */
+
 #include "am335x.h"
 #include "boot.h"
 #include <stdbool.h>
 
+/* Kernel lives at 1 MB offset on SD (sector 2048, 512-byte sectors) */
+#define KERNEL_BASE		0x80000000
+#define KERNEL_START_SECTOR	2048
+#define KERNEL_SIZE_SECTORS	2048
+
 struct boot_params {
-    uint32_t reserved;
-    uint32_t mem_desc_addr;
-    uint8_t  boot_device;
-    uint8_t  reset_reason;
-    uint8_t  reserved2;
-    uint8_t  reserved3;
+	uint32_t	reserved;
+	uint32_t	mem_desc_addr;
+	uint8_t		boot_device;
+	uint8_t		reset_reason;
+	uint8_t		reserved2;
+	uint8_t		reserved3;
 };
 
 void panic(const char *msg)
 {
-    uart_puts("\r\nPANIC: ");
-    uart_puts(msg);
-    uart_puts("\r\nSYSTEM HALTED.\r\n");
-    while (1);
+	uart_puts("\r\nPANIC: ");
+	uart_puts(msg);
+	uart_puts("\r\nSYSTEM HALTED.\r\n");
+	while (1)
+		;
 }
 
-void c_prefetch_abort_handler(void) {
-    uint32_t ifsr, ifar;
-    asm volatile("mrc p15, 0, %0, c5, c0, 1" : "=r" (ifsr));
-    asm volatile("mrc p15, 0, %0, c6, c0, 2" : "=r" (ifar));
+void c_prefetch_abort_handler(void)
+{
+	uint32_t ifsr, ifar;
 
-    uart_puts("\r\n========================================\r\n");
-    uart_puts("PANIC: PREFETCH ABORT EXCEPTION!\r\n");
-    uart_puts("IFSR (Instruction Fault Status): "); uart_print_hex(ifsr); uart_puts("\r\n");
-    uart_puts("IFAR (Instruction Fault Address): "); uart_print_hex(ifar); uart_puts("\r\n");
-    uart_puts("SYSTEM HALTED.\r\n");
-    while (1);
+	asm volatile("mrc p15, 0, %0, c5, c0, 1" : "=r" (ifsr));	/* IFSR */
+	asm volatile("mrc p15, 0, %0, c6, c0, 2" : "=r" (ifar));	/* IFAR */
+
+	uart_puts("\r\nPANIC: PREFETCH ABORT\r\n");
+	uart_puts("IFSR: "); uart_print_hex(ifsr); uart_puts("\r\n");
+	uart_puts("IFAR: "); uart_print_hex(ifar); uart_puts("\r\n");
+	while (1)
+		;
 }
 
-void c_data_abort_handler(void) {
-    uint32_t dfsr, dfar;
-    asm volatile("mrc p15, 0, %0, c5, c0, 0" : "=r" (dfsr));
-    asm volatile("mrc p15, 0, %0, c6, c0, 0" : "=r" (dfar));
+void c_data_abort_handler(void)
+{
+	uint32_t dfsr, dfar;
 
-    uart_puts("\r\n========================================\r\n");
-    uart_puts("PANIC: DATA ABORT EXCEPTION!\r\n");
-    uart_puts("DFAR (Fault Address): 0x"); uart_print_hex(dfar); uart_puts("\r\n");
-    uart_puts("DFSR (Status): 0x"); uart_print_hex(dfsr); uart_puts("\r\n");
-    uart_puts("Possible Cause: ");
-    if(dfar >= 0x44E00000 && dfar <= 0x44E0FFFF) {
-        uart_puts("Peripheral access without clock enable");
-    } else if(dfar >= 0x4C000000 && dfar <= 0x4C000FFF) {
-        uart_puts("DDR controller access before initialization");
-    } else {
-        uart_puts("Memory access violation");
-    }
-    uart_puts("\r\nSYSTEM HALTED.\r\n");
-    while (1);
+	asm volatile("mrc p15, 0, %0, c5, c0, 0" : "=r" (dfsr));	/* DFSR */
+	asm volatile("mrc p15, 0, %0, c6, c0, 0" : "=r" (dfar));	/* DFAR */
+
+	uart_puts("\r\nPANIC: DATA ABORT\r\n");
+	uart_puts("DFAR: "); uart_print_hex(dfar); uart_puts("\r\n");
+	uart_puts("DFSR: "); uart_print_hex(dfsr); uart_puts("\r\n");
+	while (1)
+		;
 }
 
-void c_undef_handler(void) {
-    uint32_t ifsr, ifar;
-    /* Read Instruction Fault Status and Address from CP15 */
-    asm volatile("mrc p15, 0, %0, c5, c0, 1" : "=r" (ifsr));  /* IFSR */
-    asm volatile("mrc p15, 0, %0, c6, c0, 2" : "=r" (ifar));  /* IFAR */
+void c_undef_handler(void)
+{
+	uint32_t ifsr, ifar;
 
-    uart_puts("\r\n========================================\r\n");
-    uart_puts("PANIC: UNDEFINED INSTRUCTION!\r\n");
-    uart_puts("IFAR (Fault PC): 0x"); uart_print_hex(ifar); uart_puts("\r\n");
-    uart_puts("IFSR (Status):   0x"); uart_print_hex(ifsr); uart_puts("\r\n");
-    uart_puts("SYSTEM HALTED.\r\n");
-    while (1);
+	asm volatile("mrc p15, 0, %0, c5, c0, 1" : "=r" (ifsr));	/* IFSR */
+	asm volatile("mrc p15, 0, %0, c6, c0, 2" : "=r" (ifar));	/* IFAR */
+
+	uart_puts("\r\nPANIC: UNDEFINED INSTRUCTION\r\n");
+	uart_puts("IFAR: "); uart_print_hex(ifar); uart_puts("\r\n");
+	uart_puts("IFSR: "); uart_print_hex(ifsr); uart_puts("\r\n");
+	while (1)
+		;
 }
 
 void bootloader_main(void)
 {
-    struct boot_params params;
+	struct boot_params params;
+	uint32_t *magic;
+	uint32_t first;
+	bool ok;
 
-    /* STAGE 0: enable L4LS/L3/L4FW clocks before any peripheral access. */
-    writel(0x2, CM_PER_L4LS_CLKSTCTRL);
-    writel(0x2, CM_PER_L3_CLKSTCTRL);
-    writel(0x2, CM_PER_L4FW_CLKSTCTRL);
-    delay(1000);
+	/* Enable clock domains first — needed before any peripheral access. */
+	clock_domains_early_init();
 
-    /* USR0–USR3 LEDs as boot indicator (GPIO1 pins 21–24). */
-    writel(0x2, 0x44E000AC);
-    delay(500);
-    writel(readl(0x4804C134) & ~(0xF << 21), 0x4804C134);  /* GPIO_OE */
-    writel(0xF << 21, 0x4804C194);                         /* GPIO_SETDATAOUT */
+	/* Light USR LEDs — first visual sign bootloader is alive. */
+	writel(MODULE_ENABLE, CM_PER_GPIO1_CLKCTRL);
+	while ((readl(CM_PER_GPIO1_CLKCTRL) & 0x30000) != 0)
+		;
+	writel(readl(GPIO1_OE) & ~GPIO1_USR_LEDS, GPIO1_OE);
+	writel(GPIO1_USR_LEDS, GPIO1_SETDATAOUT);
 
-    /* STAGE 1: disable WDT1 — ROM arms it with ~3 min timeout. */
-    writel(0xAAAA, WDT1_WSPR);
-    while (readl(WDT1_WWPS) != 0);
-    writel(0x5555, WDT1_WSPR);
-    while (readl(WDT1_WWPS) != 0);
+	/* Configure PLLs and enable peripheral module clocks. */
+	clock_init();
 
-    /* STAGE 2: early UART. */
-    uart_init();
+	uart_init();
+	delay(1000000);
 
-    delay(1000000);
+	for (int i = 0; i < 10; i++) {
+		uart_putc('\r');
+		uart_putc('\n');
+	}
+	delay(100000);
 
-    /* Push ROM banner off-screen with a row of newlines. */
-    for (int i = 0; i < 10; i++) {
-        uart_putc('\r');
-        uart_putc('\n');
-    }
-    delay(100000);
+	uart_puts("[BOOT] NothanOS Bootloader — BeagleBone Black (AM335x)\r\n");
 
-    /* STAGE 3: boot banner. */
-    uart_puts("========================================\r\n");
-    uart_puts("NothanOS Bootloader\r\n");
-    uart_puts("========================================\r\n");
-    uart_puts("Board:  BeagleBone Black (AM335x)\r\n");
-    uart_puts("UART:   Initialized @ 115200 8N1\r\n");
-    uart_puts("Clock:  ROM default (48 MHz UART)\r\n");
-    uart_puts("\r\n");
+	/* Read back actual DPLL config and calculate real frequencies */
+	{
+		uint32_t mn, m, n, m2, freq_mhz;
 
-    /* STAGE 4: DDR PLL — MPU/PER/CORE PLLs already done by ROM. */
-    uart_puts("Clock:  Configuring DDR PLL for 400MHz... ");
-    clock_init();
+		mn = readl(CM_CLKSEL_DPLL_MPU);
+		m  = (mn >> 8) & 0x3FF;
+		n  = mn & 0x7F;
+		m2 = readl(CM_DIV_M2_DPLL_MPU) & 0x1F;
+		freq_mhz = 24 * m / (n + 1) / m2;
+		uart_puts("[CLK]  MPU="); uart_print_dec(freq_mhz); uart_puts("MHz");
 
-    uart_puts("Done.\r\n");
-    uart_puts("Clock:  DDR PLL locked @ 400MHz\r\n");
-    uart_puts("\r\n");
+		mn = readl(CM_CLKSEL_DPLL_CORE);
+		m  = (mn >> 8) & 0x3FF;
+		n  = mn & 0x7F;
+		freq_mhz = 24 * m / (n + 1);
+		uart_puts(" CORE="); uart_print_dec(freq_mhz); uart_puts("MHz");
 
-    /* STAGE 5: DDR3. */
-    uart_puts("DDR:    Initializing 256MB DDR3...\r\n");
-    ddr_init();
+		mn = readl(CM_CLKSEL_DPLL_PER);
+		m  = (mn >> 8) & 0x3FF;
+		n  = mn & 0x7F;
+		m2 = readl(CM_DIV_M2_DPLL_PER) & 0x1F;
+		freq_mhz = 24 * m / (n + 1) / m2;
+		uart_puts(" PER="); uart_print_dec(freq_mhz); uart_puts("MHz");
 
-    uart_puts("DDR:    Running memory test...\r\n");
+		mn = readl(CM_CLKSEL_DPLL_DDR);
+		m  = (mn >> 8) & 0x3FF;
+		n  = mn & 0x7F;
+		m2 = readl(CM_DIV_M2_DPLL_DDR) & 0x1F;
+		freq_mhz = 24 * m / (n + 1) / m2;
+		uart_puts(" DDR="); uart_print_dec(freq_mhz); uart_puts("MHz\r\n");
+	}
 
-    if (ddr_test() == 0) {
-        uart_puts("DDR:    Test PASSED\r\n");
-    } else {
-        panic("DDR memory test FAILED!");
-    }
+	/*
+	 * Kernel uses RST_GLOBAL_COLD_SW so EMIF is always reset on reboot.
+	 * EMIF_SDRAM_CONFIG != 0 only on true power-on where ROM left it
+	 * configured; skip re-init and just verify in that case.
+	 */
+	if (readl(EMIF_SDRAM_CONFIG) != 0 && ddr_test(1) == 0) {
+		uart_puts("[DDR]  512MB @ 0x80000000 OK (warm)\r\n");
+	} else {
+		ddr_init();
+		if (ddr_test(0) == 0)
+			uart_puts("[DDR]  512MB @ 0x80000000 OK\r\n");
+		else
+			panic("DDR memory test FAILED!");
+	}
 
-    uart_puts("DDR:    OK (256MB @ 0x80000000)\r\n");
-    uart_puts("\r\n");
+	if (mmc_init() != 0)
+		panic("MMC initialization FAILED!");
 
-    /* STAGE 6: MMC + kernel load. */
-    uart_puts("MMC:    Initializing SD card...\r\n");
+	uart_puts("[MMC]  SD card OK\r\n");
 
-    if (mmc_init() != 0) {
-        panic("MMC initialization FAILED!");
-    }
+	if (mmc_read_sectors(KERNEL_START_SECTOR, KERNEL_SIZE_SECTORS,
+			     (void *)KERNEL_BASE) != 0)
+		panic("Failed to load kernel from SD!");
 
-    uart_puts("MMC:    Initialized OK\r\n");
+	uart_puts("[MMC]  Kernel loaded\r\n");
 
-    /* Kernel image lives at SD sector 2048 (1 MB offset). */
-    #define KERNEL_BASE_ADDR   0x80000000
-    #define KERNEL_START_SECTOR 2048
-    #define KERNEL_SIZE_SECTORS 2048
+	/* Validate kernel entry: must be ARM B or LDR pc instruction. */
+	magic = (uint32_t *)KERNEL_BASE;
+	first = *magic;
+	ok = (((first & 0xFF000000) == 0xEA000000) ||	/* B */
+	      ((first & 0xFFFFF000) == 0xE59FF000)) &&	/* LDR pc, [pc, #imm] */
+	     first != 0x00000000 && first != 0xFFFFFFFF;
 
-    uart_puts("MMC:    Loading kernel from SD card...\r\n");
+	if (!ok) {
+		uart_puts("[BOOT] bad kernel magic: ");
+		uart_print_hex(first);
+		panic("");
+	}
 
-    if (mmc_read_sectors(KERNEL_START_SECTOR, KERNEL_SIZE_SECTORS,
-                        (void*)KERNEL_BASE_ADDR) != 0) {
-        panic("Failed to load kernel from SD card!");
-    }
+	uart_puts("[BOOT] Jumping to kernel @ 0x80000000\r\n");
+	uart_puts("\r\n----------------------------------------\r\n\r\n");
+	uart_flush();
 
-    uart_puts("MMC:    Kernel loaded successfully\r\n");
-    uart_puts("\r\n");
+	params.reserved      = 0;
+	params.mem_desc_addr = 0;
+	params.boot_device   = 0x08;	/* MMC0 */
+	params.reset_reason  = 0x01;	/* power-on cold reset */
+	params.reserved2     = 0;
+	params.reserved3     = 0;
 
-    /* STAGE 7: boot params. */
-    uart_puts("Boot:   Setting up boot parameters...\r\n");
+	/* ARM boot ABI: r0=0, r1=MACH_TYPE (BBB=3589), r2=atags ptr */
+	asm volatile(
+		"mov r0, #0\n"
+		"ldr r1, =0x0E05\n"
+		"mov r2, %0\n"
+		"ldr pc, =0x80000000\n"
+		:: "r" (&params)
+	);
 
-    params.reserved = 0;
-    params.mem_desc_addr = 0;
-    params.boot_device = 0x08; /* MMC0 */
-    params.reset_reason = 0x01; /* power-on cold reset */
-    params.reserved2 = 0;
-    params.reserved3 = 0;
-
-    /* STAGE 8: jump. */
-    uart_puts("========================================\r\n");
-    uart_puts("Boot:   Jumping to kernel @ 0x80000000\r\n");
-
-    /* Sanity-check the kernel entry: must be ARM B or LDR-pc vector. */
-    uint32_t *magic = (uint32_t *)0x80000000;
-    uint32_t first = *magic;
-    bool ok_branch = ((first & 0xFF000000) == 0xEA000000);  /* B */
-    bool ok_ldr_vec = ((first & 0xFFFFF000) == 0xE59FF000); /* LDR pc, [pc, #imm] */
-    bool ok = (ok_branch || ok_ldr_vec) && first != 0x00000000 && first != 0xFFFFFFFF;
-
-    if (!ok) {
-        uart_puts("KERNEL MAGIC FAIL: ");
-        uart_print_hex(first);
-        panic(" - Invalid kernel image!");
-    }
-
-    uart_puts("Kernel: Magic = ");
-    uart_print_hex(first);
-    uart_puts(" OK\r\n");
-
-    uart_puts("========================================\r\n");
-    uart_puts("\r\n");
-
-    uart_flush();
-
-    /* ARM boot ABI: r0=0, r1=MACH_TYPE, r2=&params. */
-    asm volatile(
-        "mov r0, #0\n"
-        "ldr r1, =0x0E05\n"     /* BeagleBone Black MACH_TYPE (3589) */
-        "mov r2, %0\n"
-        "ldr pc, =0x80000000\n"
-        :: "r" (&params)
-    );
-
-    panic("Failed to jump to kernel!");
+	panic("Failed to jump to kernel!");
 }

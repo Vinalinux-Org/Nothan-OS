@@ -2,7 +2,10 @@
 /build/
 /bootloader/build/
 /nothan-kernel/build/
+/nothan-kernel/kernel.lds
 /userspace/build/
+/userspace/sim/build/
+/userspace/sim/build-*/
 /compiler/toolchain/build/
 /compiler/toolchain/dist/
 /compiler/toolchain/*.egg-info/
@@ -16,6 +19,11 @@
 *.dis
 uImage
 MLO
+
+# Sim host harness binaries (userspace/sim host debug builds)
+/userspace/sim/nothan-sim
+/userspace/sim/nothan-sim-*
+/userspace/sim/asan.txt
 
 # Compiler runtime artifacts
 /compiler/toolchain/runtime/*.a
@@ -42,7 +50,7 @@ MLO
 *.code-workspace
 .kiro/
 .kilo
-.claude
+.claude/
 
 # OS generated
 .DS_Store
@@ -81,5 +89,13 @@ tags
 TAGS
 .gdb_history
 
-# Roo Code AI agent config (personal)
+# AI agent configs (personal)
 .roo*
+.agents/
+.codex/
+.codegraph/
+nothan_os_old/
+
+# Documentation (WIP, không track)
+Documentation/
+nothan-os-modulesim/
