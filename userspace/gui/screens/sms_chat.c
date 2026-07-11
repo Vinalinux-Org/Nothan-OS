@@ -138,7 +138,13 @@ static void on_input_focus(lv_event_t *e)
 	lv_obj_set_height(chat_list,
 			  SCREEN_H - APP_HEADER_HEIGHT - GUI_KEYBOARD_HEIGHT - INPUT_H);
 	lv_obj_update_layout(chat_list);
-	lv_obj_scroll_by(chat_list, 0, -lv_obj_get_scroll_bottom(chat_list), LV_ANIM_OFF);
+	/* Only pin to the newest bubble when the thread actually overflows the
+	 * (now shorter) list. For a short thread scroll_bottom is NEGATIVE — the
+	 * unbounded scroll_by would then shove the top-aligned bubbles DOWN into
+	 * the middle. Leave a short thread pinned at the top instead. */
+	int32_t sb = lv_obj_get_scroll_bottom(chat_list);
+	if (sb > 0)
+		lv_obj_scroll_by(chat_list, 0, -sb, LV_ANIM_OFF);
 }
 
 static void on_input_blur(lv_event_t *e)
