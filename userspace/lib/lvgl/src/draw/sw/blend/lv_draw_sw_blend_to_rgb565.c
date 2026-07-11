@@ -277,6 +277,23 @@ void LV_ATTRIBUTE_FAST_MEM lv_draw_sw_blend_color_to_rgb565(lv_draw_sw_blend_fil
     LV_UNUSED(dest_stride);
     LV_UNUSED(dest_buf_u16);
 
+    /*
+     * NothanOS guard: dsc->dest_w/dest_h are computed upstream (see
+     * lv_draw_sw_blend.c) from an area-intersection that can still produce a
+     * "valid-looking" (non-negative, within the layer's *believed* buf_area)
+     * yet bogus width if the source widget's own layout was transiently
+     * invalid when the blend area was captured (e.g. a flex-layout resize
+     * racing a redraw) -- that kind of self-consistent corruption slips past
+     * a caller-side check that compares against the same (possibly corrupt)
+     * buf_area. dest_stride is this call's only *ground truth*: it is the
+     * real allocated row pitch of dest_buf, independent of whatever produced
+     * w/h. The "Simple fill" branch below walks dest_buf with raw
+     * pointer-compare loops (dest_buf_u16 + w), which are unsafe for a bad w
+     * at ANY optimization level -- not just the -O2 miscompile worked around
+     * elsewhere. Reject before running any loop instead of trusting w/h.
+     */
+    if(w <= 0 || h <= 0 || dest_stride <= 0 || w > dest_stride / (int32_t)sizeof(uint16_t)) return;
+
     /*Simple fill*/
     if(mask == NULL && opa >= LV_OPA_MAX) {
         if(LV_RESULT_INVALID == LV_DRAW_SW_COLOR_BLEND_TO_RGB565(dsc)) {
