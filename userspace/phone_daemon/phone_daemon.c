@@ -1566,16 +1566,20 @@ void handle_ring(void)
     cs.pending_clip   = 1;
     g_call_in_sent    = 0;
     g_clip_deadline   = pd_now_ms() + CLIP_WAIT_MS;
+    printf("[pd] RING accepted — CLIP wait armed, now=%u deadline=%u\n",
+           (unsigned int)pd_now_ms(), (unsigned int)g_clip_deadline);
     fe_send_call_ring();
 }
 
 void handle_clip(const char *line)
 {
     char num[CALLER_NUM_MAX];
+    printf("[pd] +CLIP line='%s' pending_clip=%d\n", line, cs.pending_clip);
     if (!cs.pending_clip) {
         return;
     }
     extract_quoted(line + 6, num, sizeof(num));
+    printf("[pd] +CLIP parsed num='%s'\n", num);
     strncpy(cs.caller_num, num, sizeof(cs.caller_num) - 1);
     cs.caller_num[sizeof(cs.caller_num) - 1] = '\0';
     if (!g_call_in_sent) {
@@ -1594,15 +1598,23 @@ void handle_clip(const char *line)
  * whatever number we have (possibly empty — caller withheld or no CLIP). */
 void clip_timer_tick(unsigned long now)
 {
+    static unsigned long s_last_wait_log = 0;
     if (!cs.pending_clip || g_call_in_sent) {
         return;
     }
     if (g_clip_deadline == 0 || now < g_clip_deadline) {
+        if (g_clip_deadline != 0 && now - s_last_wait_log >= 1000) {
+            s_last_wait_log = now;
+            printf("[pd] CLIP wait: now=%u deadline=%u (%d ms left)\n",
+                   (unsigned int)now, (unsigned int)g_clip_deadline,
+                   (int)(g_clip_deadline - now));
+        }
         return;
     }
     g_call_in_sent  = 1;
     g_clip_deadline = 0;
-    printf("[pd] CLIP timeout — sending CALL_IN with num='%s'\n", cs.caller_num);
+    printf("[pd] CLIP timeout — now=%u sending CALL_IN with num='%s'\n",
+           (unsigned int)now, cs.caller_num);
     fe_send_call_in(cs.caller_num);
 }
 
