@@ -2896,6 +2896,21 @@ void handle_cmd_sms(const char *json)
     }
     json_get_int(json, "cid", &cid);
 
+    /* Strip display-formatting chars (spaces, dashes) — only keep digits, +, *, # */
+    {
+        int i, w = 0;
+        for (i = 0; num[i]; i++) {
+            char c = num[i];
+            if ((c >= '0' && c <= '9') || c == '+' || c == '*' || c == '#')
+                num[w++] = c;
+        }
+        num[w] = '\0';
+    }
+    if (!num[0]) {
+        fe_send_sms_err(-1, "empty number", cid);
+        return;
+    }
+
     if (at_has_sms_pending()) {
         printf("[pd] REJECT cid=%d: sms already in flight\n", cid);
         fe_send_sms_err(503, "sms busy", cid);
