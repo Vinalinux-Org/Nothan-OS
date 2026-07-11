@@ -29,7 +29,7 @@ LVGL_CFLAGS := $(CFLAGS) -I lib/lvgl -DLV_CONF_INCLUDE_SIMPLE \
 
 .PHONY: all clean size
 
-all: $(BUILD)/shell.bin $(BUILD)/gui.bin $(BUILD)/phone_daemon.bin
+all: $(BUILD)/shell.bin $(BUILD)/gui.bin $(BUILD)/phone_daemon.bin $(BUILD)/storage_daemon.bin
 
 $(BUILD)/lib/crt0.o: lib/crt0.S | $(BUILD)/lib
 	$(CC) $(AFLAGS) -c -o $@ $<
@@ -64,6 +64,20 @@ $(BUILD)/phone_daemon.elf: $(CRT0) $(PD_OBJS)
 	$(OBJDUMP) -d $@ > $(BUILD)/phone_daemon.dis
 
 $(BUILD)/phone_daemon.bin: $(BUILD)/phone_daemon.elf
+	$(OBJCOPY) -O binary $< $@
+
+# Storage daemon (FAT-write backend) — links like the shell: crt0 + -lgcc, no newlib.
+SD_SRCS   := storage_daemon/storage_daemon.c
+SD_OBJS   := $(patsubst %.c,$(BUILD)/%.o,$(SD_SRCS))
+
+$(BUILD)/storage_daemon/%.o: storage_daemon/%.c | $(BUILD)/storage_daemon
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/storage_daemon.elf: $(CRT0) $(SD_OBJS)
+	$(CC) -nostdlib -T $(LDS) -o $@ $^ -lgcc
+	$(OBJDUMP) -d $@ > $(BUILD)/storage_daemon.dis
+
+$(BUILD)/storage_daemon.bin: $(BUILD)/storage_daemon.elf
 	$(OBJCOPY) -O binary $< $@
 
 # LVGL build rules
@@ -112,7 +126,7 @@ $(BUILD)/gui.bin: $(BUILD)/gui.elf
 
 LVGL_LIB_DIRS := $(sort $(dir $(LVGL_OBJS)))
 
-DIRS := $(BUILD)/lib $(BUILD)/sh $(BUILD)/phone_daemon \
+DIRS := $(BUILD)/lib $(BUILD)/sh $(BUILD)/phone_daemon $(BUILD)/storage_daemon \
         $(BUILD)/gui/port $(BUILD)/gui/core $(BUILD)/gui/services \
         $(BUILD)/gui/widgets $(BUILD)/gui/screens \
         $(BUILD)/gui/phone_daemon

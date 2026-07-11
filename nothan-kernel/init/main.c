@@ -18,6 +18,7 @@ extern void omap_intc_init(void);
 extern struct task_struct *user_task_create(const char *name);
 extern struct task_struct *user_task_create_gui(void);
 extern struct task_struct *user_task_create_phone_daemon(void);
+extern struct task_struct *user_task_create_storage_daemon(void);
 
 /*
  * Set to 1 to run the FAT32 write self-test at boot. Pure UART output —
@@ -167,6 +168,14 @@ void kernel_main(void)
 	if (pd) {
 		printk("[KERN] Spawning phone_daemon\n");
 		enqueue_task(&runqueue, pd);
+	}
+
+	/* FAT-write backend — takes storage_write() requests off the GUI task
+	 * so a slow SD card write never blocks touch input. */
+	struct task_struct *sd = user_task_create_storage_daemon();
+	if (sd) {
+		printk("[KERN] Spawning storage_daemon\n");
+		enqueue_task(&runqueue, sd);
 	}
 
 	printk("[KERN] NothanOS started\n");

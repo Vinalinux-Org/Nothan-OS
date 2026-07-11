@@ -63,6 +63,7 @@ OBJS += $(BUILD_DIR)/drivers/video/lcdc.o
 OBJS += $(BUILD_DIR)/drivers/video/tda19988.o
 OBJS += $(BUILD_DIR)/drivers/input/input.o
 OBJS += $(BUILD_DIR)/drivers/char/phonebus.o
+OBJS += $(BUILD_DIR)/drivers/char/storagebus.o
 OBJS += $(BUILD_DIR)/drivers/i2c/i2c-core.o
 OBJS += $(BUILD_DIR)/drivers/i2c/i2c-omap.o
 OBJS += $(BUILD_DIR)/drivers/usb/musb-hcd.o
@@ -78,6 +79,7 @@ all: $(KERNEL_BIN)
 USER_SHELL_BIN := $(BUILD_DIR)/shell.usr
 USER_GUI_BIN   := $(BUILD_DIR)/gui.usr
 USER_PHONE_DAEMON_BIN := $(BUILD_DIR)/phone_daemon.usr
+USER_STORAGE_DAEMON_BIN := $(BUILD_DIR)/storage_daemon.usr
 
 .PHONY: userspace
 userspace:
@@ -92,8 +94,11 @@ $(USER_GUI_BIN): userspace | $(BUILD_DIR)
 $(USER_PHONE_DAEMON_BIN): userspace | $(BUILD_DIR)
 	cp ../userspace/build/phone_daemon.bin $@
 
+$(USER_STORAGE_DAEMON_BIN): userspace | $(BUILD_DIR)
+	cp ../userspace/build/storage_daemon.bin $@
+
 $(BUILD_DIR)/kernel/userspace_blobs.o: kernel/userspace_blobs.S \
-	$(USER_SHELL_BIN) $(USER_GUI_BIN) $(USER_PHONE_DAEMON_BIN) | $(BUILD_DIR)
+	$(USER_SHELL_BIN) $(USER_GUI_BIN) $(USER_PHONE_DAEMON_BIN) $(USER_STORAGE_DAEMON_BIN) | $(BUILD_DIR)
 	@mkdir -p $(dir $@)
 	$(CC) $(KBUILD_AFLAGS) -c -o $@ $<
 
