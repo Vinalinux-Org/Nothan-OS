@@ -56,6 +56,12 @@ static tel_log_changed_fn  log_observer;
 static struct call_log_entry log_buf[CALLLOG_MAX];
 static int                   log_n;
 
+/* Index of the most recent entry logged with an unknown number (reject/miss
+ * before CLIP arrived) — patched in place if the real number turns up later,
+ * even after the call has ended. Any further calllog_add() invalidates it,
+ * since positions can shift (dedup-shift or eviction). */
+static int pending_fix_idx = -1;
+
 #ifdef GUI_MONKEY
 static uint32_t        next_incoming_at;          /* lv_tick to inject next ring */
 static int             mock_on = 1;               /* auto-inject incoming calls */
@@ -107,6 +113,11 @@ static void calllog_load(void)
 static void calllog_add(const char *number, const char *name,
 			enum call_type type, unsigned int dur_sec)
 {
+	/* Any mutation below shifts positions — a previously tracked pending
+	 * index would point at the wrong entry, so drop it unconditionally.
+	 * Re-armed below if this new entry itself has no number yet. */
+	pending_fix_idx = -1;
+
 	/* Remove existing entry for this number (shift left to fill the gap). */
 	for (int i = 0; i < log_n; i++) {
 		if (strncmp(log_buf[i].number, number, CALL_NUM_MAX) == 0) {
@@ -126,7 +137,30 @@ static void calllog_add(const char *number, const char *name,
 	copy_str(e->name, name, CALL_NAME_MAX);
 	e->type    = (unsigned char)type;
 	e->dur_sec = dur_sec;
+	if (!number[0]) {
+		pending_fix_idx = log_n - 1;
+	}
 	calllog_save();
+}
+
+/* Backfill the number into the still-pending call-log entry (reject/miss
+ * whose number wasn't known yet), even though the call has already ended.
+ * No-op if the log has moved on (another call logged since) or the number
+ * is still unknown. */
+static void calllog_patch_pending(const char *number)
+{
+	if (pending_fix_idx < 0 || pending_fix_idx >= log_n || !number[0]) {
+		return;
+	}
+	struct call_log_entry *e = &log_buf[pending_fix_idx];
+	const struct contact  *c = contacts_find_by_phone(number);
+	copy_str(e->number, number, CALL_NUM_MAX);
+	copy_str(e->name, c ? c->name : "", CALL_NAME_MAX);
+	pending_fix_idx = -1;
+	calllog_save();
+	if (log_observer) {
+		log_observer();
+	}
 }
 
 /* Resolve a number to a saved contact name into cur_name (else ""). */
@@ -314,6 +348,29 @@ void telephony_on_incoming(const char *number)
     cur_dir = CALL_INCOMING;
     gui_logf("telephony: incoming %s\n", cur_name[0] ? cur_name : cur_number);
     set_state(TEL_INCOMING);
+}
+
+/* Fill in the caller's number once it becomes known after the incoming-call
+ * screen already showed blank (CLIP arrived after our wait window). No state
+ * transition — just backfills cur_number/name and re-renders. */
+void telephony_update_caller_id(const char *number)
+{
+    if (!number || !number[0])
+        return;
+    if (state == TEL_INCOMING || state == TEL_ACTIVE) {
+        if (cur_number[0])
+            return;
+        copy_str(cur_number, number, CALL_NUM_MAX);
+        resolve_name(number);
+        cur_info.name   = cur_name[0] ? cur_name : NULL;
+        cur_info.number = cur_number;
+        gui_logf("telephony: caller id resolved late: %s\n", cur_name[0] ? cur_name : cur_number);
+        if (observer) observer(state);
+        return;
+    }
+    /* Call already ended (rejected/missed before CLIP arrived) — patch the
+     * call-log entry directly instead of the live call state. */
+    calllog_patch_pending(number);
 }
 
 void telephony_on_connected(void)

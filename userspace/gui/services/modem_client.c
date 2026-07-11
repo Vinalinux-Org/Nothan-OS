@@ -149,6 +149,19 @@ static void dispatch_event(const char *json)
     /* ACK — we send ACKs; we never get ACKed (daemon sends events, we ack). */
     if (strcmp(type, "ACK") == 0) return;
 
+    /* READY beacon — carries the daemon's CURRENT reliable-seq counter just
+     * to report it, not as a numbered message of its own. It reuses whatever
+     * seq the last reliable send used, so it must bypass the dedup below —
+     * otherwise it collides with that message's seq and gets silently
+     * dropped, along with "callnum" (late-arriving caller ID backfill). */
+    if (strcmp(type, "READY") == 0) {
+        char callnum[32];
+        callnum[0] = '\0';
+        json_get_str(json, "callnum", callnum, sizeof(callnum));
+        if (callnum[0]) telephony_update_caller_id(callnum);
+        return;
+    }
+
     /* Extract seq for dedup + ACK */
     json_get_int(json, "seq", &seq);
 
@@ -213,10 +226,6 @@ static void dispatch_event(const char *json)
         msg[0] = '\0';
         json_get_str(json, "msg", msg, sizeof(msg));
         gui_logf("modem_client: SMS send error %d: %s\n", code, msg);
-        return;
-    }
-    /* READY beacon — periodic daemon liveness snapshot, no action needed. */
-    if (strcmp(type, "READY") == 0) {
         return;
     }
     /* Signal strength */

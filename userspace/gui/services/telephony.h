@@ -83,4 +83,9 @@ const struct call_log_entry *telephony_log_get(int index);
 /* Log a missed call without a state transition (for CCWA callers). */
 void telephony_log_missed_direct(const char *number);
 
+/* Backfill the caller's number if it arrives after the call screen already
+ * showed blank (late +CLIP). No-op unless a call is in progress and the
+ * number is still unknown. */
+void telephony_update_caller_id(const char *number);
+
 #endif

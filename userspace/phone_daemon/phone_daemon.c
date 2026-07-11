@@ -72,7 +72,9 @@ int errno;
 #define POLL_TIMEOUT_MS 20      /* max idle between timer ticks            */
 #define IDLE_SLEEP_US   3000    /* fallback round-robin idle nap           */
 
-#define CLIP_WAIT_MS      2000  /* max wait for +CLIP after first RING      */
+#define CLIP_WAIT_MS      6000  /* max wait for +CLIP after first RING —
+                                  * this carrier's CLIP lands with the 2nd
+                                  * RING pulse, not the 1st (~3-5s cadence) */
 #define HB_INTERVAL_MS    10000 /* modem liveness heartbeat (AT)           */
 #define HB_TIMEOUT_MS     3000
 #define HB_MAX_FAIL       2     /* consecutive heartbeat misses → recover  */
@@ -1580,6 +1582,11 @@ void handle_clip(const char *line)
         g_call_in_sent  = 1;
         g_clip_deadline = 0;   /* cancel fallback */
         fe_send_call_in(num);
+    } else {
+        /* CALL_IN already went out with an empty number (CLIP timed out
+         * first) — push a snapshot now instead of waiting up to
+         * READY_BEACON_MS for the FE to learn the real number. */
+        send_ready_snapshot();
     }
 }
 
@@ -1651,6 +1658,16 @@ void handle_call_release(const char *reason)
         at_submit("AT+CEER\r", 2000);
 
     } else if (cs.pending_clip) {
+        if (!cs.caller_num[0] && strncmp(reason, "MISSED_CALL:", 12) == 0) {
+            /* CLIP never arrived in time, but "MISSED_CALL: <time> <number>"
+             * carries the number directly — use it as a fallback. */
+            const char *p = reason + 12;
+            while (*p == ' ') p++;      /* skip space before time token */
+            while (*p && *p != ' ') p++;/* skip time token (e.g. 08:08AM) */
+            while (*p == ' ') p++;      /* skip space before number */
+            strncpy(cs.caller_num, p, sizeof(cs.caller_num) - 1);
+            cs.caller_num[sizeof(cs.caller_num) - 1] = '\0';
+        }
         fe_send_call_miss(cs.caller_num);
     }
     cs.in_call = 0; cs.pending_clip = 0; cs.outgoing = 0;
