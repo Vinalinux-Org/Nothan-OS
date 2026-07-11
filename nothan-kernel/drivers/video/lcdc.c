@@ -49,6 +49,8 @@
 #define LCDC_IRQSTATUS_RAW  0x58
 #define LCDC_IRQSTATUS      0x5C
 #define LCDC_IRQENABLE_SET  0x60
+#define LCDC_IRQENABLE_CLR  0x64
+#define LCDC_END_OF_INT     0x68   /* Reg26 — End of Interrupt Indicator (TRM 13.3.7.1.6) */
 
 /* LCDC_CTRL bits */
 #define CTRL_RASTER_MODE    (1 << 0)
@@ -154,6 +156,10 @@ static void *fb_va;
 /* Set by the frame-done IRQ handler */
 static volatile int eof_flag;
 
+/* FIFO underflows seen since boot — DDR-contention telemetry, sampled at each
+ * wait_eof() timeout to tell an EOI-handshake miss apart from DMA starvation. */
+static volatile unsigned int lcdc_fuf_count;
+
 static void dpll_disp_configure(void)
 {
 	unsigned long end;
@@ -178,12 +184,35 @@ static void dpll_disp_configure(void)
 static void lcdc_eof_handler(unsigned int irq)
 {
 	(void)irq;
+
+	/* Which enabled sources are pending on this pulse (underflow telemetry). */
+	u32 stat = mmio_read32(LCDC_BASE + LCDC_IRQSTATUS);
+	if (stat & IRQBIT_FUF)
+		lcdc_fuf_count++;
+
+	/* Service (write-1-to-clear) every pending source. The LCD module requires
+	 * ALL pending interrupts to be serviced before the ISR exits (TRM
+	 * 13.3.7.1.1). */
 	mmio_write32(LCDC_BASE + LCDC_IRQSTATUS,
 		     IRQBIT_FRAME_DONE | IRQBIT_FUF | IRQBIT_SYNC_LOST);
+
+	/* The source-clear above is a posted write over L4 — it must reach the
+	 * LCDC before the EOI below, or the end-of-interrupt closes the service
+	 * window while the interrupt line is still asserted. */
+	dsb();
+
+	/* End-of-Interrupt handshake (TRM 13.3.7.1.6, Reg26 @ 0x68). The LCDC's
+	 * ipgvmodirq delivers PULSE interrupts; without this write the module never
+	 * clears its internal "in service" latch, so later frame-done pulses are
+	 * intermittently dropped — this was the cause of the wait_eof() timeouts.
+	 * Value 0 = end-of-interrupt token for this single-line IP. */
+	mmio_write32(LCDC_BASE + LCDC_END_OF_INT, 0);
+	dsb();
+
 	eof_flag = 1;
 }
 
-/* Block until EOF0 fires (max 30 ms = 2 frames at 60 Hz) */
+/* Block until the frame-done IRQ fires (max 30 ms = ~2 frames at 60 Hz). */
 static void wait_eof(void)
 {
 	unsigned long end = get_jiffies() + 3;
@@ -191,9 +220,12 @@ static void wait_eof(void)
 	eof_flag = 0;
 	while (!eof_flag) {
 		if (get_jiffies() >= end) {
-			/* EOF0 IRQ did not fire within 30 ms — tearing will occur.
-			 * Root cause: IRQ 36 not reaching the handler. */
-			printk("[LCDC] WARN wait_eof: EOF0 IRQ timeout (IRQ 36 not firing)\n");
+			/* No frame-done pulse within 30 ms — tearing will occur.
+			 * Sample raw status + underflow count so a stuck IRQ handshake
+			 * (raw clean) is distinguishable from DMA starvation (fuf high). */
+			printk("[LCDC] WARN wait_eof: frame-done IRQ timeout (raw=0x%08lx fuf=%u)\n",
+			       (unsigned long)mmio_read32(LCDC_BASE + LCDC_IRQSTATUS_RAW),
+			       lcdc_fuf_count);
 			return;
 		}
 	}

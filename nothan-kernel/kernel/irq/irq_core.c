@@ -7,6 +7,7 @@
 #include <nothan/types.h>
 #include <nothan/irq.h>
 #include <nothan/mmio.h>
+#include <asm/barrier.h>
 
 static irq_handler_t irq_handlers[NR_IRQS];
 
@@ -35,5 +36,14 @@ void intc_handle_irq(void)
 	if (irq_handlers[irq])
 		irq_handlers[irq](irq);
 
+	/*
+	 * Ensure the handler's device-side ack (posted MMIO writes clearing the
+	 * source) has drained before re-arming the INTC — otherwise a level line
+	 * still asserted at NEWIRQAGR time is latched as a spurious fresh IRQ.
+	 * The trailing barrier makes NEWIRQAGR complete before we return and IRQs
+	 * are re-enabled.
+	 */
+	dsb();
 	mmio_write32(INTC_BASE + INTC_CONTROL, NEWIRQAGR);
+	dsb();
 }
