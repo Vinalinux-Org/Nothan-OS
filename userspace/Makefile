@@ -29,14 +29,15 @@ LVGL_CFLAGS := $(CFLAGS) -I lib/lvgl -DLV_CONF_INCLUDE_SIMPLE \
 
 .PHONY: all clean size test-sms-rx
 
+all: $(BUILD)/shell.bin $(BUILD)/gui.bin $(BUILD)/phone_daemon.bin $(BUILD)/storage_daemon.bin
+
 # Host unit test for the incoming multipart-SMS reassembly (sms_rx.c).
 # Built with the native gcc + ASan/UBSan — no target hardware needed.
 test-sms-rx:
+	@mkdir -p $(BUILD)
 	gcc -g -O0 -Wall -fsanitize=address,undefined \
 	    phone_daemon/sms_rx.c phone_daemon/test/sms_rx_test.c -o $(BUILD)/sms_rx_test
 	./$(BUILD)/sms_rx_test
-
-all: $(BUILD)/shell.bin $(BUILD)/gui.bin $(BUILD)/phone_daemon.bin $(BUILD)/storage_daemon.bin
 
 $(BUILD)/lib/crt0.o: lib/crt0.S | $(BUILD)/lib
 	$(CC) $(AFLAGS) -c -o $@ $<
