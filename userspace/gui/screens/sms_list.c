@@ -18,8 +18,8 @@
 #include "../widgets/app_header.h"
 #include "../widgets/nav_bar.h"
 #include "../widgets/avatar.h"
+#include "../widgets/swipe_row.h"
 #include "../services/messages.h"
-#include "../services/contacts.h"
 
 #define SEARCH_H   48
 #define ROW_H      84
@@ -27,6 +27,8 @@
 
 static lv_obj_t *list_obj;
 static lv_obj_t *search_box;
+
+static void populate(const char *filter);
 
 static char lc(char c)
 {
@@ -48,58 +50,49 @@ static int contains_ci(const char *hay, const char *needle)
 	return 0;
 }
 
-static void on_compose(lv_event_t *e)
-{
-	(void)e;
-	gui_log("event: sms compose\n");
-}
+/* ─── swipe-to-delete: slide a row's foreground to reveal a delete panel ─── */
 
-static void on_row(lv_event_t *e)
+/* Tap on a row (not a swipe) → open that conversation. */
+static void on_open_chat(void *user)
 {
-	int idx = (int)(long)lv_event_get_user_data(e);
+	int idx = (int)(long)user;
 	const struct sms_conversation *c = sms_conversation_get(idx);
 	gui_logf("event: open chat %s\n", c ? c->peer : "?");
 	nav_push(sms_chat_create, (void *)(long)idx);
 }
 
-/* Resolve display name and avatar initial for a peer number.
- * Returns contact name if found in address book, raw peer otherwise.
- * init_out receives the first char to show in the avatar. */
-static const char *peer_display(const char *peer, char *init_out)
+/* Deferred delete: run outside event dispatch (lv_async_call) so freeing the
+ * row objects — including the delete button we're handling the click of —
+ * happens after LVGL finishes sending the event, never mid-dispatch. */
+static void delete_conv_async(void *p)
 {
-	const struct contact *ct = contacts_find_by_phone(peer);
-	if (ct && ct->name[0]) {
-		*init_out = ct->name[0];
-		return ct->name;
-	}
-	/* Unknown number — skip leading '+' for avatar initial */
-	const char *p = peer;
-	while (*p == '+') p++;
-	*init_out = *p ? *p : '?';
-	return peer;
+	int idx = (int)(long)p;
+	sms_conversation_delete(idx);
+	populate(search_box ? lv_textarea_get_text(search_box) : NULL);
+}
+
+static void on_delete(lv_event_t *e)
+{
+	int idx = (int)(long)lv_event_get_user_data(e);
+	lv_async_call(delete_conv_async, (void *)(long)idx);
 }
 
 static void add_row(lv_obj_t *list, const struct sms_conversation *c, int idx)
 {
 	int unread = c->unread > 0;
 
-	lv_obj_t *row = lv_button_create(list);
-	lv_obj_remove_style_all(row);
-	lv_obj_set_size(row, lv_pct(100), ROW_H);
-	lv_obj_set_style_radius(row, RADIUS_MD, 0);
-	lv_obj_set_style_bg_color(row, theme_color(THEME_TEXT), LV_STATE_PRESSED);
-	lv_obj_set_style_bg_opa(row, LV_OPA_10, LV_STATE_PRESSED);
+	lv_obj_t *del;
+	lv_obj_t *row = swipe_row_create(list, ROW_H, (void *)(long)idx, &del);
+	lv_obj_add_event_cb(del, on_delete, LV_EVENT_CLICKED, (void *)(long)idx);
+
 	lv_obj_set_style_pad_hor(row, 8, 0);
 	lv_obj_set_style_pad_column(row, 12, 0);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
 			      LV_FLEX_ALIGN_CENTER);
-	lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-	lv_obj_add_event_cb(row, on_row, LV_EVENT_CLICKED, (void *)(long)idx);
 
-	char av_init;
-	const char *display_name = peer_display(c->peer, &av_init);
-	avatar_create(row, av_init, AVATAR_SZ, &lv_font_montserrat_28);
+	/* No address book in the demo → no initial; show a neutral message glyph. */
+	avatar_create_icon(row, LV_SYMBOL_ENVELOPE, AVATAR_SZ, &lv_font_montserrat_28);
 
 	/* Text column: peer on top, preview below. */
 	lv_obj_t *col = lv_obj_create(row);
@@ -114,7 +107,7 @@ static void add_row(lv_obj_t *list, const struct sms_conversation *c, int idx)
 	lv_obj_clear_flag(col, LV_OBJ_FLAG_CLICKABLE);
 
 	lv_obj_t *peer = lv_label_create(col);
-	lv_label_set_text(peer, display_name);
+	lv_label_set_text(peer, c->peer);
 	lv_obj_set_style_text_color(peer, theme_color(THEME_TEXT), 0);
 	lv_obj_set_style_text_font(peer, &lv_font_montserrat_20, 0);
 
@@ -148,6 +141,9 @@ static void populate(const char *filter)
 	if (!list_obj) {
 		return;
 	}
+	/* Rows are about to be freed — drop stale swipe state and (re)set the
+	 * tap handler for the rows built below. */
+	swipe_row_reset(on_open_chat);
 	lv_obj_clean(list_obj);
 	for (int i = 0; i < sms_conversation_count(); i++) {
 		const struct sms_conversation *c = sms_conversation_get(i);
@@ -169,11 +165,16 @@ static void on_screen_loaded(lv_event_t *e)
 	populate(search_box ? lv_textarea_get_text(search_box) : NULL);
 }
 
-static void on_screen_unloaded(lv_event_t *e)
+/* Fires only when the screen is actually freed — NOT on every navigate-away.
+ * The screen is retained on the nav stack while a chat is open on top, so its
+ * list_obj stays valid; that lets the SCREEN_LOADED refresh (on pop-back or a
+ * new inbound SMS) repopulate instead of no-op'ing on a nulled pointer. */
+static void on_screen_deleted(lv_event_t *e)
 {
 	(void)e;
 	list_obj   = NULL;
 	search_box = NULL;
+	swipe_row_reset(NULL);   /* drop references to rows being freed */
 }
 
 static void build_search(lv_obj_t *parent)
@@ -199,10 +200,7 @@ static void build_search(lv_obj_t *parent)
 void sms_list_create(lv_obj_t *screen, void *arg)
 {
 	(void)arg;
-	lv_obj_t *compose = app_header_create(screen, "Messages", LV_SYMBOL_EDIT);
-	if (compose) {
-		lv_obj_add_event_cb(compose, on_compose, LV_EVENT_CLICKED, NULL);
-	}
+	app_header_create(screen, "Messages", NULL);
 
 	build_search(screen);
 
@@ -225,7 +223,9 @@ void sms_list_create(lv_obj_t *screen, void *arg)
 	lv_obj_set_flex_align(list_obj, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
 			      LV_FLEX_ALIGN_START);
 
+	lv_obj_add_event_cb(list_obj, swipe_row_scroll_begin_cb, LV_EVENT_SCROLL_BEGIN, NULL);
+
 	lv_obj_add_event_cb(screen, on_screen_loaded, LV_EVENT_SCREEN_LOADED, NULL);
-	lv_obj_add_event_cb(screen, on_screen_unloaded, LV_EVENT_SCREEN_UNLOAD_START, NULL);
+	lv_obj_add_event_cb(screen, on_screen_deleted, LV_EVENT_DELETE, NULL);
 	populate(NULL);
 }

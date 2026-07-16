@@ -50,6 +50,10 @@ int  sms_conversation_find_or_create(const char *peer);
 /* Last message text of a thread (for the list preview), or "". */
 const char *sms_preview(const struct sms_conversation *c);
 
+/* Delete a whole conversation (thread) by index; the ones below it shift up.
+ * Persists the new store. No-op if the index is out of range. */
+void sms_conversation_delete(int conv_index);
+
 /* Append an outgoing message to a thread and persist. */
 void sms_send(int conv_index, const char *text);
 /* Clear a thread's unread count and persist. */

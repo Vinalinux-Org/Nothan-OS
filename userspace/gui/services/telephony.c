@@ -14,7 +14,6 @@
  */
 
 #include "telephony.h"
-#include "contacts.h"
 #include "storage.h"
 #include "modem_client.h"
 #include "../core/log.h"
@@ -153,9 +152,10 @@ static void calllog_patch_pending(const char *number)
 		return;
 	}
 	struct call_log_entry *e = &log_buf[pending_fix_idx];
-	const struct contact  *c = contacts_find_by_phone(number);
+	/* Phone is standalone in the demo — no address book, so only the number
+	 * is patched in; the name stays empty and the UI shows the number. */
 	copy_str(e->number, number, CALL_NUM_MAX);
-	copy_str(e->name, c ? c->name : "", CALL_NAME_MAX);
+	copy_str(e->name, "", CALL_NAME_MAX);
 	pending_fix_idx = -1;
 	calllog_save();
 	if (log_observer) {
@@ -163,11 +163,12 @@ static void calllog_patch_pending(const char *number)
 	}
 }
 
-/* Resolve a number to a saved contact name into cur_name (else ""). */
+/* Demo Phone is standalone (no address book) — the caller is always shown by
+ * number, so the resolved name is always empty. */
 static void resolve_name(const char *number)
 {
-	const struct contact *c = contacts_find_by_phone(number);
-	copy_str(cur_name, c ? c->name : "", CALL_NAME_MAX);
+	(void)number;
+	cur_name[0] = '\0';
 }
 
 static void set_state(enum tel_state s)
@@ -404,11 +405,9 @@ void telephony_on_remote_end(int is_missed)
  * already moved state to IDLE, so telephony_on_remote_end would early-return. */
 void telephony_log_missed_direct(const char *number)
 {
-    char name[CALL_NAME_MAX];
-    const struct contact *c = contacts_find_by_phone(number);
-    copy_str(name, c ? c->name : "", sizeof(name));
-    gui_logf("telephony: missed (ccwa) %s\n", name[0] ? name : number);
-    calllog_add(number, name, CALL_MISSED, 0);
+    /* No address book in the demo — log by number, empty name. */
+    gui_logf("telephony: missed (ccwa) %s\n", number);
+    calllog_add(number, "", CALL_MISSED, 0);
     if (log_observer) log_observer();
 }
 
@@ -434,4 +433,21 @@ const struct call_log_entry *telephony_log_get(int index)
 		return NULL;
 	}
 	return &log_buf[log_n - 1 - index]; /* 0 = newest */
+}
+
+void telephony_calllog_delete(int index)
+{
+	if (index < 0 || index >= log_n) {
+		return;
+	}
+	/* `index` is display order (0 = newest); map to the storage slot, then
+	 * shift the tail up over it. The caller repopulates its own list. */
+	int s = log_n - 1 - index;
+	gui_logf("telephony: delete log %s\n", log_buf[s].number);
+	for (int i = s; i < log_n - 1; i++) {
+		log_buf[i] = log_buf[i + 1];
+	}
+	log_n--;
+	pending_fix_idx = -1;   /* positions shifted → drop any pending backfill */
+	calllog_save();
 }

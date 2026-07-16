@@ -64,6 +64,11 @@ static void caller_block(const char *status)
 	const struct call_info *c = telephony_current();
 	const char *name   = c->name;
 	const char *number = c->number ? c->number : "";
+	/* When neither name nor number is known (network withheld CLI, or the
+	 * caller hid their number) show a label instead of a blank title. Kept in
+	 * English to match the rest of the UI and the built-in Montserrat font,
+	 * which has no Vietnamese glyphs. */
+	const char *disp   = name ? name : (number[0] ? number : "Unknown");
 
 	lv_obj_t *st = lv_label_create(overlay);
 	lv_label_set_text(st, status);
@@ -71,12 +76,16 @@ static void caller_block(const char *status)
 	lv_obj_set_style_text_font(st, &lv_font_montserrat_16, 0);
 	lv_obj_align(st, LV_ALIGN_TOP_MID, 0, 72);
 
-	lv_obj_t *av = avatar_create(overlay, name ? name[0] : '#', AVATAR_SZ,
-				     &lv_font_montserrat_42);
+	/* No address book in the demo → no name to derive an initial from; show a
+	 * neutral phone glyph instead of a fallback character. */
+	lv_obj_t *av = name
+		? avatar_create(overlay, name[0], AVATAR_SZ, &lv_font_montserrat_42)
+		: avatar_create_icon(overlay, LV_SYMBOL_CALL, AVATAR_SZ,
+				      &lv_font_montserrat_42);
 	lv_obj_align(av, LV_ALIGN_TOP_MID, 0, 112);
 
 	lv_obj_t *title = lv_label_create(overlay);
-	lv_label_set_text(title, name ? name : number);
+	lv_label_set_text(title, disp);
 	lv_obj_set_style_text_color(title, theme_color(THEME_TEXT), 0);
 	lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
 	lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 112 + AVATAR_SZ + 16);

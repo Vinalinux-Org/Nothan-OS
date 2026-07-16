@@ -12,4 +12,12 @@
 lv_obj_t *avatar_create(lv_obj_t *parent, char initial, int size,
 			const lv_font_t *font);
 
+/*
+ * Same round avatar, but showing an LVGL symbol glyph (e.g. LV_SYMBOL_CALL)
+ * instead of a letter. Used where there is no name to derive an initial from
+ * (the demo's standalone Messages list shows numbers, not contacts).
+ */
+lv_obj_t *avatar_create_icon(lv_obj_t *parent, const char *symbol, int size,
+			     const lv_font_t *font);
+
 #endif
