@@ -27,7 +27,14 @@ LVGL_LIB  := $(BUILD)/liblvgl.a
 LVGL_CFLAGS := $(CFLAGS) -I lib/lvgl -DLV_CONF_INCLUDE_SIMPLE \
                -Wno-unused-variable -Wno-type-limits -Wno-sign-compare -O1
 
-.PHONY: all clean size
+.PHONY: all clean size test-sms-rx
+
+# Host unit test for the incoming multipart-SMS reassembly (sms_rx.c).
+# Built with the native gcc + ASan/UBSan — no target hardware needed.
+test-sms-rx:
+	gcc -g -O0 -Wall -fsanitize=address,undefined \
+	    phone_daemon/sms_rx.c phone_daemon/test/sms_rx_test.c -o $(BUILD)/sms_rx_test
+	./$(BUILD)/sms_rx_test
 
 all: $(BUILD)/shell.bin $(BUILD)/gui.bin $(BUILD)/phone_daemon.bin $(BUILD)/storage_daemon.bin
 
@@ -48,7 +55,7 @@ $(BUILD)/shell.bin: $(BUILD)/shell.elf
 # Phone daemon (modem backend) — links like the shell: crt0 + -lgcc, no newlib.
 # Bare-metal flags: no poll()/clock_gettime()/usleep() (use getticks/yield).
 PD_SRCS   := phone_daemon/phone_daemon.c phone_daemon/phone_frame.c phone_daemon/json.c \
-             lib/mem.c
+             phone_daemon/sms_rx.c lib/mem.c
 PD_OBJS   := $(patsubst %.c,$(BUILD)/%.o,$(PD_SRCS))
 PD_CFLAGS := $(CFLAGS) -DPD_NO_POLL -DPD_NO_CLOCK -DPD_NO_USLEEP \
              -Wno-unused-function -Wno-unused-variable

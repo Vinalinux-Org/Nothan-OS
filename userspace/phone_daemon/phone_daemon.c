@@ -30,6 +30,7 @@
 #include "pd_port.h"
 #include "json.h"
 #include "phone_frame.h"
+#include "sms_rx.h"
 
 /* errno storage for the port shim (declared extern in pd_port.h). */
 int errno;
@@ -1228,25 +1229,8 @@ enum { STEP_PLAIN, STEP_HEARTBEAT, STEP_SMS_HDR, STEP_SMS_RESULT,
 
 static unsigned char g_sms_concat_ref = 1;
 
-/* ── Incoming multipart SMS reassembly ───────────────────────────────
- * Text mode (CMGF=1) delivers each part as a separate +CMT URC with no
- * UDH exposed. We buffer parts from the same sender in a short time
- * window (SMS_CONCAT_COLLECT_MS after the last received part) and emit
- * one combined SMS_IN when the window expires. */
-#define SMS_CONCAT_IN_MAX       4       /* concurrent senders in flight  */
-#define SMS_CONCAT_COLLECT_MS   3000    /* window after last part arrival; Viettel SMSC delivers parts ~2s apart */
-#define SMS_CONCAT_TEXT_CAP     2048    /* max total reassembled UTF-8   */
-
-typedef struct {
-    int   active;
-    char  sender[CALLER_NUM_MAX];
-    char  ts[24];
-    char  text[SMS_CONCAT_TEXT_CAP];
-    int   text_len;
-    unsigned long expire_ms;
-} SmsConcatIn;
-
-static SmsConcatIn g_sms_concat_in[SMS_CONCAT_IN_MAX];
+/* Incoming multipart reassembly lives in sms_rx.c (length-based, host-tested).
+ * The daemon just decodes each part and feeds it to sms_rx_part(). */
 
 /* PDU hex body ≤ 310 B; text-mode SMS ≤ 162 B — PHONE_JSON_MAX bloats at_q to 65 KB BSS */
 #define AT_TEXT_MAX 1100   
@@ -1784,91 +1768,6 @@ static void handle_ccfc(const char *line)
     fe_send_cf_state(0, status, num);
 }
 
-/* ── Incoming concat reassembly helpers ──────────────────────────── */
-
-static SmsConcatIn *sms_ci_find(const char *sender)
-{
-    int i;
-    for (i = 0; i < SMS_CONCAT_IN_MAX; i++) {
-        if (g_sms_concat_in[i].active &&
-            strncmp(g_sms_concat_in[i].sender, sender, CALLER_NUM_MAX - 1) == 0) {
-            return &g_sms_concat_in[i];
-        }
-    }
-    return NULL;
-}
-
-static SmsConcatIn *sms_ci_alloc(const char *sender, const char *ts)
-{
-    int i;
-    SmsConcatIn *oldest = NULL;
-    for (i = 0; i < SMS_CONCAT_IN_MAX; i++) {
-        if (!g_sms_concat_in[i].active) {
-            SmsConcatIn *sc = &g_sms_concat_in[i];
-            sc->active   = 1;
-            sc->text_len = 0;
-            sc->text[0]  = '\0';
-            strncpy(sc->sender, sender, sizeof(sc->sender) - 1);
-            sc->sender[sizeof(sc->sender) - 1] = '\0';
-            strncpy(sc->ts, ts ? ts : "", sizeof(sc->ts) - 1);
-            sc->ts[sizeof(sc->ts) - 1] = '\0';
-            return sc;
-        }
-        if (!oldest || g_sms_concat_in[i].expire_ms < oldest->expire_ms) {
-            oldest = &g_sms_concat_in[i];
-        }
-    }
-    /* evict oldest — flush it first */
-    if (oldest) {
-        printf("[pd] evict sender=%s to make room\n", oldest->sender);
-        fe_send_sms_in(oldest->sender, oldest->text, oldest->ts);
-        oldest->active   = 1;
-        oldest->text_len = 0;
-        oldest->text[0]  = '\0';
-        strncpy(oldest->sender, sender, sizeof(oldest->sender) - 1);
-        oldest->sender[sizeof(oldest->sender) - 1] = '\0';
-        strncpy(oldest->ts, ts ? ts : "", sizeof(oldest->ts) - 1);
-        oldest->ts[sizeof(oldest->ts) - 1] = '\0';
-        return oldest;
-    }
-    return NULL;
-}
-
-static void sms_ci_append(SmsConcatIn *sc, const char *text)
-{
-    int tlen = (int)strlen(text);
-    if (sc->text_len + tlen >= SMS_CONCAT_TEXT_CAP - 1) {
-        printf("[pd] concat buffer full, truncating\n");
-        tlen = SMS_CONCAT_TEXT_CAP - 1 - sc->text_len;
-        if (tlen <= 0) {
-            return;
-        }
-    }
-    memcpy(sc->text + sc->text_len, text, (size_t)tlen);
-    sc->text_len += tlen;
-    sc->text[sc->text_len] = '\0';
-}
-
-static void sms_ci_flush(SmsConcatIn *sc)
-{
-    if (sc->active && sc->text_len > 0) {
-        fe_send_sms_in(sc->sender, sc->text, sc->ts);
-    }
-    sc->active   = 0;
-    sc->text_len = 0;
-    sc->text[0]  = '\0';
-}
-
-void sms_ci_tick(unsigned long now)
-{
-    int i;
-    for (i = 0; i < SMS_CONCAT_IN_MAX; i++) {
-        if (g_sms_concat_in[i].active && now >= g_sms_concat_in[i].expire_ms) {
-            sms_ci_flush(&g_sms_concat_in[i]);
-        }
-    }
-}
-
 /* +CMT header → next non-empty line is the body (set pending). */
 void handle_cmt_header(const char *line)
 {
@@ -1971,6 +1870,11 @@ void handle_sms_body(const char *raw)
         strncpy(text, raw, (size_t)(buf_sz - 1)); text[buf_sz - 1] = '\0';
     }
 
+    /* Part length in SMS characters BEFORE stripping — UCS-2 code units
+     * (hexlen/4) or GSM-7 char count. sms_rx uses this to tell a full
+     * "more-coming" part from a short final/standalone part. */
+    int part_chars = is_ucs2 ? (raw_len / 4) : (int)strlen(text);
+
     /* Normalize diacritics → ASCII so LVGL Montserrat can render the text.
      * Covers both NFC (precomposed, from UCS-2) and NFD (combining marks). */
     {
@@ -1980,20 +1884,12 @@ void handle_sms_body(const char *raw)
     }
 
     if (kind == BODY_CMT) {
-        /* Buffer in concat window so multipart SMS arrive as one message.
-         * Single-part SMS is emitted after SMS_CONCAT_COLLECT_MS of silence
-         * from this sender — acceptable latency in exchange for correct
-         * reassembly of multipart messages delivered in text mode (no UDH). */
-        SmsConcatIn *sc = sms_ci_find(g_body_sender);
-        if (!sc) {
-            sc = sms_ci_alloc(g_body_sender, g_body_ts);
-        }
-        if (sc) {
-            sms_ci_append(sc, text);
-            sc->expire_ms = pd_now_ms() + SMS_CONCAT_COLLECT_MS;
-        } else {
-            fe_send_sms_in(g_body_sender, text, g_body_ts);
-        }
+        /* Reassemble multipart SMS by part length (see sms_rx.c): full parts
+         * accumulate, a short part flushes the whole message. Keeps two
+         * separate short messages from the same sender apart, and joins the
+         * parts of one message regardless of inter-part delay. */
+        sms_rx_part(g_body_sender, g_body_ts, text, part_chars, is_ucs2,
+                    pd_now_ms());
     } else {
         fe_send_sms_list(g_body_index, g_body_stat, g_body_sender, g_body_ts, text);
     }
@@ -3694,7 +3590,7 @@ static void super_loop(void)
                 && now >= g_body_hex_flush_ms) {
             sms_body_hex_flush();
         }
-        sms_ci_tick(now);
+        sms_rx_tick(now);
         rel_retransmit_tick(now);
         recovery_tick(now);
         check_init_done();
@@ -3714,6 +3610,7 @@ int main(void)
 
     memset(&cs, 0, sizeof(cs));
     cs.last_cause = -1;
+    sms_rx_init(fe_send_sms_in);   /* incoming multipart reassembly sink */
 
     fd_sim = open_uart(SIM_DEV);
     if (fd_sim < 0) {
