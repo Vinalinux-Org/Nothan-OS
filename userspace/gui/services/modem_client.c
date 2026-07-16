@@ -173,7 +173,7 @@ static void dispatch_event(const char *json)
 
     /* ── Call events ── */
     if (strcmp(type, "CALL_IN") == 0) {
-        char raw[32];
+        char raw[32] = "";   /* json_get_str leaves it untouched if "num" absent */
         json_get_str(json, "num", raw, sizeof(raw));
         if (seq > 0) send_ack(seq);
         telephony_on_incoming(raw);
@@ -194,7 +194,8 @@ static void dispatch_event(const char *json)
         /* CCWA case: daemon sends CALL_MISS(num) after CALL_END has already moved
          * state to IDLE. Extract num — if present and state is idle, log directly. */
         {
-            char missed_num[32];
+            char missed_num[32] = "";   /* untouched if "num" absent — avoid
+                                         * branching on / logging a garbage number */
             json_get_str(json, "num", missed_num, sizeof(missed_num));
             if (missed_num[0] && telephony_state() == TEL_IDLE)
                 telephony_log_missed_direct(missed_num);
