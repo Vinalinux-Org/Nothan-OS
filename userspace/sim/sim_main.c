@@ -45,6 +45,39 @@ static unsigned long sim_getticks(void)
 	return (unsigned long)(ts.tv_sec * 1000UL + ts.tv_nsec / 1000000UL);
 }
 
+extern void telephony_on_incoming(const char *number);
+extern void telephony_on_remote_end(int is_missed);
+extern void telephony_log_missed_direct(const char *number);
+extern int  telephony_log_count(void);
+extern void sms_on_received(const char *peer, const char *text);
+
+/* Seed realistic test data so every screen has something to render and
+ * scroll. Used by the autotap harness and by the interactive SDL run so a
+ * manual tester has threads and recent calls to work with. */
+static void at_seed_data(void)
+{
+	/* Contacts */
+	contacts_add("An Nguyen",    "0868 000 001");
+	contacts_add("Binh Tran",    "0912 345 678");
+	contacts_add("Cuong Le",     "0987 654 321");
+	contacts_add("Dung Pham",    "0901 111 222");
+	contacts_add("Giang Hoang",  "0933 444 555");
+
+	/* SMS conversations — a few messages each */
+	sms_on_received("0868 000 001", "Hey, are you free?");
+	sms_on_received("0868 000 001", "Let me know when you arrive");
+	sms_on_received("0912 345 678", "Meeting moved to 3pm");
+	sms_on_received("0912 345 678", "Can you confirm?");
+	sms_on_received("0987 654 321", "On my way");
+
+	/* Recent calls — seed a few so Recents has rows to call back / swipe-delete.
+	 * telephony_log_missed_direct is the only public way to add log entries
+	 * without driving the state machine, so these show as missed calls. */
+	telephony_log_missed_direct("0868 000 001");
+	telephony_log_missed_direct("0912 345 678");
+	telephony_log_missed_direct("0987 654 321");
+}
+
 #ifdef SIM_AUTOTAP
 /*
  * Deterministic auto-tap harness for the host repro builds (`make asan` /
@@ -165,28 +198,6 @@ static void at_drag(int x0, int y0, int x1, int y1, int steps)
  * =======================================================================*/
 
 /* Entry points declared in telephony.c / messages.c — called by modem_client */
-extern void telephony_on_incoming(const char *number);
-extern void sms_on_received(const char *peer, const char *text);
-
-/* Seed realistic test data so every screen has something to render and
- * scroll. Called once at the top of run_autotap(), before screen tests. */
-static void at_seed_data(void)
-{
-	/* Contacts */
-	contacts_add("An Nguyen",    "0868 000 001");
-	contacts_add("Binh Tran",    "0912 345 678");
-	contacts_add("Cuong Le",     "0987 654 321");
-	contacts_add("Dung Pham",    "0901 111 222");
-	contacts_add("Giang Hoang",  "0933 444 555");
-
-	/* SMS conversations — a few messages each */
-	sms_on_received("0868 000 001", "Hey, are you free?");
-	sms_on_received("0868 000 001", "Let me know when you arrive");
-	sms_on_received("0912 345 678", "Meeting moved to 3pm");
-	sms_on_received("0912 345 678", "Can you confirm?");
-	sms_on_received("0987 654 321", "On my way");
-}
-
 #define AT_CX        240		/* center X of the 480-wide display     */
 #define AT_BACK_X    43		/* header back-chevron position          */
 #define AT_BACK_Y    54
@@ -217,6 +228,21 @@ static void at_screen_back(void)
 static void at_test_call_log(void)
 {
 	at_screen_open(call_log_create, NULL, "call_log");
+
+	/* Swipe-to-delete a recent call: slide row 0 left, tap Delete, confirm
+	 * the log dropped by one. Same drag → snap → async delete → repopulate
+	 * path as Messages, under the heap check in at_click. */
+	if (telephony_log_count() > 0) {
+		int before = telephony_log_count();
+		at_drag(AT_CX, AT_ROW(0), AT_CX - 140, AT_ROW(0), 10);	/* reveal */
+		at_pump(12);						/* snap open */
+		at_click(424, AT_ROW(0));				/* tap Delete */
+		at_pump(12);						/* async delete + rebuild */
+		gui_logf("autotap: call delete %d -> %d\n",
+			 before, telephony_log_count());
+		at_check("call_delete");
+	}
+
 	at_drag(AT_CX, AT_ROW(3), AT_CX, AT_ROW(0), 8);	/* scroll down */
 	at_drag(AT_CX, AT_ROW(0), AT_CX, AT_ROW(3), 8);	/* scroll up   */
 	at_tap(AT_CX, AT_ROW(0));	/* tap first row → dial (no-op in sim) */
@@ -254,6 +280,22 @@ static void at_test_dialer(void)
 static void at_test_sms_list(void)
 {
 	at_screen_open(sms_list_create, NULL, "sms_list");
+
+	/* Swipe-to-delete: slide row 0 left to reveal the red delete button, tap
+	 * it, and confirm the thread count dropped by one. Exercises the whole
+	 * drag → snap-open → async delete → repopulate path (which frees the very
+	 * row objects the click came from) under the heap check in at_click. */
+	if (sms_conversation_count() > 0) {
+		int before = sms_conversation_count();
+		at_drag(AT_CX, AT_ROW(0), AT_CX - 140, AT_ROW(0), 10);	/* reveal   */
+		at_pump(12);						/* snap open */
+		at_click(424, AT_ROW(0));				/* tap Delete */
+		at_pump(12);						/* async delete + rebuild */
+		gui_logf("autotap: sms delete %d -> %d\n",
+			 before, sms_conversation_count());
+		at_check("sms_delete");
+	}
+
 	at_drag(AT_CX, AT_ROW(3), AT_CX, AT_ROW(0), 8);
 	at_drag(AT_CX, AT_ROW(0), AT_CX, AT_ROW(3), 8);
 	/* open first conversation if one exists */
@@ -590,6 +632,11 @@ int main(void)
 	messages_init();
 	telephony_init();
 	call_ui_init();
+#if !defined(SIM_AUTOTAP) && !defined(SIM_MONKEY)
+	/* Interactive SDL run: autotap/monkey seed themselves, so only the
+	 * hand-driven build needs demo contacts + threads to poke at. */
+	at_seed_data();
+#endif
 	nav_set_root(boot_create, NULL);
 	gui_log("ready\n");
 
@@ -602,6 +649,7 @@ int main(void)
 #endif
 
 #ifndef SIM_HEADLESS
+	gui_log("hotkeys: F1=incoming call  F2=incoming SMS  F3=remote hang up\n");
 	unsigned long last_tick   = sim_getticks();
 	unsigned long start_t     = last_tick;
 	unsigned long mem_t       = last_tick;
@@ -612,6 +660,26 @@ int main(void)
 		while (SDL_PollEvent(&e)) {
 			if (e.type == SDL_QUIT)
 				return 0;
+			/* Dev hotkeys — the sim has no real modem, so inject radio
+			 * events by hand. F-keys never reach a focused textarea. */
+			if (e.type == SDL_KEYDOWN) {
+				switch (e.key.keysym.sym) {
+				case SDLK_F1:
+					gui_log("hotkey: F1 -> incoming call\n");
+					telephony_on_incoming("0868 000 000");
+					break;
+				case SDLK_F2:
+					gui_log("hotkey: F2 -> incoming SMS\n");
+					sms_on_received("0912 345 678", "Test message");
+					break;
+				case SDLK_F3:
+					gui_log("hotkey: F3 -> remote hang up\n");
+					telephony_on_remote_end(1);
+					break;
+				default:
+					break;
+				}
+			}
 			sim_indev_feed(&e);
 		}
 
