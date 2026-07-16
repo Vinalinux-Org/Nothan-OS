@@ -18,6 +18,9 @@ static lv_obj_t *icon_button(lv_obj_t *parent, const char *symbol)
 	lv_obj_t *btn = lv_button_create(parent);
 	lv_obj_remove_style_all(btn);
 	lv_obj_set_size(btn, 52, 52);
+	/* These sit at the header's left/right corner, where touch accuracy is
+	 * worst — extend the hit area without changing the visible button. */
+	lv_obj_set_ext_click_area(btn, 12);
 	lv_obj_set_style_radius(btn, RADIUS_SM, 0);
 	lv_obj_set_style_bg_color(btn, theme_color(THEME_TEXT), LV_STATE_PRESSED);
 	lv_obj_set_style_bg_opa(btn, LV_OPA_20, LV_STATE_PRESSED);

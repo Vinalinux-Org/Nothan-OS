@@ -1556,11 +1556,21 @@ void sms_body_hex_flush(void)
 
 void handle_ring(void)
 {
-    /* Ignore RING if already in a call or dialing (call waiting is handled
+    /* Ignore RING only if already in a call or dialing (call waiting is handled
      * separately via +CCWA — we log a missed call when the active call ends). */
-    if (cs.in_call || cs.outgoing || cs.pending_clip) {
-        printf("[pd] RING ignored (in_call=%d outgoing=%d pending_clip=%d)\n",
-               cs.in_call, cs.outgoing, cs.pending_clip);
+    if (cs.in_call || cs.outgoing) {
+        printf("[pd] RING ignored (in_call=%d outgoing=%d)\n",
+               cs.in_call, cs.outgoing);
+        return;
+    }
+    if (cs.pending_clip) {
+        /* Repeat RING for the same incoming call. If we still have no number,
+         * re-poll the call table — this modem emits +CLIP late (2nd RING),
+         * but AT+CLCC returns the number the network already delivered. */
+        if (!g_call_in_sent && !cs.caller_num[0]) {
+            printf("[pd] RING repeat — re-polling AT+CLCC for caller ID\n");
+            at_submit("AT+CLCC\r", 2000);
+        }
         return;
     }
     cs.pending_clip   = 1;
@@ -1569,6 +1579,33 @@ void handle_ring(void)
     printf("[pd] RING accepted — CLIP wait armed, now=%u deadline=%u\n",
            (unsigned int)pd_now_ms(), (unsigned int)g_clip_deadline);
     fe_send_call_ring();
+    /* Actively pull the caller number instead of only waiting for the (late)
+     * +CLIP URC — the number is in the modem's call table from the network
+     * SETUP, so AT+CLCC returns it right on the first RING. */
+    at_submit("AT+CLCC\r", 2000);
+}
+
+/* Apply a caller number learned from +CLIP or +CLCC during a pending incoming
+ * call: record it and send CALL_IN once (or a snapshot if CALL_IN already went
+ * out empty). Empty numbers are ignored so a later/other source can still fill
+ * it — whichever of +CLIP / +CLCC produces a number first wins. */
+static void apply_incoming_number(const char *num)
+{
+    if (!cs.pending_clip || !num || !num[0]) {
+        return;
+    }
+    strncpy(cs.caller_num, num, sizeof(cs.caller_num) - 1);
+    cs.caller_num[sizeof(cs.caller_num) - 1] = '\0';
+    if (!g_call_in_sent) {
+        g_call_in_sent  = 1;
+        g_clip_deadline = 0;   /* cancel fallback + stop CLCC polling */
+        fe_send_call_in(num);
+    } else {
+        /* CALL_IN already went out with an empty number (wait window elapsed)
+         * — push a snapshot now instead of waiting up to READY_BEACON_MS for
+         * the FE to learn the real number. */
+        send_ready_snapshot();
+    }
 }
 
 void handle_clip(const char *line)
@@ -1580,18 +1617,7 @@ void handle_clip(const char *line)
     }
     extract_quoted(line + 6, num, sizeof(num));
     printf("[pd] +CLIP parsed num='%s'\n", num);
-    strncpy(cs.caller_num, num, sizeof(cs.caller_num) - 1);
-    cs.caller_num[sizeof(cs.caller_num) - 1] = '\0';
-    if (!g_call_in_sent) {
-        g_call_in_sent  = 1;
-        g_clip_deadline = 0;   /* cancel fallback */
-        fe_send_call_in(num);
-    } else {
-        /* CALL_IN already went out with an empty number (CLIP timed out
-         * first) — push a snapshot now instead of waiting up to
-         * READY_BEACON_MS for the FE to learn the real number. */
-        send_ready_snapshot();
-    }
+    apply_incoming_number(num);
 }
 
 /* Fallback: if CLIP never arrived before the deadline, send CALL_IN with
@@ -1608,6 +1634,10 @@ void clip_timer_tick(unsigned long now)
             printf("[pd] CLIP wait: now=%u deadline=%u (%d ms left)\n",
                    (unsigned int)now, (unsigned int)g_clip_deadline,
                    (int)(g_clip_deadline - now));
+            /* Keep polling the call table until a number lands (or timeout).
+             * Stops automatically once apply_incoming_number sets
+             * g_call_in_sent (early return at the top of this function). */
+            at_submit("AT+CLCC\r", 2000);
         }
         return;
     }
@@ -1692,6 +1722,14 @@ void handle_clcc(const char *line)
 {
     char num[CALLER_NUM_MAX];
     extract_quoted(line + 6, num, sizeof(num));
+    if (cs.pending_clip) {
+        /* Response to our RING-time AT+CLCC poll: the quoted field is the
+         * caller number the network delivered in the SETUP. Fast path for
+         * when +CLIP is late or never arrives. Empty (withheld) → ignored. */
+        printf("[pd] +CLCC caller num='%s' (pending incoming)\n", num);
+        apply_incoming_number(num);
+        return;
+    }
     fe_send_call_stat(num, line + 6);
 }
 

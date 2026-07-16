@@ -111,7 +111,13 @@ void nav_pop(void)
 
 	lv_obj_t *dying = stack[depth - 1];
 	depth--;
-	lv_screen_load(stack[depth - 1]);
+	lv_obj_t *revealed = stack[depth - 1];
+	lv_screen_load(revealed);
+	/* Force the revealed screen to refresh its data — lv_screen_load does not
+	 * re-fire SCREEN_LOADED for an already-built screen, so a data-mutable
+	 * screen (Recents, Messages) would otherwise show stale rows (e.g. an
+	 * unread thread that was just read). Screens with no such handler ignore it. */
+	lv_obj_send_event(revealed, LV_EVENT_SCREEN_LOADED, NULL);
 	/* Reset all indev state before deleting the outgoing screen.
 	 * Without this, the indev keeps stale pointers to scroll targets /
 	 * pressed objects on the dying screen; the next touch then calls

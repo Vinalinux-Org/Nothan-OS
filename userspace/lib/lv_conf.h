@@ -48,7 +48,12 @@
  * (code 0x10000.., stack top 0x100000); 384 KB keeps ~76 KB of guard
  * between the mapped bss top and the 32 KB stack.
  */
-#define LV_MEM_SIZE (512 * 1024U)
+/* 2026-07-15: raised 512K→1M. The old 384K/1MB-region note above is stale
+ * (per-process PGD now, stack at high VA, bss ~2.5MB and mapped fine). 1MB
+ * gives render headroom so a content-heavy Messages list after a couple of
+ * calls no longer exhausts the pool (LVGL asserted lv_array_at, data==NULL).
+ * bss stays ~3MB, inside the 4MB buddy block. */
+#define LV_MEM_SIZE (1024 * 1024U)
 #define LV_MEM_POOL_EXPAND_SIZE 0
 #define LV_MEM_ADR 0
 /* SIM_GUARD: back the TLSF pool with a guard-paged mmap so a write past the

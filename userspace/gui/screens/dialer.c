@@ -75,8 +75,8 @@ static void on_call(lv_event_t *e)
 	}
 	gui_logf("event: dial call %s\n", num_buf);
 	telephony_dial(num_buf);
-	/* The call overlay (lv_layer_top) takes over from here; drop back to
-	 * Recents so we land there when the call ends. */
+	/* The call overlay (lv_layer_top) takes over from here; pop the dialer so
+	 * we land back on Home when the call ends. */
 	nav_pop();
 }
 
