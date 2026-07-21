@@ -48,10 +48,126 @@ static int      recv_on = 1;   /* auto-inject inbound SMS */
  * inactivity, then auto-deletes. */
 static lv_timer_t *g_save_timer;
 
+/*
+ * Compact on-disk format — only the bytes actually in use, no empty padding.
+ * The old code dumped the whole ~515 KB fixed struct on every message, and the
+ * polled MMC write (IRQs masked per 512 B block) stalled the whole system for
+ * ~1000 blocks. A few short threads serialize to a few KB → the SD write is as
+ * cheap as contacts/calllog → no freeze.
+ *
+ *   [4] magic
+ *   [2] conversation count
+ *   per conversation:
+ *     [1] peer length, [peer] bytes
+ *     [1] unread   [1] message count
+ *     per message: [1] sent  [2] text length  [text] bytes
+ */
+#define SMS_BLOB_MAX (32 * 1024)
+static unsigned char sms_blob[SMS_BLOB_MAX];
+
+static int slen(const char *s, int max)
+{
+	int n = 0;
+	while (n < max && s[n]) {
+		n++;
+	}
+	return n;
+}
+
+static int sms_serialize(void)
+{
+	int n = 0;
+	sms_blob[n++] = (unsigned char)(SMS_MAGIC & 0xFF);
+	sms_blob[n++] = (unsigned char)((SMS_MAGIC >> 8) & 0xFF);
+	sms_blob[n++] = (unsigned char)((SMS_MAGIC >> 16) & 0xFF);
+	sms_blob[n++] = (unsigned char)((SMS_MAGIC >> 24) & 0xFF);
+	int count_at = n;
+	n += 2;				/* patched after the loop */
+	int written = 0;
+	for (int c = 0; c < store.count; c++) {
+		struct sms_conversation *cv = &store.conv[c];
+		int pl = slen(cv->peer, SMS_PEER_MAX);
+		int need = 1 + pl + 2;
+		for (int m = 0; m < cv->message_count; m++)
+			need += 3 + slen(cv->messages[m].text, SMS_TEXT_MAX);
+		if (n + need > SMS_BLOB_MAX)
+			break;			/* store is newest-first → keep newest */
+		sms_blob[n++] = (unsigned char)pl;
+		for (int k = 0; k < pl; k++)
+			sms_blob[n++] = (unsigned char)cv->peer[k];
+		sms_blob[n++] = (unsigned char)(cv->unread > 255 ? 255 : cv->unread);
+		sms_blob[n++] = (unsigned char)cv->message_count;
+		for (int m = 0; m < cv->message_count; m++) {
+			int tl = slen(cv->messages[m].text, SMS_TEXT_MAX);
+			sms_blob[n++] = cv->messages[m].sent;
+			sms_blob[n++] = (unsigned char)(tl & 0xFF);
+			sms_blob[n++] = (unsigned char)((tl >> 8) & 0xFF);
+			for (int k = 0; k < tl; k++)
+				sms_blob[n++] = (unsigned char)cv->messages[m].text[k];
+		}
+		written++;
+	}
+	sms_blob[count_at]     = (unsigned char)(written & 0xFF);
+	sms_blob[count_at + 1] = (unsigned char)((written >> 8) & 0xFF);
+	return n;
+}
+
+/* Rebuild the store from sms_blob[0..len). Returns conv count, or -1 if the
+ * blob is missing/short/corrupt (caller then seeds the demo threads). */
+static int sms_deserialize(int len)
+{
+	if (len < 6)
+		return -1;
+	unsigned int magic = sms_blob[0] | (sms_blob[1] << 8) |
+			     (sms_blob[2] << 16) | ((unsigned)sms_blob[3] << 24);
+	if (magic != SMS_MAGIC)
+		return -1;
+	int n = 4;
+	int count = sms_blob[n] | (sms_blob[n + 1] << 8);
+	n += 2;
+	if (count < 0 || count > SMS_CONV_MAX)
+		return -1;
+	store.count = 0;
+	for (int c = 0; c < count; c++) {
+		if (n + 1 > len)
+			return -1;
+		int pl = sms_blob[n++];
+		if (pl >= SMS_PEER_MAX || n + pl + 2 > len)
+			return -1;
+		struct sms_conversation *cv = &store.conv[store.count];
+		for (int k = 0; k < pl; k++)
+			cv->peer[k] = (char)sms_blob[n++];
+		cv->peer[pl] = '\0';
+		cv->unread = sms_blob[n++];
+		int mc = sms_blob[n++];
+		if (mc > SMS_PER_CONV)
+			return -1;
+		cv->message_count = 0;
+		for (int m = 0; m < mc; m++) {
+			if (n + 3 > len)
+				return -1;
+			unsigned char sent = sms_blob[n++];
+			int tl = sms_blob[n] | (sms_blob[n + 1] << 8);
+			n += 2;
+			if (tl >= SMS_TEXT_MAX || n + tl > len)
+				return -1;
+			struct sms_message *msg = &cv->messages[cv->message_count++];
+			for (int k = 0; k < tl; k++)
+				msg->text[k] = (char)sms_blob[n++];
+			msg->text[tl] = '\0';
+			msg->sent = sent;
+		}
+		store.count++;
+	}
+	return store.count;
+}
+
 static void messages_save(void)
 {
-	store.magic = SMS_MAGIC;
-	storage_write(SMS_PATH, &store, sizeof(store));
+	/* Compact write — only real data, so the SD write stays small and does not
+	 * stall the system the way the full-struct dump did. Still deferred 300 ms
+	 * (schedule_save) so a burst of messages coalesces into one write. */
+	storage_write(SMS_PATH, sms_blob, sms_serialize());
 }
 
 static void deferred_save_cb(lv_timer_t *t)
@@ -111,10 +227,24 @@ static int create_conv(const char *peer)
 	return idx;
 }
 
-static void seed_mock(void)
+/* Move a conversation to the front so the thread with the newest activity
+ * sorts to the top of the list (like a real phone). The ones above it shift
+ * down by one. */
+static void move_to_front(int idx)
 {
-	store.count = 0;
+	if (idx <= 0) {
+		return;
+	}
+	struct sms_conversation tmp = store.conv[idx];
+	for (int i = idx; i > 0; i--) {
+		store.conv[i] = store.conv[i - 1];
+	}
+	store.conv[0] = tmp;
 }
+
+/* Defined in screens/sms_chat.c — keeps an open thread pointing at its own
+ * conversation across the move_to_front() shuffle above. */
+extern void sms_chat_reindex(int moved_from);
 
 /* Wipe all conversations and persist the empty store so the next boot
  * also starts from scratch.  Call before porting to a new display.
@@ -128,7 +258,7 @@ void sms_clear(void)
 	}
 	store.count = 0;
 	store.magic = SMS_MAGIC;
-	storage_write(SMS_PATH, &store, sizeof(store));
+	messages_save();		/* persist the empty store */
 }
 
 #ifdef GUI_MONKEY
@@ -137,11 +267,11 @@ static void messages_tick(lv_timer_t *t);
 
 void messages_init(void)
 {
-	int n = storage_read(SMS_PATH, &store, sizeof(store));
-	if (n < (int)(sizeof(store.magic) + sizeof(store.count)) ||
-	    store.magic != SMS_MAGIC || store.count < 0 ||
-	    store.count > SMS_CONV_MAX)
-		seed_mock();
+	/* Load persisted threads from SD. No fake seed anymore — the list simply
+	 * starts empty until real SMS arrive (compact format, see messages_save). */
+	int len = storage_read(SMS_PATH, sms_blob, SMS_BLOB_MAX);
+	if (len < 6 || sms_deserialize(len) < 0)
+		store.count = 0;
 
 #ifdef GUI_MONKEY
 	next_recv_at = lv_tick_get() + RECV_EVERY_MS;
@@ -215,6 +345,21 @@ const char *sms_preview(const struct sms_conversation *c)
 	if (*src) { buf[i++] = '.'; buf[i++] = '.'; buf[i++] = '.'; }
 	buf[i] = '\0';
 	return i > 0 ? buf : "";
+}
+
+void sms_conversation_delete(int conv_index)
+{
+	if (conv_index < 0 || conv_index >= store.count) {
+		return;
+	}
+	gui_logf("sms: delete thread %s\n", store.conv[conv_index].peer);
+	/* Shift the tail up over the removed slot, then shrink. Struct copy is
+	 * fine — the store already moves whole conversations (move_to_front). */
+	for (int i = conv_index; i < store.count - 1; i++) {
+		store.conv[i] = store.conv[i + 1];
+	}
+	store.count--;
+	schedule_save();
 }
 
 void sms_send(int conv_index, const char *text)
@@ -325,6 +470,10 @@ void sms_on_received(const char *peer, const char *text)
 	strip_vietnamese(clean);
 	append_msg(idx, clean, 0);
 	store.conv[idx].unread++;
+	/* Bump this thread to the top; fix an open chat's index first so it keeps
+	 * showing the right conversation after the store shuffles. */
+	sms_chat_reindex(idx);
+	move_to_front(idx);
 	schedule_save();
 	gui_logf("sms: recv from %s: %s\n", peer, clean);
 	lv_async_call(refresh_screen_cb, NULL);

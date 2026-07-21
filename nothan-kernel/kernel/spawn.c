@@ -96,6 +96,8 @@ extern char _binary_user_gui_start[];
 extern char _binary_user_gui_end[];
 extern char _binary_user_phone_daemon_start[];
 extern char _binary_user_phone_daemon_end[];
+extern char _binary_user_storage_daemon_start[];
+extern char _binary_user_storage_daemon_end[];
 
 /*
  * NothanOS user binary header — see userspace/lib/user.lds.
@@ -401,5 +403,18 @@ struct task_struct *user_task_create_phone_daemon(void)
 	return user_task_create_bin("phone_daemon",
 				    _binary_user_phone_daemon_start,
 				    _binary_user_phone_daemon_end);
+}
+
+/**
+ * user_task_create_storage_daemon() - Create the FAT-write backend task
+ * from the embedded binary.
+ *
+ * Return: Pointer to the task_struct, or NULL on failure.
+ */
+struct task_struct *user_task_create_storage_daemon(void)
+{
+	return user_task_create_bin("storage_daemon",
+				    _binary_user_storage_daemon_start,
+				    _binary_user_storage_daemon_end);
 }
 

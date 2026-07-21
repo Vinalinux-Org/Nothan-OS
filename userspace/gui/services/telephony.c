@@ -14,7 +14,6 @@
  */
 
 #include "telephony.h"
-#include "contacts.h"
 #include "storage.h"
 #include "modem_client.h"
 #include "../core/log.h"
@@ -55,6 +54,12 @@ static tel_log_changed_fn  log_observer;
 /* Call log: append-only ring, newest at the end. */
 static struct call_log_entry log_buf[CALLLOG_MAX];
 static int                   log_n;
+
+/* Index of the most recent entry logged with an unknown number (reject/miss
+ * before CLIP arrived) — patched in place if the real number turns up later,
+ * even after the call has ended. Any further calllog_add() invalidates it,
+ * since positions can shift (dedup-shift or eviction). */
+static int pending_fix_idx = -1;
 
 #ifdef GUI_MONKEY
 static uint32_t        next_incoming_at;          /* lv_tick to inject next ring */
@@ -107,6 +112,11 @@ static void calllog_load(void)
 static void calllog_add(const char *number, const char *name,
 			enum call_type type, unsigned int dur_sec)
 {
+	/* Any mutation below shifts positions — a previously tracked pending
+	 * index would point at the wrong entry, so drop it unconditionally.
+	 * Re-armed below if this new entry itself has no number yet. */
+	pending_fix_idx = -1;
+
 	/* Remove existing entry for this number (shift left to fill the gap). */
 	for (int i = 0; i < log_n; i++) {
 		if (strncmp(log_buf[i].number, number, CALL_NUM_MAX) == 0) {
@@ -126,14 +136,39 @@ static void calllog_add(const char *number, const char *name,
 	copy_str(e->name, name, CALL_NAME_MAX);
 	e->type    = (unsigned char)type;
 	e->dur_sec = dur_sec;
+	if (!number[0]) {
+		pending_fix_idx = log_n - 1;
+	}
 	calllog_save();
 }
 
-/* Resolve a number to a saved contact name into cur_name (else ""). */
+/* Backfill the number into the still-pending call-log entry (reject/miss
+ * whose number wasn't known yet), even though the call has already ended.
+ * No-op if the log has moved on (another call logged since) or the number
+ * is still unknown. */
+static void calllog_patch_pending(const char *number)
+{
+	if (pending_fix_idx < 0 || pending_fix_idx >= log_n || !number[0]) {
+		return;
+	}
+	struct call_log_entry *e = &log_buf[pending_fix_idx];
+	/* Phone is standalone in the demo — no address book, so only the number
+	 * is patched in; the name stays empty and the UI shows the number. */
+	copy_str(e->number, number, CALL_NUM_MAX);
+	copy_str(e->name, "", CALL_NAME_MAX);
+	pending_fix_idx = -1;
+	calllog_save();
+	if (log_observer) {
+		log_observer();
+	}
+}
+
+/* Demo Phone is standalone (no address book) — the caller is always shown by
+ * number, so the resolved name is always empty. */
 static void resolve_name(const char *number)
 {
-	const struct contact *c = contacts_find_by_phone(number);
-	copy_str(cur_name, c ? c->name : "", CALL_NAME_MAX);
+	(void)number;
+	cur_name[0] = '\0';
 }
 
 static void set_state(enum tel_state s)
@@ -316,6 +351,29 @@ void telephony_on_incoming(const char *number)
     set_state(TEL_INCOMING);
 }
 
+/* Fill in the caller's number once it becomes known after the incoming-call
+ * screen already showed blank (CLIP arrived after our wait window). No state
+ * transition — just backfills cur_number/name and re-renders. */
+void telephony_update_caller_id(const char *number)
+{
+    if (!number || !number[0])
+        return;
+    if (state == TEL_INCOMING || state == TEL_ACTIVE) {
+        if (cur_number[0])
+            return;
+        copy_str(cur_number, number, CALL_NUM_MAX);
+        resolve_name(number);
+        cur_info.name   = cur_name[0] ? cur_name : NULL;
+        cur_info.number = cur_number;
+        gui_logf("telephony: caller id resolved late: %s\n", cur_name[0] ? cur_name : cur_number);
+        if (observer) observer(state);
+        return;
+    }
+    /* Call already ended (rejected/missed before CLIP arrived) — patch the
+     * call-log entry directly instead of the live call state. */
+    calllog_patch_pending(number);
+}
+
 void telephony_on_connected(void)
 {
     if (state != TEL_DIALING && state != TEL_INCOMING)
@@ -347,11 +405,9 @@ void telephony_on_remote_end(int is_missed)
  * already moved state to IDLE, so telephony_on_remote_end would early-return. */
 void telephony_log_missed_direct(const char *number)
 {
-    char name[CALL_NAME_MAX];
-    const struct contact *c = contacts_find_by_phone(number);
-    copy_str(name, c ? c->name : "", sizeof(name));
-    gui_logf("telephony: missed (ccwa) %s\n", name[0] ? name : number);
-    calllog_add(number, name, CALL_MISSED, 0);
+    /* No address book in the demo — log by number, empty name. */
+    gui_logf("telephony: missed (ccwa) %s\n", number);
+    calllog_add(number, "", CALL_MISSED, 0);
     if (log_observer) log_observer();
 }
 
@@ -377,4 +433,21 @@ const struct call_log_entry *telephony_log_get(int index)
 		return NULL;
 	}
 	return &log_buf[log_n - 1 - index]; /* 0 = newest */
+}
+
+void telephony_calllog_delete(int index)
+{
+	if (index < 0 || index >= log_n) {
+		return;
+	}
+	/* `index` is display order (0 = newest); map to the storage slot, then
+	 * shift the tail up over it. The caller repopulates its own list. */
+	int s = log_n - 1 - index;
+	gui_logf("telephony: delete log %s\n", log_buf[s].number);
+	for (int i = s; i < log_n - 1; i++) {
+		log_buf[i] = log_buf[i + 1];
+	}
+	log_n--;
+	pending_fix_idx = -1;   /* positions shifted → drop any pending backfill */
+	calllog_save();
 }

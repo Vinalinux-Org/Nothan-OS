@@ -54,10 +54,12 @@ static void pointer_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 		data->state = LV_INDEV_STATE_RELEASED;
 	}
 
-	/* Log on leading edge only — ROTATION_270: logical (x,y) = (H-1-phy_y, phy_x). */
+	/* Log on leading edge only — must mirror lv_display_rotate_point's actual
+	 * ROTATION_270 formula (point->x = phy_y; point->y = hor_res-1-phy_x) or
+	 * the logged coordinate won't match where LVGL really hit-tests. */
 	if (pressed && !was_pressed) {
-		int lx = PHYS_H - 1 - (int)last_y;
-		int ly = (int)last_x;
+		int lx = (int)last_y;
+		int ly = PHYS_W - 1 - (int)last_x;
 		gui_logf("touch: (%d, %d)\n", lx, ly);
 	}
 	was_pressed = pressed;

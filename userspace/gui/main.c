@@ -12,13 +12,12 @@
 #include "port/lv_port_disp.h"
 #include "port/lv_port_indev.h"
 #include "core/nav.h"
+#include "core/log.h"
 #include "screens/boot.h"
 #include "screens/home.h"
 #include "core/call_ui.h"
-#include "services/contacts.h"
 #include "services/messages.h"
 #include "services/telephony.h"
-#include "services/clear.h"
 #include "services/modem_client.h"
 #include "../lib/syscall.h"
 
@@ -40,7 +39,9 @@ void main(void)
 
 	nav_init();
 
-	contacts_init();
+	/* SMS + call log persist on the SD card and load here; there is no
+	 * boot-time wipe, so a swipe-deleted thread/call stays gone across
+	 * reboots. The demo has no address book — Phone/Messages show numbers. */
 	messages_init();
 	telephony_init();
 	call_ui_init();
@@ -57,12 +58,24 @@ void main(void)
 
 	unsigned long last_tick = getticks();
 	unsigned long boot_t    = last_tick;
+	unsigned long mem_t     = last_tick;
 	int           on_home   = 0;
 
 	while (1) {
 		unsigned long now = getticks();
 		lv_tick_inc((uint32_t)(now - last_tick));
 		last_tick = now;
+
+		/* Pool-usage heartbeat — surfaces LVGL heap pressure so an
+		 * lv_array_at/data==NULL assert can be traced to exhaustion. */
+		if (now - mem_t >= 3000) {
+			mem_t = now;
+			lv_mem_monitor_t mon;
+			lv_mem_monitor(&mon);
+			gui_logf("mem used=%u%% free=%uB frag=%u%% peak=%uB\n",
+				 (unsigned)mon.used_pct, (unsigned)mon.free_size,
+				 (unsigned)mon.frag_pct, (unsigned)mon.max_used);
+		}
 
 		if (!on_home && (now - boot_t) >= BOOT_MS) {
 			nav_set_root(home_create, NULL);

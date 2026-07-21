@@ -21,3 +21,9 @@ _binary_user_gui_end:
 _binary_user_phone_daemon_start:
 	.incbin	"build/phone_daemon.usr"
 _binary_user_phone_daemon_end:
+
+	.globl	_binary_user_storage_daemon_start
+	.globl	_binary_user_storage_daemon_end
+_binary_user_storage_daemon_start:
+	.incbin	"build/storage_daemon.usr"
+_binary_user_storage_daemon_end:

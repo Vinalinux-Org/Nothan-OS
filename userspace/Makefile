@@ -27,9 +27,17 @@ LVGL_LIB  := $(BUILD)/liblvgl.a
 LVGL_CFLAGS := $(CFLAGS) -I lib/lvgl -DLV_CONF_INCLUDE_SIMPLE \
                -Wno-unused-variable -Wno-type-limits -Wno-sign-compare -O1
 
-.PHONY: all clean size
+.PHONY: all clean size test-sms-rx
 
-all: $(BUILD)/shell.bin $(BUILD)/gui.bin $(BUILD)/phone_daemon.bin
+all: $(BUILD)/shell.bin $(BUILD)/gui.bin $(BUILD)/phone_daemon.bin $(BUILD)/storage_daemon.bin
+
+# Host unit test for the incoming multipart-SMS reassembly (sms_rx.c).
+# Built with the native gcc + ASan/UBSan — no target hardware needed.
+test-sms-rx:
+	@mkdir -p $(BUILD)
+	gcc -g -O0 -Wall -fsanitize=address,undefined \
+	    phone_daemon/sms_rx.c phone_daemon/test/sms_rx_test.c -o $(BUILD)/sms_rx_test
+	./$(BUILD)/sms_rx_test
 
 $(BUILD)/lib/crt0.o: lib/crt0.S | $(BUILD)/lib
 	$(CC) $(AFLAGS) -c -o $@ $<
@@ -48,7 +56,7 @@ $(BUILD)/shell.bin: $(BUILD)/shell.elf
 # Phone daemon (modem backend) — links like the shell: crt0 + -lgcc, no newlib.
 # Bare-metal flags: no poll()/clock_gettime()/usleep() (use getticks/yield).
 PD_SRCS   := phone_daemon/phone_daemon.c phone_daemon/phone_frame.c phone_daemon/json.c \
-             lib/mem.c
+             phone_daemon/sms_rx.c lib/mem.c
 PD_OBJS   := $(patsubst %.c,$(BUILD)/%.o,$(PD_SRCS))
 PD_CFLAGS := $(CFLAGS) -DPD_NO_POLL -DPD_NO_CLOCK -DPD_NO_USLEEP \
              -Wno-unused-function -Wno-unused-variable
@@ -66,6 +74,20 @@ $(BUILD)/phone_daemon.elf: $(CRT0) $(PD_OBJS)
 $(BUILD)/phone_daemon.bin: $(BUILD)/phone_daemon.elf
 	$(OBJCOPY) -O binary $< $@
 
+# Storage daemon (FAT-write backend) — links like the shell: crt0 + -lgcc, no newlib.
+SD_SRCS   := storage_daemon/storage_daemon.c
+SD_OBJS   := $(patsubst %.c,$(BUILD)/%.o,$(SD_SRCS))
+
+$(BUILD)/storage_daemon/%.o: storage_daemon/%.c | $(BUILD)/storage_daemon
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/storage_daemon.elf: $(CRT0) $(SD_OBJS)
+	$(CC) -nostdlib -T $(LDS) -o $@ $^ -lgcc
+	$(OBJDUMP) -d $@ > $(BUILD)/storage_daemon.dis
+
+$(BUILD)/storage_daemon.bin: $(BUILD)/storage_daemon.elf
+	$(OBJCOPY) -O binary $< $@
+
 # LVGL build rules
 $(BUILD)/$(LVGL_DIR)/%.o: $(LVGL_DIR)/%.c | $(LVGL_LIB_DIRS)
 	mkdir -p $(dir $@)
@@ -81,9 +103,8 @@ GUI_SRCS := gui/main.c \
             gui/services/contacts.c gui/services/messages.c gui/services/telephony.c \
             gui/services/modem_client.c \
             gui/services/storage.c \
-            gui/services/clear.c \
             gui/widgets/status_bar.c gui/widgets/app_tile.c gui/widgets/nav_bar.c \
-            gui/widgets/app_header.c gui/widgets/avatar.c \
+            gui/widgets/app_header.c gui/widgets/avatar.c gui/widgets/swipe_row.c \
             gui/screens/boot.c gui/screens/home.c \
             gui/screens/contacts_list.c gui/screens/contact_detail.c \
             gui/screens/contacts_add.c \
@@ -112,7 +133,7 @@ $(BUILD)/gui.bin: $(BUILD)/gui.elf
 
 LVGL_LIB_DIRS := $(sort $(dir $(LVGL_OBJS)))
 
-DIRS := $(BUILD)/lib $(BUILD)/sh $(BUILD)/phone_daemon \
+DIRS := $(BUILD)/lib $(BUILD)/sh $(BUILD)/phone_daemon $(BUILD)/storage_daemon \
         $(BUILD)/gui/port $(BUILD)/gui/core $(BUILD)/gui/services \
         $(BUILD)/gui/widgets $(BUILD)/gui/screens \
         $(BUILD)/gui/phone_daemon

@@ -79,8 +79,15 @@ void                      telephony_set_log_observer(tel_log_changed_fn cb);
 /* Recent-calls log. index 0 is the most recent. */
 int                          telephony_log_count(void);
 const struct call_log_entry *telephony_log_get(int index);
+/* Delete one log entry by display index (0 = newest). Caller repopulates. */
+void                         telephony_calllog_delete(int index);
 
 /* Log a missed call without a state transition (for CCWA callers). */
 void telephony_log_missed_direct(const char *number);
+
+/* Backfill the caller's number if it arrives after the call screen already
+ * showed blank (late +CLIP). No-op unless a call is in progress and the
+ * number is still unknown. */
+void telephony_update_caller_id(const char *number);
 
 #endif

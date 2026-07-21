@@ -1,5 +1,5 @@
 /*
- * widgets/avatar.c - Round gradient avatar with a single initial
+ * widgets/avatar.c - Round gradient avatar with a single initial or an icon
  *
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
@@ -7,8 +7,9 @@
 #include "avatar.h"
 #include "../theme/theme.h"
 
-lv_obj_t *avatar_create(lv_obj_t *parent, char initial, int size,
-			const lv_font_t *font)
+/* Shared body: the accent-gradient circle plus one centered letter/glyph. */
+static lv_obj_t *avatar_build(lv_obj_t *parent, const char *text, int size,
+			      const lv_font_t *font)
 {
 	lv_obj_t *av = lv_obj_create(parent);
 	lv_obj_remove_style_all(av);
@@ -21,11 +22,23 @@ lv_obj_t *avatar_create(lv_obj_t *parent, char initial, int size,
 	lv_obj_clear_flag(av, LV_OBJ_FLAG_SCROLLABLE);
 	lv_obj_clear_flag(av, LV_OBJ_FLAG_CLICKABLE);
 
-	char s[2] = { initial, '\0' };
 	lv_obj_t *lbl = lv_label_create(av);
-	lv_label_set_text(lbl, s);
+	lv_label_set_text(lbl, text);
 	lv_obj_set_style_text_color(lbl, theme_color(THEME_TEXT), 0);
 	lv_obj_set_style_text_font(lbl, font, 0);
 	lv_obj_center(lbl);
 	return av;
+}
+
+lv_obj_t *avatar_create(lv_obj_t *parent, char initial, int size,
+			const lv_font_t *font)
+{
+	char s[2] = { initial, '\0' };
+	return avatar_build(parent, s, size, font);
+}
+
+lv_obj_t *avatar_create_icon(lv_obj_t *parent, const char *symbol, int size,
+			     const lv_font_t *font)
+{
+	return avatar_build(parent, symbol, size, font);
 }

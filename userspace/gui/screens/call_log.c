@@ -18,6 +18,7 @@
 #include "../widgets/app_header.h"
 #include "../widgets/nav_bar.h"
 #include "../widgets/avatar.h"
+#include "../widgets/swipe_row.h"
 #include "../services/telephony.h"
 #include "../services/modem_client.h"
 #include "../../lib/string.h"
@@ -39,9 +40,11 @@ static void on_keypad(lv_event_t *e)
 	nav_push(dialer_create, NULL);
 }
 
-static void on_row(lv_event_t *e)
+/* Tap on a row (not a swipe) → call that number back. `user` is the row's
+ * stable number buffer, so it is immune to the log shifting under us. */
+static void on_dial(void *user)
 {
-	const char *number = (const char *)lv_event_get_user_data(e);
+	const char *number = (const char *)user;
 	if (!number || !number[0]) return;
 	if (!modem_net_registered()) {
 		gui_toast("No network");
@@ -49,6 +52,24 @@ static void on_row(lv_event_t *e)
 	}
 	gui_logf("event: call back %s\n", number);
 	telephony_dial(number);
+}
+
+static void populate(void);
+
+/* Deferred delete — run outside event dispatch (lv_async_call) so the row
+ * objects, including the delete button being clicked, are freed only after
+ * LVGL finishes sending the event. */
+static void delete_log_async(void *p)
+{
+	int idx = (int)(long)p;
+	telephony_calllog_delete(idx);
+	populate();
+}
+
+static void on_delete(lv_event_t *e)
+{
+	int idx = (int)(long)lv_event_get_user_data(e);
+	lv_async_call(delete_log_async, (void *)(long)idx);
 }
 
 /* "Outgoing · 02:14" / "Incoming · 00:45" / "Missed" */
@@ -71,27 +92,29 @@ static void add_row(lv_obj_t *list, const struct call_log_entry *en, int idx)
 	int missed = (en->type == CALL_MISSED);
 	const char *title = en->name[0] ? en->name : en->number;
 
-	/* Snapshot number into stable buffer — on_row reads this instead of
-	 * telephony_log_get(idx) so index-shift after concurrent calllog_add
+	/* Snapshot number into a stable buffer — on_dial reads this instead of
+	 * telephony_log_get(idx) so index-shift after a concurrent calllog_add
 	 * cannot cause a wrong number to be dialled. */
 	strncpy(row_num_buf[idx], en->number, sizeof(row_num_buf[0]) - 1);
 	row_num_buf[idx][sizeof(row_num_buf[0]) - 1] = '\0';
 
-	lv_obj_t *row = lv_button_create(list);
-	lv_obj_remove_style_all(row);
-	lv_obj_set_size(row, lv_pct(100), ROW_H);
-	lv_obj_set_style_radius(row, RADIUS_MD, 0);
-	lv_obj_set_style_bg_color(row, theme_color(THEME_TEXT), LV_STATE_PRESSED);
-	lv_obj_set_style_bg_opa(row, LV_OPA_10, LV_STATE_PRESSED);
+	lv_obj_t *del;
+	lv_obj_t *row = swipe_row_create(list, ROW_H, row_num_buf[idx], &del);
+	lv_obj_add_event_cb(del, on_delete, LV_EVENT_CLICKED, (void *)(long)idx);
+
 	lv_obj_set_style_pad_hor(row, 8, 0);
 	lv_obj_set_style_pad_column(row, 12, 0);
 	lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
 	lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
 			      LV_FLEX_ALIGN_CENTER);
-	lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-	lv_obj_add_event_cb(row, on_row, LV_EVENT_CLICKED, row_num_buf[idx]);
 
-	avatar_create(row, title[0], AVATAR_SZ, &lv_font_montserrat_28);
+	/* No address book in the demo → no initial; show a neutral phone glyph
+	 * (or the name's letter once contacts exist again). */
+	if (en->name[0])
+		avatar_create(row, en->name[0], AVATAR_SZ, &lv_font_montserrat_28);
+	else
+		avatar_create_icon(row, LV_SYMBOL_CALL, AVATAR_SZ,
+				   &lv_font_montserrat_28);
 
 	lv_obj_t *col = lv_obj_create(row);
 	lv_obj_remove_style_all(col);
@@ -129,6 +152,9 @@ static void populate(void)
 	if (!list_obj) {
 		return;
 	}
+	/* Rows are about to be freed — drop stale swipe state and (re)set the tap
+	 * handler for the rows built below. */
+	swipe_row_reset(on_dial);
 	lv_obj_clean(list_obj);
 
 	int n = telephony_log_count();
@@ -161,6 +187,7 @@ static void on_screen_unloaded(lv_event_t *e)
 	(void)e;
 	list_obj = NULL;
 	telephony_set_log_observer(NULL);
+	swipe_row_reset(NULL);   /* drop references to rows being freed */
 }
 
 void call_log_create(lv_obj_t *screen, void *arg)
@@ -190,8 +217,13 @@ void call_log_create(lv_obj_t *screen, void *arg)
 	lv_obj_set_flex_align(list_obj, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
 			      LV_FLEX_ALIGN_START);
 
+	lv_obj_add_event_cb(list_obj, swipe_row_scroll_begin_cb, LV_EVENT_SCROLL_BEGIN, NULL);
+
 	lv_obj_add_event_cb(screen, on_screen_loaded, LV_EVENT_SCREEN_LOADED, NULL);
-	lv_obj_add_event_cb(screen, on_screen_unloaded, LV_EVENT_SCREEN_UNLOAD_START, NULL);
+	/* Null list_obj only on real delete, not every navigate-away, so the
+	 * retained screen refreshes on pop-back (SCREEN_LOADED) instead of
+	 * no-op'ing on a nulled pointer. */
+	lv_obj_add_event_cb(screen, on_screen_unloaded, LV_EVENT_DELETE, NULL);
 	telephony_set_log_observer(on_log_changed);
 	populate();
 }

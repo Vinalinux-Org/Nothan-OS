@@ -18,7 +18,6 @@
 #include "../widgets/app_header.h"
 #include "../widgets/nav_bar.h"
 #include "../services/messages.h"
-#include "../services/contacts.h"
 
 #define INPUT_H     68
 #define BUBBLE_MAXW 240
@@ -26,6 +25,20 @@
 static int        chat_idx;
 static lv_obj_t  *chat_input;
 static lv_obj_t  *chat_list;
+
+/* An inbound message moves its thread to store index 0 (services/messages.c).
+ * Remap chat_idx by the same rule so an open thread keeps pointing at its own
+ * conversation. @moved_from = the pre-move index that jumped to the top.
+ * Harmless when no thread is open — chat_idx is re-set on the next open. */
+void sms_chat_reindex(int moved_from)
+{
+	if (chat_idx == moved_from) {
+		chat_idx = 0;
+	} else if (chat_idx < moved_from) {
+		chat_idx += 1;
+	}
+	/* chat_idx > moved_from: its position is unchanged */
+}
 
 
 static void add_bubble(lv_obj_t *list, const struct sms_message *m)
@@ -138,7 +151,13 @@ static void on_input_focus(lv_event_t *e)
 	lv_obj_set_height(chat_list,
 			  SCREEN_H - APP_HEADER_HEIGHT - GUI_KEYBOARD_HEIGHT - INPUT_H);
 	lv_obj_update_layout(chat_list);
-	lv_obj_scroll_by(chat_list, 0, -lv_obj_get_scroll_bottom(chat_list), LV_ANIM_OFF);
+	/* Only pin to the newest bubble when the thread actually overflows the
+	 * (now shorter) list. For a short thread scroll_bottom is NEGATIVE — the
+	 * unbounded scroll_by would then shove the top-aligned bubbles DOWN into
+	 * the middle. Leave a short thread pinned at the top instead. */
+	int32_t sb = lv_obj_get_scroll_bottom(chat_list);
+	if (sb > 0)
+		lv_obj_scroll_by(chat_list, 0, -sb, LV_ANIM_OFF);
 }
 
 static void on_input_blur(lv_event_t *e)
@@ -183,6 +202,10 @@ static lv_obj_t *build_input_bar(lv_obj_t *parent)
 	lv_obj_t *send = lv_button_create(bar);
 	lv_obj_remove_style_all(send);
 	lv_obj_set_size(send, 40, 40);
+	/* Visual size stays 40x40, but the circular target sits right at the
+	 * screen's right edge (worst spot for touch accuracy) — pad the actual
+	 * hit area by 12px on every side without changing how it looks. */
+	lv_obj_set_ext_click_area(send, 12);
 	lv_obj_set_style_radius(send, LV_RADIUS_CIRCLE, 0);
 	lv_obj_set_style_bg_opa(send, LV_OPA_COVER, 0);
 	lv_obj_set_style_bg_color(send, theme_color(THEME_ACCENT), 0);
@@ -207,8 +230,7 @@ void sms_chat_create(lv_obj_t *screen, void *arg)
 	chat_idx = (int)(long)arg;
 	const struct sms_conversation *c = sms_conversation_get(chat_idx);
 	const char *peer = c ? c->peer : NULL;
-	const struct contact *ct = peer ? contacts_find_by_phone(peer) : NULL;
-	const char *title = (ct && ct->name[0]) ? ct->name : (peer ? peer : "Chat");
+	const char *title = peer ? peer : "Chat";
 	app_header_create(screen, title, NULL);
 
 	lv_obj_t *input_bar = build_input_bar(screen);

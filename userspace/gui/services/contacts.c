@@ -61,14 +61,9 @@ static void remove_at(int index)
 /* Serialize the whole store to /CONTACTS.BIN. */
 static void contacts_save(void)
 {
-	struct contacts_blob blob;
-	blob.magic = CONTACTS_MAGIC;
-	blob.count = (unsigned int)count;
-	for (int i = 0; i < count; i++) {
-		blob.entries[i] = store[i];
-	}
-
-	storage_write(CONTACTS_PATH, &blob, sizeof(blob));
+	/* SD persistence disabled for the demo — contacts are seeded in RAM at
+	 * boot (see contacts_init). Kept as a no-op so the add/update/delete paths
+	 * still compile; session edits live in memory until reboot. */
 }
 
 /* Wipe the entire store and persist the empty state so the next boot
@@ -81,29 +76,30 @@ void contacts_clear(void)
 }
 
 /*
- * contacts_init() - Load persisted contacts, if any.
+ * contacts_init() - Seed the demo contacts in RAM (no SD persistence).
  *
- * On a valid file the saved entries replace the seeded mock. If the file
- * is missing/short/corrupt (or we are in the simulator) the mock stays.
+ * The first five numbers match the seeded SMS threads (services/messages.c) so
+ * the message list and caller ID resolve to names. ASCII names only — the
+ * built-in Montserrat font has no Vietnamese glyphs.
  */
 void contacts_init(void)
 {
-	struct contacts_blob blob;
-	int n = storage_read(CONTACTS_PATH, &blob, sizeof(blob));
-
-	if (n < (int)(sizeof(blob.magic) + sizeof(blob.count))) {
-		return;
+	static const struct { const char *name; const char *phone; } seed[] = {
+		{ "Phu Hai",     "0912345678" },
+		{ "Bui Hien",    "0905112233" },
+		{ "Minh Quan",   "0937445566" },
+		{ "Thanh Tung",  "0708123456" },
+		{ "Ngoc Anh",    "0967221144" },
+		{ "Hoang Nam",   "0349876543" },
+		{ "Thu Thao",    "0816998877" },
+	};
+	count = (int)(sizeof(seed) / sizeof(seed[0]));
+	if (count > MAX_CONTACTS) {
+		count = MAX_CONTACTS;
 	}
-	if (blob.magic != CONTACTS_MAGIC) {
-		return;
-	}
-	if (blob.count > MAX_CONTACTS) {
-		return;
-	}
-
-	count = (int)blob.count;
 	for (int i = 0; i < count; i++) {
-		store[i] = blob.entries[i];
+		copy_field(store[i].name,  seed[i].name,  CONTACT_NAME_MAX);
+		copy_field(store[i].phone, seed[i].phone, CONTACT_PHONE_MAX);
 	}
 }
 

@@ -30,6 +30,7 @@
 #include "pd_port.h"
 #include "json.h"
 #include "phone_frame.h"
+#include "sms_rx.h"
 
 /* errno storage for the port shim (declared extern in pd_port.h). */
 int errno;
@@ -72,7 +73,9 @@ int errno;
 #define POLL_TIMEOUT_MS 20      /* max idle between timer ticks            */
 #define IDLE_SLEEP_US   3000    /* fallback round-robin idle nap           */
 
-#define CLIP_WAIT_MS      2000  /* max wait for +CLIP after first RING      */
+#define CLIP_WAIT_MS      6000  /* max wait for +CLIP after first RING —
+                                  * this carrier's CLIP lands with the 2nd
+                                  * RING pulse, not the 1st (~3-5s cadence) */
 #define HB_INTERVAL_MS    10000 /* modem liveness heartbeat (AT)           */
 #define HB_TIMEOUT_MS     3000
 #define HB_MAX_FAIL       2     /* consecutive heartbeat misses → recover  */
@@ -1226,25 +1229,8 @@ enum { STEP_PLAIN, STEP_HEARTBEAT, STEP_SMS_HDR, STEP_SMS_RESULT,
 
 static unsigned char g_sms_concat_ref = 1;
 
-/* ── Incoming multipart SMS reassembly ───────────────────────────────
- * Text mode (CMGF=1) delivers each part as a separate +CMT URC with no
- * UDH exposed. We buffer parts from the same sender in a short time
- * window (SMS_CONCAT_COLLECT_MS after the last received part) and emit
- * one combined SMS_IN when the window expires. */
-#define SMS_CONCAT_IN_MAX       4       /* concurrent senders in flight  */
-#define SMS_CONCAT_COLLECT_MS   3000    /* window after last part arrival; Viettel SMSC delivers parts ~2s apart */
-#define SMS_CONCAT_TEXT_CAP     2048    /* max total reassembled UTF-8   */
-
-typedef struct {
-    int   active;
-    char  sender[CALLER_NUM_MAX];
-    char  ts[24];
-    char  text[SMS_CONCAT_TEXT_CAP];
-    int   text_len;
-    unsigned long expire_ms;
-} SmsConcatIn;
-
-static SmsConcatIn g_sms_concat_in[SMS_CONCAT_IN_MAX];
+/* Incoming multipart reassembly lives in sms_rx.c (length-based, host-tested).
+ * The daemon just decodes each part and feeds it to sms_rx_part(). */
 
 /* PDU hex body ≤ 310 B; text-mode SMS ≤ 162 B — PHONE_JSON_MAX bloats at_q to 65 KB BSS */
 #define AT_TEXT_MAX 1100   
@@ -1554,48 +1540,95 @@ void sms_body_hex_flush(void)
 
 void handle_ring(void)
 {
-    /* Ignore RING if already in a call or dialing (call waiting is handled
+    /* Ignore RING only if already in a call or dialing (call waiting is handled
      * separately via +CCWA — we log a missed call when the active call ends). */
-    if (cs.in_call || cs.outgoing || cs.pending_clip) {
-        printf("[pd] RING ignored (in_call=%d outgoing=%d pending_clip=%d)\n",
-               cs.in_call, cs.outgoing, cs.pending_clip);
+    if (cs.in_call || cs.outgoing) {
+        printf("[pd] RING ignored (in_call=%d outgoing=%d)\n",
+               cs.in_call, cs.outgoing);
+        return;
+    }
+    if (cs.pending_clip) {
+        /* Repeat RING for the same incoming call. If we still have no number,
+         * re-poll the call table — this modem emits +CLIP late (2nd RING),
+         * but AT+CLCC returns the number the network already delivered. */
+        if (!g_call_in_sent && !cs.caller_num[0]) {
+            printf("[pd] RING repeat — re-polling AT+CLCC for caller ID\n");
+            at_submit("AT+CLCC\r", 2000);
+        }
         return;
     }
     cs.pending_clip   = 1;
     g_call_in_sent    = 0;
     g_clip_deadline   = pd_now_ms() + CLIP_WAIT_MS;
+    printf("[pd] RING accepted — CLIP wait armed, now=%u deadline=%u\n",
+           (unsigned int)pd_now_ms(), (unsigned int)g_clip_deadline);
     fe_send_call_ring();
+    /* Actively pull the caller number instead of only waiting for the (late)
+     * +CLIP URC — the number is in the modem's call table from the network
+     * SETUP, so AT+CLCC returns it right on the first RING. */
+    at_submit("AT+CLCC\r", 2000);
+}
+
+/* Apply a caller number learned from +CLIP or +CLCC during a pending incoming
+ * call: record it and send CALL_IN once (or a snapshot if CALL_IN already went
+ * out empty). Empty numbers are ignored so a later/other source can still fill
+ * it — whichever of +CLIP / +CLCC produces a number first wins. */
+static void apply_incoming_number(const char *num)
+{
+    if (!cs.pending_clip || !num || !num[0]) {
+        return;
+    }
+    strncpy(cs.caller_num, num, sizeof(cs.caller_num) - 1);
+    cs.caller_num[sizeof(cs.caller_num) - 1] = '\0';
+    if (!g_call_in_sent) {
+        g_call_in_sent  = 1;
+        g_clip_deadline = 0;   /* cancel fallback + stop CLCC polling */
+        fe_send_call_in(num);
+    } else {
+        /* CALL_IN already went out with an empty number (wait window elapsed)
+         * — push a snapshot now instead of waiting up to READY_BEACON_MS for
+         * the FE to learn the real number. */
+        send_ready_snapshot();
+    }
 }
 
 void handle_clip(const char *line)
 {
     char num[CALLER_NUM_MAX];
+    printf("[pd] +CLIP line='%s' pending_clip=%d\n", line, cs.pending_clip);
     if (!cs.pending_clip) {
         return;
     }
     extract_quoted(line + 6, num, sizeof(num));
-    strncpy(cs.caller_num, num, sizeof(cs.caller_num) - 1);
-    cs.caller_num[sizeof(cs.caller_num) - 1] = '\0';
-    if (!g_call_in_sent) {
-        g_call_in_sent  = 1;
-        g_clip_deadline = 0;   /* cancel fallback */
-        fe_send_call_in(num);
-    }
+    printf("[pd] +CLIP parsed num='%s'\n", num);
+    apply_incoming_number(num);
 }
 
 /* Fallback: if CLIP never arrived before the deadline, send CALL_IN with
  * whatever number we have (possibly empty — caller withheld or no CLIP). */
 void clip_timer_tick(unsigned long now)
 {
+    static unsigned long s_last_wait_log = 0;
     if (!cs.pending_clip || g_call_in_sent) {
         return;
     }
     if (g_clip_deadline == 0 || now < g_clip_deadline) {
+        if (g_clip_deadline != 0 && now - s_last_wait_log >= 1000) {
+            s_last_wait_log = now;
+            printf("[pd] CLIP wait: now=%u deadline=%u (%d ms left)\n",
+                   (unsigned int)now, (unsigned int)g_clip_deadline,
+                   (int)(g_clip_deadline - now));
+            /* Keep polling the call table until a number lands (or timeout).
+             * Stops automatically once apply_incoming_number sets
+             * g_call_in_sent (early return at the top of this function). */
+            at_submit("AT+CLCC\r", 2000);
+        }
         return;
     }
     g_call_in_sent  = 1;
     g_clip_deadline = 0;
-    printf("[pd] CLIP timeout — sending CALL_IN with num='%s'\n", cs.caller_num);
+    printf("[pd] CLIP timeout — now=%u sending CALL_IN with num='%s'\n",
+           (unsigned int)now, cs.caller_num);
     fe_send_call_in(cs.caller_num);
 }
 
@@ -1651,6 +1684,16 @@ void handle_call_release(const char *reason)
         at_submit("AT+CEER\r", 2000);
 
     } else if (cs.pending_clip) {
+        if (!cs.caller_num[0] && strncmp(reason, "MISSED_CALL:", 12) == 0) {
+            /* CLIP never arrived in time, but "MISSED_CALL: <time> <number>"
+             * carries the number directly — use it as a fallback. */
+            const char *p = reason + 12;
+            while (*p == ' ') p++;      /* skip space before time token */
+            while (*p && *p != ' ') p++;/* skip time token (e.g. 08:08AM) */
+            while (*p == ' ') p++;      /* skip space before number */
+            strncpy(cs.caller_num, p, sizeof(cs.caller_num) - 1);
+            cs.caller_num[sizeof(cs.caller_num) - 1] = '\0';
+        }
         fe_send_call_miss(cs.caller_num);
     }
     cs.in_call = 0; cs.pending_clip = 0; cs.outgoing = 0;
@@ -1663,6 +1706,14 @@ void handle_clcc(const char *line)
 {
     char num[CALLER_NUM_MAX];
     extract_quoted(line + 6, num, sizeof(num));
+    if (cs.pending_clip) {
+        /* Response to our RING-time AT+CLCC poll: the quoted field is the
+         * caller number the network delivered in the SETUP. Fast path for
+         * when +CLIP is late or never arrives. Empty (withheld) → ignored. */
+        printf("[pd] +CLCC caller num='%s' (pending incoming)\n", num);
+        apply_incoming_number(num);
+        return;
+    }
     fe_send_call_stat(num, line + 6);
 }
 
@@ -1715,91 +1766,6 @@ static void handle_ccfc(const char *line)
         extract_quoted(p, num, sizeof(num));
     }
     fe_send_cf_state(0, status, num);
-}
-
-/* ── Incoming concat reassembly helpers ──────────────────────────── */
-
-static SmsConcatIn *sms_ci_find(const char *sender)
-{
-    int i;
-    for (i = 0; i < SMS_CONCAT_IN_MAX; i++) {
-        if (g_sms_concat_in[i].active &&
-            strncmp(g_sms_concat_in[i].sender, sender, CALLER_NUM_MAX - 1) == 0) {
-            return &g_sms_concat_in[i];
-        }
-    }
-    return NULL;
-}
-
-static SmsConcatIn *sms_ci_alloc(const char *sender, const char *ts)
-{
-    int i;
-    SmsConcatIn *oldest = NULL;
-    for (i = 0; i < SMS_CONCAT_IN_MAX; i++) {
-        if (!g_sms_concat_in[i].active) {
-            SmsConcatIn *sc = &g_sms_concat_in[i];
-            sc->active   = 1;
-            sc->text_len = 0;
-            sc->text[0]  = '\0';
-            strncpy(sc->sender, sender, sizeof(sc->sender) - 1);
-            sc->sender[sizeof(sc->sender) - 1] = '\0';
-            strncpy(sc->ts, ts ? ts : "", sizeof(sc->ts) - 1);
-            sc->ts[sizeof(sc->ts) - 1] = '\0';
-            return sc;
-        }
-        if (!oldest || g_sms_concat_in[i].expire_ms < oldest->expire_ms) {
-            oldest = &g_sms_concat_in[i];
-        }
-    }
-    /* evict oldest — flush it first */
-    if (oldest) {
-        printf("[pd] evict sender=%s to make room\n", oldest->sender);
-        fe_send_sms_in(oldest->sender, oldest->text, oldest->ts);
-        oldest->active   = 1;
-        oldest->text_len = 0;
-        oldest->text[0]  = '\0';
-        strncpy(oldest->sender, sender, sizeof(oldest->sender) - 1);
-        oldest->sender[sizeof(oldest->sender) - 1] = '\0';
-        strncpy(oldest->ts, ts ? ts : "", sizeof(oldest->ts) - 1);
-        oldest->ts[sizeof(oldest->ts) - 1] = '\0';
-        return oldest;
-    }
-    return NULL;
-}
-
-static void sms_ci_append(SmsConcatIn *sc, const char *text)
-{
-    int tlen = (int)strlen(text);
-    if (sc->text_len + tlen >= SMS_CONCAT_TEXT_CAP - 1) {
-        printf("[pd] concat buffer full, truncating\n");
-        tlen = SMS_CONCAT_TEXT_CAP - 1 - sc->text_len;
-        if (tlen <= 0) {
-            return;
-        }
-    }
-    memcpy(sc->text + sc->text_len, text, (size_t)tlen);
-    sc->text_len += tlen;
-    sc->text[sc->text_len] = '\0';
-}
-
-static void sms_ci_flush(SmsConcatIn *sc)
-{
-    if (sc->active && sc->text_len > 0) {
-        fe_send_sms_in(sc->sender, sc->text, sc->ts);
-    }
-    sc->active   = 0;
-    sc->text_len = 0;
-    sc->text[0]  = '\0';
-}
-
-void sms_ci_tick(unsigned long now)
-{
-    int i;
-    for (i = 0; i < SMS_CONCAT_IN_MAX; i++) {
-        if (g_sms_concat_in[i].active && now >= g_sms_concat_in[i].expire_ms) {
-            sms_ci_flush(&g_sms_concat_in[i]);
-        }
-    }
 }
 
 /* +CMT header → next non-empty line is the body (set pending). */
@@ -1904,6 +1870,11 @@ void handle_sms_body(const char *raw)
         strncpy(text, raw, (size_t)(buf_sz - 1)); text[buf_sz - 1] = '\0';
     }
 
+    /* Part length in SMS characters BEFORE stripping — UCS-2 code units
+     * (hexlen/4) or GSM-7 char count. sms_rx uses this to tell a full
+     * "more-coming" part from a short final/standalone part. */
+    int part_chars = is_ucs2 ? (raw_len / 4) : (int)strlen(text);
+
     /* Normalize diacritics → ASCII so LVGL Montserrat can render the text.
      * Covers both NFC (precomposed, from UCS-2) and NFD (combining marks). */
     {
@@ -1913,20 +1884,12 @@ void handle_sms_body(const char *raw)
     }
 
     if (kind == BODY_CMT) {
-        /* Buffer in concat window so multipart SMS arrive as one message.
-         * Single-part SMS is emitted after SMS_CONCAT_COLLECT_MS of silence
-         * from this sender — acceptable latency in exchange for correct
-         * reassembly of multipart messages delivered in text mode (no UDH). */
-        SmsConcatIn *sc = sms_ci_find(g_body_sender);
-        if (!sc) {
-            sc = sms_ci_alloc(g_body_sender, g_body_ts);
-        }
-        if (sc) {
-            sms_ci_append(sc, text);
-            sc->expire_ms = pd_now_ms() + SMS_CONCAT_COLLECT_MS;
-        } else {
-            fe_send_sms_in(g_body_sender, text, g_body_ts);
-        }
+        /* Reassemble multipart SMS by part length (see sms_rx.c): full parts
+         * accumulate, a short part flushes the whole message. Keeps two
+         * separate short messages from the same sender apart, and joins the
+         * parts of one message regardless of inter-part delay. */
+        sms_rx_part(g_body_sender, g_body_ts, text, part_chars, is_ucs2,
+                    pd_now_ms());
     } else {
         fe_send_sms_list(g_body_index, g_body_stat, g_body_sender, g_body_ts, text);
     }
@@ -2896,6 +2859,21 @@ void handle_cmd_sms(const char *json)
     }
     json_get_int(json, "cid", &cid);
 
+    /* Strip display-formatting chars (spaces, dashes) — only keep digits, +, *, # */
+    {
+        int i, w = 0;
+        for (i = 0; num[i]; i++) {
+            char c = num[i];
+            if ((c >= '0' && c <= '9') || c == '+' || c == '*' || c == '#')
+                num[w++] = c;
+        }
+        num[w] = '\0';
+    }
+    if (!num[0]) {
+        fe_send_sms_err(-1, "empty number", cid);
+        return;
+    }
+
     if (at_has_sms_pending()) {
         printf("[pd] REJECT cid=%d: sms already in flight\n", cid);
         fe_send_sms_err(503, "sms busy", cid);
@@ -3612,7 +3590,7 @@ static void super_loop(void)
                 && now >= g_body_hex_flush_ms) {
             sms_body_hex_flush();
         }
-        sms_ci_tick(now);
+        sms_rx_tick(now);
         rel_retransmit_tick(now);
         recovery_tick(now);
         check_init_done();
@@ -3632,6 +3610,7 @@ int main(void)
 
     memset(&cs, 0, sizeof(cs));
     cs.last_cause = -1;
+    sms_rx_init(fe_send_sms_in);   /* incoming multipart reassembly sink */
 
     fd_sim = open_uart(SIM_DEV);
     if (fd_sim < 0) {

@@ -13,7 +13,6 @@
 #include "../widgets/nav_bar.h"
 #include "call_log.h"
 #include "sms_list.h"
-#include "contacts_list.h"
 
 #define STATUS_H   STATUS_BAR_HEIGHT
 #define SEARCH_H   40
@@ -29,9 +28,12 @@ struct app_def {
 };
 
 static const struct app_def apps[] = {
-	{ LV_SYMBOL_CALL,      "Phone",    0x7C3AED, call_log_create },
+	{ LV_SYMBOL_CALL,      "Phone",    0x22C55E, call_log_create },
 	{ LV_SYMBOL_ENVELOPE,  "Messages", 0x3B82F6, sms_list_create },
-	{ LV_SYMBOL_LIST,      "Contacts", 0xEC4899, contacts_list_create },
+	/* Contacts is a decorative stub for the demo — the address-book service
+	 * (contacts.c) stays, used by Phone/Messages to resolve names, but the
+	 * standalone Contacts screen is disabled (no builder). */
+	{ LV_SYMBOL_LIST,      "Contacts", 0xEC4899 },
 	{ LV_SYMBOL_GPS,       "Maps",     0xF59E0B },
 	{ LV_SYMBOL_EDIT,      "Notes",    0xEAB308 },
 	{ LV_SYMBOL_SETTINGS,  "Settings", 0x64748B },
@@ -76,10 +78,12 @@ void home_scroll_to_end(int to_end, int animated)
 	}
 }
 
+/* Dock shortcuts. Phone + Messages open; Contacts + the last slot are
+ * decorative stubs (no builder) — same visual, just not wired to a screen. */
 static const struct app_def dock_apps[4] = {
 	{ LV_SYMBOL_CALL,     NULL, 0x22C55E, call_log_create },
 	{ LV_SYMBOL_ENVELOPE, NULL, 0x3B82F6, sms_list_create },
-	{ LV_SYMBOL_LIST,     NULL, 0xEC4899, contacts_list_create },
+	{ LV_SYMBOL_LIST,     NULL, 0xEC4899 },
 	{ LV_SYMBOL_IMAGE,    NULL, 0x64748B },
 };
 
@@ -221,6 +225,14 @@ void home_create(lv_obj_t *parent, void *arg)
 					      apps[i].label, apps[i].color);
 		lv_obj_set_grid_cell(t, LV_GRID_ALIGN_CENTER, i % 4, 1,
 				     LV_GRID_ALIGN_START, i / 4, 1);
+		/* Wire the click, same as the dock: only real apps (with a
+		 * builder — Phone/Messages/Contacts) open a screen; the rest
+		 * stay decorative placeholders. */
+		if (apps[i].builder) {
+			lv_obj_t *badge = lv_obj_get_child(t, 0);
+			lv_obj_add_event_cb(badge, on_app_tile, LV_EVENT_CLICKED,
+					    (void *)&apps[i]);
+		}
 	}
 
 	s_grid = grid;
