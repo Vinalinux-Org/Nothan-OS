@@ -9,6 +9,7 @@
 #include <nothan/mm.h>
 #include <nothan/slab.h>
 #include <nothan/printk.h>
+#include <asm/irqflags.h>
 
 struct rq runqueue;
 int need_resched;
@@ -130,15 +131,27 @@ void sched_init(void)
 }
 
 /**
- * schedule() - Pick the next task and switch to it
+ * __schedule() - Core reschedule: pick the next task and switch to it
  *
- * The idle task is always on the runqueue, so pick_next_task()
- * never returns NULL.
+ * PRECONDITION:  IRQs are already masked by the caller.
+ * POSTCONDITION: IRQs are still masked on return; the caller restores them.
+ *
+ * Keeping IRQs masked across the whole body lets a blocking primitive
+ * (wait_event, wait_for_completion) commit the "add self to wait queue +
+ * set state + schedule" sequence atomically, closing the lost-wakeup and
+ * double-enqueue races.  IRQs must also stay masked across __switch_to so a
+ * timer IRQ cannot fire mid-stack-switch.
+ *
+ * IRQs are re-enabled by the caller:
+ *  - schedule() wrapper: local_irq_restore() after __schedule() returns
+ *  - task_entry, for newly-created tasks (cpsie i at entry)
+ *  - vector_irq path: cpsid i after the bl schedule (kept as-is)
+ *
+ * The idle task is always on the runqueue, so pick_next_task() never
+ * returns NULL under normal operation.
  */
-void schedule(void)
+void __schedule(void)
 {
-	__asm__ __volatile__ ("cpsid i" : : : "memory");
-
 	reap_dead();
 
 	struct task_struct *prev = runqueue.curr;
@@ -150,27 +163,14 @@ void schedule(void)
 	if (!next) {
 		/* Should never happen — idle task is always available. */
 		runqueue.curr = NULL;
-		__asm__ __volatile__ ("cpsie i" : : : "memory");
 		return;
 	}
 
 	runqueue.curr = next;
 	need_resched = 0;
 
-	/*
-	 * Keep IRQs disabled across __switch_to to prevent a timer IRQ
-	 * from firing between "ldr sp, [next]" and "ldmfd ... pc" inside
-	 * __switch_to, which would corrupt the task stack mid-switch.
-	 *
-	 * IRQs are re-enabled:
-	 *  - Here, after __switch_to returns (prev resumed after re-schedule)
-	 *  - In task_entry, for newly-created tasks (cpsie i at entry)
-	 *  - In vector_irq path: cpsid after schedule + rfefd restores CPSR
-	 */
-	if (prev == next) {
-		__asm__ __volatile__ ("cpsie i" : : : "memory");
+	if (prev == next)
 		return;
-	}
 
 	sched_running = true;
 
@@ -194,8 +194,24 @@ void schedule(void)
 			: : "r" (next));
 	}
 
-	/* Reached only when prev is resumed by a later __switch_to. */
-	__asm__ __volatile__ ("cpsie i" : : : "memory");
+	/* Reached only when prev is resumed by a later __switch_to; IRQs
+	 * are still masked (the resuming task switched us in under mask). */
+}
+
+/**
+ * schedule() - Reschedule wrapper for ordinary callers
+ *
+ * Masks IRQs, runs the core reschedule, then restores the caller's prior
+ * IRQ state.  Blocking primitives that already hold IRQs masked call
+ * __schedule() directly instead.
+ */
+void schedule(void)
+{
+	unsigned long flags;
+
+	local_irq_save(flags);
+	__schedule();
+	local_irq_restore(flags);
 }
 
 /*

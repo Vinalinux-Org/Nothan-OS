@@ -134,6 +134,7 @@ void enqueue_task(struct rq *rq, struct task_struct *p);
 void dequeue_task(struct rq *rq, struct task_struct *p);
 struct task_struct *pick_next_task(struct rq *rq);
 void schedule(void);
+void __schedule(void);	/* core reschedule; caller must hold IRQs masked */
 void scheduler_tick(void);
 
 extern struct rq runqueue;
