@@ -27,8 +27,8 @@ static struct list_head dead_list;
 void sched_defer_free(struct task_struct *tsk)
 {
 	list_add(&tsk->rt.run_list, &dead_list);
-	printk("[DEAD] queued pid=%d kstack=%p\n",
-	       tsk->pid, tsk->kstack_base);
+	pr_debug("[DEAD] queued pid=%d kstack=%p\n",
+		 tsk->pid, tsk->kstack_base);
 }
 
 static void reap_dead(void)
@@ -41,7 +41,7 @@ static void reap_dead(void)
 
 		if (z == runqueue.curr)
 			continue;	/* never free the stack we're running on */
-		printk("[REAP] free pid=%d kstack=%p\n", z->pid, z->kstack_base);
+		pr_debug("[REAP] free pid=%d kstack=%p\n", z->pid, z->kstack_base);
 		list_del(&rt->run_list);
 		if (z->kstack_base)
 			kfree(z->kstack_base);

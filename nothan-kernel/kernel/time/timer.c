@@ -6,29 +6,15 @@
 
 #include <nothan/timer.h>
 #include <nothan/time.h>
+#include <asm/irqflags.h>
 
 static LIST_HEAD(timer_head);		/* sorted by expires (ascending) */
 
 /*
- * Disable / enable IRQ helpers.  On a single core these are the only
- * mutual-exclusion needed between process context and the tick ISR.
+ * On a single core, masking IRQs is the only mutual-exclusion needed
+ * between process context and the tick ISR.  Use the shared
+ * local_irq_save/restore primitive (asm/irqflags.h).
  */
-static inline unsigned long irq_save(void)
-{
-	unsigned long cpsr;
-	__asm__ __volatile__ (
-		"mrs	%0, cpsr\n"
-		"cpsid	i\n"
-		: "=r" (cpsr)
-	);
-	return cpsr;
-}
-
-static inline void irq_restore(unsigned long cpsr)
-{
-	if (!(cpsr & 0x80))
-		__asm__ __volatile__ ("cpsie i" : : : "memory");
-}
 
 /**
  * add_timer() - arm a one-shot timer
@@ -39,7 +25,8 @@ static inline void irq_restore(unsigned long cpsr)
  */
 void add_timer(struct timer_list *timer)
 {
-	unsigned long flags = irq_save();
+	unsigned long flags;
+	local_irq_save(flags);
 	struct list_head *pos;
 
 	list_for_each(pos, &timer_head) {
@@ -54,7 +41,7 @@ void add_timer(struct timer_list *timer)
 	pos->prev->next = &timer->entry;
 	pos->prev = &timer->entry;
 
-	irq_restore(flags);
+	local_irq_restore(flags);
 }
 
 /**
@@ -69,16 +56,17 @@ int del_timer(struct timer_list *timer)
 	if (!timer->entry.next)
 		return 0;
 
-	unsigned long flags = irq_save();
+	unsigned long flags;
+	local_irq_save(flags);
 
 	if (!timer->entry.next) {
-		irq_restore(flags);
+		local_irq_restore(flags);
 		return 0;
 	}
 
 	list_del(&timer->entry);
 	timer->entry.next = NULL;	/* mark detached */
-	irq_restore(flags);
+	local_irq_restore(flags);
 	return 1;
 }
 
@@ -89,14 +77,15 @@ int del_timer(struct timer_list *timer)
  */
 int mod_timer(struct timer_list *timer, unsigned long expires)
 {
-	unsigned long flags = irq_save();
+	unsigned long flags;
+	local_irq_save(flags);
 
 	if (timer->entry.next)
 		list_del(&timer->entry);
 
 	timer->expires = expires;
 	timer->entry.next = NULL;	/* re-validate for add_timer */
-	irq_restore(flags);
+	local_irq_restore(flags);
 
 	add_timer(timer);
 	return 0;

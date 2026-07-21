@@ -10,6 +10,7 @@
 #include <nothan/mmio.h>
 #include <nothan/genhd.h>
 #include <nothan/init.h>
+#include <asm/irqflags.h>
 
 /* Register offsets — mmc_base = module_base + 0x100 */
 #define MMCHS_SYSCONFIG  0x010
@@ -186,17 +187,7 @@ static int mmc_send_cmd(uint32_t cmd, uint32_t arg, uint32_t flags)
  * masking IRQs cannot deadlock, and a healthy transfer is only ~tens of
  * microseconds.
  */
-static inline unsigned long mmc_irq_save(void)
-{
-	unsigned long flags;
-	__asm__ __volatile__("mrs %0, cpsr\n\tcpsid i" : "=r"(flags) : : "memory");
-	return flags;
-}
-
-static inline void mmc_irq_restore(unsigned long flags)
-{
-	__asm__ __volatile__("msr cpsr_c, %0" : : "r"(flags) : "memory");
-}
+/* Uses the shared local_irq_save/restore primitive (asm/irqflags.h). */
 
 static int omap_hsmmc_read_block_inner(struct gendisk *disk, u64 block, void *buf)
 {
@@ -303,17 +294,19 @@ static int omap_hsmmc_write_block_inner(struct gendisk *disk, u64 block, const v
 /* IRQ-masked wrappers — serialize the controller against preemption. */
 static int omap_hsmmc_read_block(struct gendisk *disk, u64 block, void *buf)
 {
-	unsigned long flags = mmc_irq_save();
+	unsigned long flags;
+	local_irq_save(flags);
 	int ret = omap_hsmmc_read_block_inner(disk, block, buf);
-	mmc_irq_restore(flags);
+	local_irq_restore(flags);
 	return ret;
 }
 
 static int omap_hsmmc_write_block(struct gendisk *disk, u64 block, const void *buf)
 {
-	unsigned long flags = mmc_irq_save();
+	unsigned long flags;
+	local_irq_save(flags);
 	int ret = omap_hsmmc_write_block_inner(disk, block, buf);
-	mmc_irq_restore(flags);
+	local_irq_restore(flags);
 	return ret;
 }
 

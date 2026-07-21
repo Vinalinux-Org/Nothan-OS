@@ -9,6 +9,7 @@
 #include <stddef.h>
 #include <nothan/printk.h>
 #include <nothan/uart.h>
+#include <asm/irqflags.h>
 
 /*
  * Minimal vsnprintf — %s %d %i %u %x %X %p %% + width + zero-pad
@@ -181,13 +182,12 @@ int printk(const char *fmt, ...)
 
 	/*
 	 * IRQ-off ensures the UART output is not interleaved by preemption.
-	 * Save the prior I-bit so callers that masked IRQs (e.g. kernel_main
-	 * before schedule(), task spawn loop) stay masked across printk.
+	 * local_irq_save/restore preserves the prior I-bit so callers that
+	 * masked IRQs (e.g. kernel_main before schedule(), task spawn loop,
+	 * abort handlers) stay masked across printk.
 	 */
-	unsigned long cpsr_save;
-	__asm__ __volatile__ ("mrs %0, cpsr\n"
-			      "cpsid i"
-			      : "=r" (cpsr_save) : : "memory");
+	unsigned long flags;
+	local_irq_save(flags);
 
 	for (char *p = buf; *p; p++) {
 		if (*p == '\n')
@@ -195,9 +195,7 @@ int printk(const char *fmt, ...)
 		uart_putchar(*p);
 	}
 
-	/* Restore only if IRQs were enabled before. */
-	if (!(cpsr_save & (1u << 7)))
-		__asm__ __volatile__ ("cpsie i" : : : "memory");
+	local_irq_restore(flags);
 
 	return ret;
 }
