@@ -43,10 +43,67 @@ static void reap_dead(void)
 			continue;	/* never free the stack we're running on */
 		pr_debug("[REAP] free pid=%d kstack=%p\n", z->pid, z->kstack_base);
 		list_del(&rt->run_list);
+		task_unregister(z);
 		if (z->kstack_base)
 			kfree(z->kstack_base);
 		kfree(z);
 	}
+}
+
+/*
+ * Flat task registry. Every task (kernel thread, user task, idle) registers
+ * here at creation and is removed at reap. Unlike the runqueue scan, this
+ * finds tasks that are blocked off the runqueue too (needed by kill), and
+ * caps the live task count (MAX_TASKS) so task creation is bounded.
+ */
+#define MAX_TASKS 32
+static struct task_struct *task_table[MAX_TASKS];
+
+int task_register(struct task_struct *p)
+{
+	unsigned long flags;
+	int ret = -1;
+
+	local_irq_save(flags);
+	for (int i = 0; i < MAX_TASKS; i++) {
+		if (!task_table[i]) {
+			task_table[i] = p;
+			ret = 0;
+			break;
+		}
+	}
+	local_irq_restore(flags);
+	return ret;
+}
+
+void task_unregister(struct task_struct *p)
+{
+	unsigned long flags;
+
+	local_irq_save(flags);
+	for (int i = 0; i < MAX_TASKS; i++) {
+		if (task_table[i] == p) {
+			task_table[i] = NULL;
+			break;
+		}
+	}
+	local_irq_restore(flags);
+}
+
+struct task_struct *task_find(int pid)
+{
+	unsigned long flags;
+	struct task_struct *found = NULL;
+
+	local_irq_save(flags);
+	for (int i = 0; i < MAX_TASKS; i++) {
+		if (task_table[i] && task_table[i]->pid == pid) {
+			found = task_table[i];
+			break;
+		}
+	}
+	local_irq_restore(flags);
+	return found;
 }
 
 /* Idle task — always runnable, lowest priority, no kmalloc needed. */
@@ -81,6 +138,7 @@ static void idle_task_init(void)
 		idle_tsk.user_sp    = 0;
 		idle_tsk.user_lr    = 0;
 		idle_tsk.__state    = TASK_RUNNING;
+		idle_tsk.flags      = 0;
 		idle_tsk.pid        = 0;
 		idle_tsk.prio       = IDLE_PRIO;
 		idle_tsk.rt.time_slice = RR_TIMESLICE;
@@ -96,6 +154,8 @@ static void idle_task_init(void)
 
 	enqueue_task(&runqueue, &idle_tsk);
 		runqueue.curr = &idle_tsk;
+
+	task_register(&idle_tsk);
 }
 
 /**

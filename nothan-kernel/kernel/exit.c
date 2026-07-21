@@ -29,7 +29,7 @@ void do_exit(int code)
 		 tsk->pid, tsk->comm, code);
 
 	tsk->exit_code = code;
-	tsk->__state = TASK_UNINTERRUPTIBLE;
+	tsk->__state = TASK_DEAD;	/* EXIT_DEAD: done, on dead_list, awaiting reap */
 
 	/* Release user-space resources if any */
 	if (tsk->mm) {

@@ -20,6 +20,14 @@
 
 #define TASK_NEW		0x00000800	/* just spawned, not yet seen by scheduler */
 
+#define TASK_DEAD		0x00000010	/* done exiting, on dead_list, awaiting reap (EXIT_DEAD) */
+
+/*
+ * task_struct.flags bits — a SEPARATE field from __state. A flag is a request
+ * overlaid on whatever state the task is in, not a state itself.
+ */
+#define TASK_SHOULD_EXIT	0x00000001	/* cooperative kill: task exits at its next syscall boundary */
+
 /* Scheduling constants */
 #define MAX_PRIO			32	/* 32 fixed priority levels */
 #define IDLE_PRIO			(MAX_PRIO - 1)	/* lowest: idle task */
@@ -55,6 +63,7 @@ struct task_struct {
 	unsigned long			user_sp;
 	unsigned long			user_lr;
 	unsigned int			__state;
+	unsigned int			flags;	/* TASK_SHOULD_EXIT etc. — request bits, not state */
 	int				pid;
 	int				prio;
 	struct sched_rt_entity		rt;
@@ -143,5 +152,14 @@ extern bool sched_running;  /* true after first real context switch */
 
 void do_exit(int code);
 void sched_defer_free(struct task_struct *tsk);
+
+/*
+ * Flat task registry — every task (kernel + user + idle) is registered here.
+ * Bounded by MAX_TASKS. Lets kill find a task by pid including ones blocked
+ * off the runqueue, and caps the number of live tasks.
+ */
+int task_register(struct task_struct *p);	/* 0 ok, -1 if table full */
+void task_unregister(struct task_struct *p);
+struct task_struct *task_find(int pid);
 
 #endif /* _NOTHAN_SCHED_H */

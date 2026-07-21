@@ -265,83 +265,46 @@ static long sys_listdir(unsigned long a0, unsigned long a1, unsigned long a2)
 }
 
 /**
- * sys_kill - terminate a task by PID
+ * sys_kill - request a task to terminate, by PID (cooperative)
  * @a0: PID of the target task
  *
- * If a0 matches the current task, delegates to do_exit().
- * Otherwise finds the task in the runqueue, dequeues it,
- * and frees its resources.
+ * Does NOT free anything in place. Sets TASK_SHOULD_EXIT on the target; the
+ * target then calls do_exit() itself at its next syscall boundary (a safe
+ * point — never mid-FAT-write). The flat task registry is used to find the
+ * target, so a task blocked off the runqueue is found too (the old runqueue
+ * scan missed those).
  *
- * Return: 0 on success, -1 if PID not found.
+ * Return: 0 if the request was posted, -1 otherwise.
  */
 static long sys_kill(unsigned long a0, unsigned long a1, unsigned long a2)
 {
 	(void)a1; (void)a2;
 	int target_pid = (int)a0;
 
-	if (target_pid <= 1)
+	if (target_pid <= 1)			/* protect idle(0) + first task/gui(1) */
 		return -1;
 
 	if (runqueue.curr && runqueue.curr->pid == target_pid) {
-		do_exit(0);
+		do_exit(0);			/* self — exit right here */
 		/* NOTREACHED */
 		return 0;
 	}
 
-	struct rq *rq = &runqueue;
-	for (int prio = 0; prio < MAX_PRIO; prio++) {
-		struct sched_rt_entity *rt, *tmp;
-		list_for_each_entry_safe(rt, tmp, &rq->active.queue[prio],
-					 struct sched_rt_entity, run_list) {
-			struct task_struct *tsk = container_of(rt, struct task_struct, rt);
-			if (tsk->pid != target_pid)
-				continue;
+	struct task_struct *t = task_find(target_pid);
+	if (!t)
+		return -1;			/* no such pid */
+	if (!t->mm)
+		return -1;			/* kernel thread (idle/musb) — unkillable */
+	if (t->__state == TASK_DEAD)
+		return -1;			/* already dying, awaiting reap */
 
-			dequeue_task(rq, tsk);
-			tsk->__state = TASK_UNINTERRUPTIBLE;
-
-			if (tsk->mm) {
-				struct zone *zone = get_zone();
-				struct mm_struct *mm = tsk->mm;
-
-				/* Free the private page tables (L2s + 16 KB L1). The
-				 * killed task is not current, so its TTBR0 is not
-				 * active — safe to tear down directly. */
-				pgd_free(mm);
-
-				unsigned int code_order = 0;
-				while ((1u << code_order) < mm->code_pages)
-					code_order++;
-				struct page *cp = pfn_to_page(zone,
-					(mm->code_pa - zone->base_pa) >> PAGE_SHIFT);
-				if (cp)
-					__free_pages(cp, code_order);
-
-				mm_free_bss_chunks(mm, zone);
-
-				unsigned int stack_order = 0;
-				while ((1u << stack_order) < mm->stack_pages)
-					stack_order++;
-				struct page *sp = pfn_to_page(zone,
-					(mm->stack_pa - zone->base_pa) >> PAGE_SHIFT);
-				if (sp)
-					__free_pages(sp, stack_order);
-
-				kfree(mm);
-				tsk->mm = NULL;
-			}
-
-			printk("[KILL] task \"%s\" pid=%d killed\n", tsk->comm, tsk->pid);
-
-			/* The caller runs on its own kernel stack, not the
-			 * target's, so the target's kernel stack and task_struct
-			 * can be freed right here (no reaper needed). */
-			kfree(tsk->kstack_base);
-			kfree(tsk);
-			return 0;
-		}
-	}
-	return -1;
+	t->flags |= TASK_SHOULD_EXIT;		/* raise the flag — no free here */
+	/*
+	 * A blocked target exits when it returns from its current syscall.
+	 * Force-waking a target blocked indefinitely is deferred until blocking
+	 * I/O exists (there is none yet — reads are non-blocking).
+	 */
+	return 0;
 }
 
 /**
@@ -592,11 +555,23 @@ static const syscall_fn_t syscall_table[NR_SYSCALLS] = {
 long do_syscall(unsigned int nr, unsigned long arg0,
 		unsigned long arg1, unsigned long arg2)
 {
+	long ret;
+
 	if (nr >= NR_SYSCALLS) {
 		printk("[SYSCALL] invalid syscall %u from pid=%d\n",
 		       nr, runqueue.curr ? runqueue.curr->pid : -1);
-		return -1L;
+		ret = -1L;
+	} else {
+		ret = syscall_table[nr](arg0, arg1, arg2);
 	}
 
-	return syscall_table[nr](arg0, arg1, arg2);
+	/*
+	 * Cooperative-kill safe point: a task marked TASK_SHOULD_EXIT exits
+	 * HERE, at the syscall boundary — never mid-operation. do_exit() runs
+	 * on this task's own kernel stack (like sys_exit) and never returns.
+	 */
+	if (runqueue.curr && (runqueue.curr->flags & TASK_SHOULD_EXIT))
+		do_exit(0);
+
+	return ret;
 }
