@@ -8,9 +8,66 @@
 #include <nothan/irq.h>
 #include <nothan/printk.h>
 #include <nothan/sched.h>
+#include <nothan/mm.h>
 
 #define SPSR_MODE_MASK	0x1F
 #define MODE_USER	0x10	/* ARM user mode */
+
+/* Kernel .text bounds (from kernel.ld) — a word in this range on the stack is
+ * a candidate return address into kernel code. */
+extern char _stext[], _etext[];
+
+/*
+ * Read the stack pointer of the faulting context. We run here in Abort mode
+ * (IRQs masked on abort entry, so hopping modes is safe): switch to the
+ * faulting mode, read its banked sp, switch back. User faults ran on sp_usr
+ * (shared with System mode); kernel faults on sp_svc.
+ */
+static unsigned long fault_sp(unsigned int spsr)
+{
+	unsigned long sp;
+
+	if ((spsr & SPSR_MODE_MASK) == MODE_USER)
+		__asm__ __volatile__("cps #0x1f\n\tmov %0, sp\n\tcps #0x17"
+				     : "=r"(sp) : : "memory");
+	else
+		__asm__ __volatile__("cps #0x13\n\tmov %0, sp\n\tcps #0x17"
+				     : "=r"(sp) : : "memory");
+	return sp;
+}
+
+/*
+ * Heuristic backtrace: scan the faulting stack for words that land inside the
+ * code range [lo, hi) — those are candidate return addresses. No frame pointer
+ * needed (works at -O2). May show stale/false candidates; resolve the printed
+ * addresses offline with scripts/ksym.py.
+ */
+static void dump_backtrace(unsigned long *sp, unsigned long lo, unsigned long hi)
+{
+	printk("  Call trace (resolve offline: scripts/ksym.py):\n");
+	for (int i = 0, shown = 0; i < 256 && shown < 16; i++) {
+		unsigned long w = sp[i];
+		if (w >= lo && w < hi)
+			printk("    [%d] 0x%08lx\n", shown++, w);
+	}
+}
+
+/* Pick the right code range (kernel vs the faulting user task) and walk. */
+static void show_backtrace(unsigned int spsr)
+{
+	unsigned long *sp = (unsigned long *)fault_sp(spsr);
+
+	if ((spsr & SPSR_MODE_MASK) == MODE_USER) {
+		struct mm_struct *mm = runqueue.curr ? runqueue.curr->mm : NULL;
+		if (!mm)
+			return;
+		unsigned long lo = USER_CODE_VA;
+		unsigned long hi = lo + (unsigned long)mm->code_pages * PAGE_SIZE;
+		dump_backtrace(sp, lo, hi);
+	} else {
+		dump_backtrace(sp, (unsigned long)_stext, (unsigned long)_etext);
+	}
+}
 
 /*
  * If the exception originated in user mode, kill the faulting task and
@@ -38,6 +95,7 @@ void und_handler(unsigned int spsr)
 {
 	printk("\nException: Undefined Instruction!\n");
 	printk("  SPSR=0x%08x\n", spsr);
+	show_backtrace(spsr);
 	handle_user_or_panic(spsr, "UND");
 }
 
@@ -72,6 +130,7 @@ void pabt_handler(unsigned int spsr, unsigned int lr_usr)
 	default: reason = "Unknown"; break;
 	}
 	printk("  Reason: %s\n", reason);
+	show_backtrace(spsr);
 	handle_user_or_panic(spsr, "PABT");
 }
 
@@ -114,6 +173,7 @@ void dabt_handler(unsigned int spsr, unsigned int pc, unsigned int *regs)
 	default: reason = "Unknown"; break;
 	}
 	printk("  Reason: %s\n", reason);
+	show_backtrace(spsr);
 	handle_user_or_panic(spsr, "DABT");
 }
 

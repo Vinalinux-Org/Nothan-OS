@@ -29,6 +29,7 @@ static void cmd_help(void)
 	puts("  shutdown\t\tHalt system\n");
 	puts("  simstat\t\tCheck SIM status\n");
 	puts("  msgqtest\t\tIPC message-queue loopback test\n");
+	puts("  crashtest\t\tTrigger a fault (test backtrace)\n");
 	putchar('\n');
 }
 
@@ -312,6 +313,11 @@ static void execute(char *line, char *cwd)
 		puts("msgqtest: recv '");
 		puts(in);
 		puts("'\n");
+	} else if (strcmp(cmd, "crashtest") == 0) {
+		/* Trigger a controlled user-mode data abort to test the kernel
+		 * backtrace. Writes to NULL (unmapped) → this task dies. */
+		puts("crashtest: writing to NULL...\n");
+		*(volatile int *)0 = 0;
 	} else {
 		puts("Unknown: '");
 		puts(cmd);

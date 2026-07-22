@@ -26,8 +26,10 @@ SECTIONS
 	}
 
 	.text : {
+		_stext = .;
 		*(.text)
 		*(.init.text)
+		_etext = .;
 	}
 
 	.rodata : {
