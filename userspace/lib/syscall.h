@@ -19,6 +19,9 @@
 #define __NR_chdir      17
 #define __NR_getcwd     18
 #define __NR_getticks   19
+/* 20 = __NR_sleep (kernel) — not wrapped here */
+#define __NR_msgq_send  21
+#define __NR_msgq_recv  22
 
 #define REBOOT_WARM     0
 #define REBOOT_HALT     1
@@ -176,6 +179,18 @@ static inline long getcwd(char *buf, unsigned long size)
 static inline unsigned long getticks(void)
 {
 	return (unsigned long)__syscall0(__NR_getticks);
+}
+
+/* IPC: send/recv a fixed-size message to/from system queue @qid.
+ * msgq_recv blocks while the queue is empty; msgq_send blocks while full. */
+static inline long msgq_send(int qid, const void *msg, unsigned long len)
+{
+	return __syscall3(__NR_msgq_send, (long)qid, (long)msg, (long)len);
+}
+
+static inline long msgq_recv(int qid, void *out, unsigned long len)
+{
+	return __syscall3(__NR_msgq_recv, (long)qid, (long)out, (long)len);
 }
 
 #endif

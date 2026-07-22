@@ -16,6 +16,7 @@
 #include <nothan/time.h>
 #include <nothan/delay.h>
 #include <nothan/uaccess.h>
+#include <nothan/msgq.h>
 
 /* Longest path/string a syscall will scan out of user space. */
 #define USER_STR_MAX	256
@@ -512,6 +513,48 @@ static long sys_sleep(unsigned long a0, unsigned long a1, unsigned long a2)
 	return 0;
 }
 
+/**
+ * sys_msgq_send - send a fixed-size message to system queue @a0 (qid)
+ * @a0: queue id      @a1: user pointer to message      @a2: buffer length
+ *
+ * Bridges the user/kernel boundary: pulls the message out of user space with
+ * copy_from_user() (validates it lies in the caller's mapping), then hands a
+ * kernel buffer to the core msgq_send(). Blocks if the queue is full.
+ * Return: 0 on success, -1 on bad qid / short buffer / bad user pointer.
+ */
+static long sys_msgq_send(unsigned long a0, unsigned long a1, unsigned long a2)
+{
+	struct msgq *q = msgq_get((unsigned int)a0);
+	char kbuf[MSGQ_MSG_SIZE];
+
+	if (!q || a2 < MSGQ_MSG_SIZE)
+		return -1;
+	if (copy_from_user(kbuf, (const void *)a1, MSGQ_MSG_SIZE))
+		return -1;
+	msgq_send(q, kbuf);
+	return 0;
+}
+
+/**
+ * sys_msgq_recv - receive a fixed-size message from system queue @a0 (qid)
+ * @a0: queue id      @a1: user pointer to output buffer   @a2: buffer length
+ *
+ * Blocks if the queue is empty, then copies the message out to user space
+ * with copy_to_user(). Return: 0 on success, -1 on bad qid/buffer/pointer.
+ */
+static long sys_msgq_recv(unsigned long a0, unsigned long a1, unsigned long a2)
+{
+	struct msgq *q = msgq_get((unsigned int)a0);
+	char kbuf[MSGQ_MSG_SIZE];
+
+	if (!q || a2 < MSGQ_MSG_SIZE)
+		return -1;
+	msgq_recv(q, kbuf);
+	if (copy_to_user((void *)a1, kbuf, MSGQ_MSG_SIZE))
+		return -1;
+	return 0;
+}
+
 /*
  * Syscall dispatch table
  * Indexed by syscall number; must match __NR_xxx constants.
@@ -538,6 +581,8 @@ static const syscall_fn_t syscall_table[NR_SYSCALLS] = {
 	[__NR_getcwd]      = sys_getcwd,
 	[__NR_getticks]    = sys_getticks,
 	[__NR_sleep]       = sys_sleep,
+	[__NR_msgq_send]   = sys_msgq_send,
+	[__NR_msgq_recv]   = sys_msgq_recv,
 };
 
 /**

@@ -25,8 +25,10 @@
 #define __NR_getcwd     18  /* get current working directory     */
 #define __NR_getticks   19  /* get system tick count in ms       */
 #define __NR_sleep      20  /* block the task for N milliseconds  */
+#define __NR_msgq_send  21  /* send a message to system queue qid */
+#define __NR_msgq_recv  22  /* recv a message from system queue qid */
 
-#define NR_SYSCALLS     21
+#define NR_SYSCALLS     23
 
 /* reboot commands */
 #define REBOOT_WARM     0

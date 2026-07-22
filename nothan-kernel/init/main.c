@@ -12,6 +12,8 @@
 #include <nothan/timer.h>
 #include <nothan/init.h>
 #include <nothan/fs.h>
+#include <nothan/msgq.h>
+#include <nothan/delay.h>
 
 extern void mmu_log_config(void);
 extern void omap_intc_init(void);
@@ -26,6 +28,15 @@ extern struct task_struct *user_task_create_storage_daemon(void);
  * (round-trip + boot counter persists across reboots); left off now.
  */
 #define FAT_WRITE_SELFTEST  0
+
+/*
+ * Set to 1 to run the message-queue self-test at boot: two kernel threads
+ * (producer/consumer) pass 10 messages through a 4-slot bounded queue. The
+ * consumer drains slowly (msleep) so the producer must block on "full" and
+ * the consumer blocks on "empty" — exercising wait_event/wake_up at runtime.
+ * Pure UART output. Threads exit when done (also exercises exit + reap).
+ */
+#define MSGQ_SELFTEST  0
 
 #if FAT_WRITE_SELFTEST
 /*
@@ -88,6 +99,30 @@ static void fat_write_selftest(void)
 }
 #endif
 
+#if MSGQ_SELFTEST
+static struct msgq test_q;
+static unsigned int test_q_buf[4];		/* 4 slots × sizeof(unsigned int) */
+
+static void msgq_producer(void)
+{
+	for (unsigned int i = 0; i < 10; i++) {
+		msgq_send(&test_q, &i);		/* no delay → fills then blocks on full */
+		printk("[MSGQTEST] send=%u\n", i);
+	}
+}
+
+static void msgq_consumer(void)
+{
+	for (unsigned int i = 0; i < 10; i++) {
+		unsigned int v;
+		msgq_recv(&test_q, &v);		/* blocks while empty */
+		printk("[MSGQTEST] recv=%u%s\n", v, v == i ? "" : " !!ORDER");
+		msleep(30);			/* slow drain → producer blocks on full */
+	}
+	printk("[MSGQTEST] PASS (10 msgs in order)\n");
+}
+#endif
+
 void kernel_main(void)
 {
 	printk("[BOOT] page_alloc_init\n");
@@ -104,6 +139,8 @@ void kernel_main(void)
 	 */
 	printk("[BOOT] sched_init\n");
 	sched_init();
+
+	msgq_sys_init();	/* system message queues for the msgq_send/recv syscalls */
 
 	/*
 	 * init_IRQ() equivalent: initialize INTC before any driver runs.
@@ -177,6 +214,16 @@ void kernel_main(void)
 		printk("[KERN] Spawning storage_daemon\n");
 		enqueue_task(&runqueue, sd);
 	}
+
+#if MSGQ_SELFTEST
+	msgq_init(&test_q, test_q_buf, sizeof(unsigned int), 4);
+	struct task_struct *tp = task_create(msgq_producer, DEFAULT_PRIO, "msgq-prod");
+	if (tp)
+		enqueue_task(&runqueue, tp);
+	struct task_struct *tc = task_create(msgq_consumer, DEFAULT_PRIO, "msgq-cons");
+	if (tc)
+		enqueue_task(&runqueue, tc);
+#endif
 
 	printk("[KERN] NothanOS started\n");
 

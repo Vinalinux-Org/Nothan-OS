@@ -39,6 +39,7 @@ OBJS += $(BUILD_DIR)/kernel/sched/core.o
 OBJS += $(BUILD_DIR)/kernel/sched/rt.o
 OBJS += $(BUILD_DIR)/kernel/sched/wait.o
 OBJS += $(BUILD_DIR)/kernel/sched/completion.o
+OBJS += $(BUILD_DIR)/kernel/ipc/msgq.o
 OBJS += $(BUILD_DIR)/kernel/syscall.o
 OBJS += $(BUILD_DIR)/kernel/exit.o
 OBJS += $(BUILD_DIR)/init/main.o

@@ -28,6 +28,7 @@ static void cmd_help(void)
 	puts("  reboot\t\tWarm reboot\n");
 	puts("  shutdown\t\tHalt system\n");
 	puts("  simstat\t\tCheck SIM status\n");
+	puts("  msgqtest\t\tIPC message-queue loopback test\n");
 	putchar('\n');
 }
 
@@ -296,6 +297,21 @@ static void execute(char *line, char *cwd)
 		reboot(REBOOT_HALT);
 	} else if (strcmp(cmd, "simstat") == 0) {
 		cmd_simstat();
+	} else if (strcmp(cmd, "msgqtest") == 0) {
+		/* IPC loopback: send a message to system queue 0, read it back.
+		 * Round-trip proves copy_from_user + msgq + copy_to_user.
+		 * Zero/copy by hand — freestanding userspace has no memset. */
+		char out[64];
+		char in[64];
+		const char *m = "hello msgq";
+		int i;
+		for (i = 0; i < 64; i++) { out[i] = 0; in[i] = 0; }
+		for (i = 0; m[i] && i < 63; i++) out[i] = m[i];
+		msgq_send(0, out, 64);
+		msgq_recv(0, in, 64);
+		puts("msgqtest: recv '");
+		puts(in);
+		puts("'\n");
 	} else {
 		puts("Unknown: '");
 		puts(cmd);
