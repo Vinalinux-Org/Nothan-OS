@@ -9,13 +9,14 @@
 #include <nothan/printk.h>
 #include <nothan/sched.h>
 #include <nothan/mm.h>
+#include <nothan/panic.h>
 
 #define SPSR_MODE_MASK	0x1F
 #define MODE_USER	0x10	/* ARM user mode */
 
-/* Kernel .text bounds (from kernel.ld) — a word in this range on the stack is
- * a candidate return address into kernel code. */
-extern char _stext[], _etext[];
+/* _stext/_etext (kernel .text bounds) + dump_backtrace() prototype live in
+ * <nothan/panic.h> — a word in [_stext,_etext) on the stack is a candidate
+ * return address into kernel code. */
 
 /*
  * Read the stack pointer of the faulting context. We run here in Abort mode
@@ -42,7 +43,7 @@ static unsigned long fault_sp(unsigned int spsr)
  * needed (works at -O2). May show stale/false candidates; resolve the printed
  * addresses offline with scripts/ksym.py.
  */
-static void dump_backtrace(unsigned long *sp, unsigned long lo, unsigned long hi)
+void dump_backtrace(unsigned long *sp, unsigned long lo, unsigned long hi)
 {
 	printk("  Call trace (resolve offline: scripts/ksym.py):\n");
 	for (int i = 0, shown = 0; i < 256 && shown < 16; i++) {
@@ -82,9 +83,7 @@ static void handle_user_or_panic(unsigned int spsr, const char *tag)
 		do_exit(-1);
 		/* NOTREACHED */
 	}
-	printk("  [%s] kernel-mode fault — halting\n", tag);
-	while (1)
-		;
+	panic("%s in kernel mode", tag);
 }
 
 /**
@@ -195,7 +194,5 @@ void irq_handler(void)
 void fiq_handler(unsigned int spsr)
 {
 	(void)spsr;
-	printk("\nException: FIQ!\n");
-	while (1)
-		;
+	panic("unexpected FIQ");
 }

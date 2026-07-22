@@ -14,6 +14,7 @@
 #include <nothan/fs.h>
 #include <nothan/msgq.h>
 #include <nothan/delay.h>
+#include <nothan/panic.h>
 
 extern void mmu_log_config(void);
 extern void omap_intc_init(void);
@@ -37,6 +38,10 @@ extern struct task_struct *user_task_create_storage_daemon(void);
  * Pure UART output. Threads exit when done (also exercises exit + reap).
  */
 #define MSGQ_SELFTEST  0
+
+/* Set to 1 to fire BUG_ON(1) early at boot — verifies panic() + the
+ * kernel-context backtrace. Pure UART output. */
+#define PANIC_SELFTEST  0
 
 #if FAT_WRITE_SELFTEST
 /*
@@ -141,6 +146,10 @@ void kernel_main(void)
 	sched_init();
 
 	msgq_sys_init();	/* system message queues for the msgq_send/recv syscalls */
+
+#if PANIC_SELFTEST
+	BUG_ON(1);		/* verify panic() + kernel backtrace, then set back to 0 */
+#endif
 
 	/*
 	 * init_IRQ() equivalent: initialize INTC before any driver runs.

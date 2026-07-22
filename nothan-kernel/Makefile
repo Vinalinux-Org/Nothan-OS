@@ -42,6 +42,7 @@ OBJS += $(BUILD_DIR)/kernel/sched/completion.o
 OBJS += $(BUILD_DIR)/kernel/ipc/msgq.o
 OBJS += $(BUILD_DIR)/kernel/syscall.o
 OBJS += $(BUILD_DIR)/kernel/exit.o
+OBJS += $(BUILD_DIR)/kernel/panic.o
 OBJS += $(BUILD_DIR)/init/main.o
 OBJS += $(BUILD_DIR)/kernel/userspace_blobs.o
 OBJS += $(BUILD_DIR)/kernel/vfs/vfs.o
