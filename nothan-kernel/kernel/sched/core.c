@@ -41,39 +41,42 @@ static void reap_dead(void)
 
 		if (z == runqueue.curr)
 			continue;	/* never free the stack we're running on */
-		pr_debug("[REAP] free pid=%d kstack=%p\n", z->pid, z->kstack_base);
-		list_del(&rt->run_list);
-		task_unregister(z);
-		if (z->kstack_base)
-			kfree(z->kstack_base);
-		kfree(z);
+		pr_debug("[REAP] put pid=%d kstack=%p\n", z->pid, z->kstack_base);
+		list_del(&rt->run_list);	/* off dead_list */
+		task_unregister(z);		/* off all_tasks + pid_hash */
+		/*
+		 * Drop the existence ref. Frees now if nobody else holds one; if a
+		 * task_find() caller (e.g. sys_kill) still holds a ref, the free is
+		 * deferred until they put() — closing the UAF.
+		 */
+		put_task_struct(z);
 	}
 }
 
 /*
- * Flat task registry. Every task (kernel thread, user task, idle) registers
- * here at creation and is removed at reap. Unlike the runqueue scan, this
- * finds tasks that are blocked off the runqueue too (needed by kill), and
- * caps the live task count (MAX_TASKS) so task creation is bounded.
+ * Memory-bound task registry. Every task (kernel thread, user task, idle) is
+ * linked on the global all_tasks list at creation and hashed by pid, removed
+ * at reap. No fixed cap — the only ceiling is RAM (creation fails earlier at
+ * kmalloc). Finds tasks blocked off the runqueue too (needed by kill).
+ *
+ * Single-core: local_irq_save/restore is the mutual exclusion (same as before).
  */
-#define MAX_TASKS 32
-static struct task_struct *task_table[MAX_TASKS];
+LIST_HEAD(all_tasks);	/* every live task; walked by sys_gettasklist */
+static struct list_head pid_hash_table[PID_HASH_SIZE];
 
-int task_register(struct task_struct *p)
+static inline struct list_head *pid_bucket(int pid)
+{
+	return &pid_hash_table[(unsigned)pid % PID_HASH_SIZE];
+}
+
+void task_register(struct task_struct *p)
 {
 	unsigned long flags;
-	int ret = -1;
 
 	local_irq_save(flags);
-	for (int i = 0; i < MAX_TASKS; i++) {
-		if (!task_table[i]) {
-			task_table[i] = p;
-			ret = 0;
-			break;
-		}
-	}
+	list_add(&p->tasks, &all_tasks);
+	list_add(&p->pid_hash, pid_bucket(p->pid));
 	local_irq_restore(flags);
-	return ret;
 }
 
 void task_unregister(struct task_struct *p)
@@ -81,12 +84,8 @@ void task_unregister(struct task_struct *p)
 	unsigned long flags;
 
 	local_irq_save(flags);
-	for (int i = 0; i < MAX_TASKS; i++) {
-		if (task_table[i] == p) {
-			task_table[i] = NULL;
-			break;
-		}
-	}
+	list_del(&p->tasks);
+	list_del(&p->pid_hash);
 	local_irq_restore(flags);
 }
 
@@ -94,16 +93,61 @@ struct task_struct *task_find(int pid)
 {
 	unsigned long flags;
 	struct task_struct *found = NULL;
+	struct task_struct *p;
 
 	local_irq_save(flags);
-	for (int i = 0; i < MAX_TASKS; i++) {
-		if (task_table[i] && task_table[i]->pid == pid) {
-			found = task_table[i];
+	list_for_each_entry(p, pid_bucket(pid), struct task_struct, pid_hash) {
+		if (p->pid == pid) {
+			found = p;
+			found->refcount++;	/* hand caller a ref (find+get atomic under
+						 * this mask; reap can't free it meanwhile) */
 			break;
 		}
 	}
 	local_irq_restore(flags);
 	return found;
+}
+
+/*
+ * Refcount lifetime.
+ *
+ * refcount = 1 at creation (existence ref). task_find() takes an extra ref for
+ * its caller. reap_dead() drops the existence ref via put; the task_struct +
+ * kernel stack are freed only when refcount hits 0. So a task task_find()'d by
+ * sys_kill survives until that caller put()s, even if it exits meanwhile —
+ * closing the UAF.
+ *
+ * Impl = plain int under local_irq_save/restore (single-core mutual exclusion).
+ * On SMP, swap these two bodies for atomics; callers don't change.
+ */
+void get_task_struct(struct task_struct *p)
+{
+	unsigned long flags;
+
+	local_irq_save(flags);
+	p->refcount++;
+	local_irq_restore(flags);
+}
+
+void put_task_struct(struct task_struct *p)
+{
+	unsigned long flags;
+	int dead;
+
+	local_irq_save(flags);
+	dead = (--p->refcount == 0);
+	local_irq_restore(flags);
+
+	/*
+	 * Freed outside the mask: once refcount is 0 the task is already off the
+	 * registry (reap unregisters before put) and off every list, so no other
+	 * context can reach p — this is the exclusive last reference.
+	 */
+	if (dead) {
+		if (p->kstack_base)
+			kfree(p->kstack_base);
+		kfree(p);
+	}
 }
 
 /* Idle task — always runnable, lowest priority, no kmalloc needed. */
@@ -145,6 +189,7 @@ static void idle_task_init(void)
 		idle_tsk.rt.on_rq   = 0;
 		idle_tsk.exit_code  = 0;
 		idle_tsk.mm         = NULL;
+		idle_tsk.refcount   = 1;	/* never exits/reaped → never put → never freed */
 
 	const char *name = "idle";
 	unsigned int i = 0;
@@ -175,6 +220,9 @@ void sched_init(void)
 	need_resched = 0;
 
 	list_init(&dead_list);
+
+	for (unsigned int i = 0; i < PID_HASH_SIZE; i++)
+		list_init(&pid_hash_table[i]);
 
 	idle_task_init();
 

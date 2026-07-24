@@ -17,6 +17,7 @@
 #include <nothan/delay.h>
 #include <nothan/uaccess.h>
 #include <nothan/msgq.h>
+#include <asm/irqflags.h>
 
 /* Longest path/string a syscall will scan out of user space. */
 #define USER_STR_MAX	256
@@ -187,41 +188,31 @@ static long sys_gettasklist(unsigned long a0, unsigned long a1, unsigned long a2
 	struct task_info *buf = (struct task_info *)a0;
 	unsigned long max = a1;
 	unsigned long count = 0;
-	struct rq *rq = &runqueue;
+	struct task_struct *p;
+	unsigned long flags;
 
 	if (max > USER_ARR_MAX || !access_ok(buf, max * sizeof(struct task_info)))
 		return -1;
 
-	/* Always include the currently running task */
-	if (count < max && rq->curr) {
-		buf[count].pid = rq->curr->pid;
-		buf[count].state = rq->curr->__state;
-		buf[count].prio = rq->curr->prio;
+	/*
+	 * Walk the global task list — includes running, runnable AND blocked
+	 * tasks (the old runqueue scan missed blocked ones). Under IRQ mask so
+	 * the list can't change mid-walk (register/unregister run masked too).
+	 */
+	local_irq_save(flags);
+	list_for_each_entry(p, &all_tasks, struct task_struct, tasks) {
+		if (count >= max)
+			break;
+		buf[count].pid = p->pid;
+		buf[count].state = p->__state;
+		buf[count].prio = p->prio;
 		unsigned int i;
-		for (i = 0; i < TASK_NAME_LEN - 1 && rq->curr->comm[i]; i++)
-			buf[count].name[i] = rq->curr->comm[i];
+		for (i = 0; i < TASK_NAME_LEN - 1 && p->comm[i]; i++)
+			buf[count].name[i] = p->comm[i];
 		buf[count].name[i] = '\0';
 		count++;
 	}
-
-	/* Then iterate the runqueue for other tasks */
-	for (int prio = 0; prio < MAX_PRIO && count < max; prio++) {
-		struct list_head *pos;
-		list_for_each(pos, &rq->active.queue[prio]) {
-			if (count >= max)
-				break;
-			struct sched_rt_entity *rt = list_entry(pos, struct sched_rt_entity, run_list);
-			struct task_struct *tsk = container_of(rt, struct task_struct, rt);
-			buf[count].pid = tsk->pid;
-			buf[count].state = tsk->__state;
-			buf[count].prio = tsk->prio;
-			unsigned int i;
-			for (i = 0; i < TASK_NAME_LEN - 1 && tsk->comm[i]; i++)
-				buf[count].name[i] = tsk->comm[i];
-			buf[count].name[i] = '\0';
-			count++;
-		}
-	}
+	local_irq_restore(flags);
 	return (long)count;
 }
 
@@ -291,21 +282,30 @@ static long sys_kill(unsigned long a0, unsigned long a1, unsigned long a2)
 		return 0;
 	}
 
+	/*
+	 * task_find() returns a REFFED task: t stays valid across the derefs below
+	 * even if it exits + gets reaped meanwhile (reap's free is deferred to our
+	 * put). Every exit path must put_task_struct(t) — hence the single put.
+	 *
+	 * SP2 (TODO): after raising the flag, wake_up_task(t) if t is blocked in a
+	 * killable sleep, so it runs, sees the flag, and exits.
+	 */
 	struct task_struct *t = task_find(target_pid);
 	if (!t)
 		return -1;			/* no such pid */
-	if (!t->mm)
-		return -1;			/* kernel thread (idle/musb) — unkillable */
-	if (t->__state == TASK_DEAD)
-		return -1;			/* already dying, awaiting reap */
 
-	t->flags |= TASK_SHOULD_EXIT;		/* raise the flag — no free here */
-	/*
-	 * A blocked target exits when it returns from its current syscall.
-	 * Force-waking a target blocked indefinitely is deferred until blocking
-	 * I/O exists (there is none yet — reads are non-blocking).
-	 */
-	return 0;
+	long ret = -1;
+	if (!t->mm) {
+		/* kernel thread (idle/musb) — unkillable */
+	} else if (t->__state == TASK_DEAD) {
+		/* already dying, awaiting reap */
+	} else {
+		t->flags |= TASK_SHOULD_EXIT;	/* cooperative: exits at next syscall boundary */
+		ret = 0;
+	}
+
+	put_task_struct(t);			/* release the ref task_find() took */
+	return ret;
 }
 
 /**

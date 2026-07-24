@@ -71,6 +71,17 @@ struct task_struct {
 	struct mm_struct		*mm;    /* NULL = kernel thread */
 	int				exit_code;
 	char				cwd[64];
+
+	/*
+	 * Lifetime + registry (memory-bound registry; no fixed cap).
+	 * @refcount: freed only when this drops to 0 (see put_task_struct).
+	 *            1 at creation; task_find() takes an extra ref for its caller.
+	 * @tasks:    node on the global all_tasks list (every live task).
+	 * @pid_hash: node on pid_hash_table[pid % PID_HASH_SIZE] bucket.
+	 */
+	int				refcount;
+	struct list_head		tasks;
+	struct list_head		pid_hash;
 };
 
 /**
@@ -154,12 +165,24 @@ void do_exit(int code);
 void sched_defer_free(struct task_struct *tsk);
 
 /*
- * Flat task registry — every task (kernel + user + idle) is registered here.
- * Bounded by MAX_TASKS. Lets kill find a task by pid including ones blocked
- * off the runqueue, and caps the number of live tasks.
+ * Memory-bound task registry — every task (kernel + user + idle) is linked on
+ * the global all_tasks list and hashed by pid. No fixed cap: the only ceiling
+ * is RAM (task creation fails earlier at kmalloc). task_find() by pid also sees
+ * tasks blocked off the runqueue.
  */
-int task_register(struct task_struct *p);	/* 0 ok, -1 if table full */
+#define PID_HASH_SIZE	64		/* buckets; chained with list_head */
+
+void task_register(struct task_struct *p);	/* cannot fail */
 void task_unregister(struct task_struct *p);
-struct task_struct *task_find(int pid);
+struct task_struct *task_find(int pid);		/* returns a REFFED task; caller put_task_struct() */
+
+/*
+ * Task refcount API. Behind these two calls so the single-core impl (plain int
+ * under IRQ mask) can be swapped for atomics on SMP without touching callers.
+ */
+void get_task_struct(struct task_struct *p);
+void put_task_struct(struct task_struct *p);	/* frees kstack + task_struct when refcount hits 0 */
+
+extern struct list_head all_tasks;	/* global list of every live task */
 
 #endif /* _NOTHAN_SCHED_H */

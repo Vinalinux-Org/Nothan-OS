@@ -185,6 +185,12 @@ static inline unsigned long __find_buddy_pfn(unsigned long pfn, unsigned int ord
 	     &pos->member != (head);					\
 	     pos = tmp, tmp = list_entry(tmp->member.next, type, member))
 
+/* Non-safe walk: do NOT del/free pos inside the loop (use _safe for that). */
+#define list_for_each_entry(pos, head, type, member)			\
+	for (pos = list_entry((head)->next, type, member);		\
+	     &pos->member != (head);					\
+	     pos = list_entry(pos->member.next, type, member))
+
 #define LIST_HEAD(name) struct list_head name = { &(name), &(name) }
 
 static inline void list_init(struct list_head *head)
@@ -205,6 +211,18 @@ static inline void list_del(struct list_head *entry)
 {
 	entry->prev->next = entry->next;
 	entry->next->prev = entry->prev;
+}
+
+/*
+ * list_del_init - unlink @entry and re-point it at itself.
+ * After this, list_empty(entry) is true — lets a caller tell "on a list"
+ * from "not on any list" (needed by wake_up_task to know whether a task is
+ * queued on a waitq via run_list or sleeping off all lists).
+ */
+static inline void list_del_init(struct list_head *entry)
+{
+	list_del(entry);
+	list_init(entry);
 }
 
 static inline int list_empty(struct list_head *head)

@@ -70,6 +70,7 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 	p->rt.on_rq   = 0;
 	p->exit_code  = 0;
 	p->mm         = NULL;
+	p->refcount   = 1;	/* existence ref; dropped at reap */
 	p->cwd[0]     = '/';
 	p->cwd[1]     = '\0';
 
@@ -78,12 +79,7 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 		p->comm[i] = name[i];
 	p->comm[i] = '\0';
 
-	if (task_register(p)) {
-		printk("[SPAWN] %s: task table full (MAX_TASKS)\n", name);
-		kfree(kstack_base);
-		kfree(p);
-		return NULL;
-	}
+	task_register(p);	/* memory-bound registry — cannot fail */
 
 	return p;
 }
@@ -345,6 +341,7 @@ struct task_struct *user_task_create_bin(const char *name,
 	p->rt.on_rq   = 0;
 	p->mm         = mm;
 	p->exit_code  = 0;
+	p->refcount   = 1;	/* existence ref; dropped at reap */
 	p->cwd[0]     = '/';
 	p->cwd[1]     = '\0';
 
@@ -353,17 +350,7 @@ struct task_struct *user_task_create_bin(const char *name,
 		p->comm[i] = name[i];
 	p->comm[i] = '\0';
 
-	if (task_register(p)) {
-		printk("[SPAWN] %s: task table full (MAX_TASKS)\n", name);
-		pgd_free(mm);
-		__free_pages(stack_pg, USER_STACK_ORDER);
-		mm_free_bss_chunks(mm, zone);
-		__free_pages(code_pg, order);
-		kfree(mm);
-		kfree(ksp);
-		kfree(p);
-		return NULL;
-	}
+	task_register(p);	/* memory-bound registry — cannot fail */
 
 	printk("[SPAWN] user task \"%s\" pid=%d, code_pa=0x%lx, stack_pa=0x%lx\n",
 	       p->comm, p->pid, code_pa, stack_pa);
