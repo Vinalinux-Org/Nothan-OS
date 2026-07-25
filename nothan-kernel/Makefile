@@ -17,6 +17,10 @@ KBUILD_AFLAGS += -I include -I arch/arm/include
 LDSCRIPT := arch/arm/kernel/kernel.ld
 LDFLAGS  := -nostdlib -T $(LDSCRIPT) -Map $(BUILD_DIR)/kernel.map
 
+# libgcc = compiler runtime (NOT libc): 64-bit divide (__aeabi_uldivmod) etc.
+# needed by CFS-lite vruntime math. Self-contained arithmetic, safe to link.
+LIBGCC := $(shell $(CC) $(KBUILD_CFLAGS) -print-libgcc-file-name)
+
 OBJS := $(BUILD_DIR)/arch/arm/kernel/vectors.o
 OBJS += $(BUILD_DIR)/arch/arm/kernel/traps.o
 OBJS += $(BUILD_DIR)/arch/arm/kernel/head.o
@@ -38,6 +42,7 @@ OBJS += $(BUILD_DIR)/lib/rbtree.o
 OBJS += $(BUILD_DIR)/kernel/spawn.o
 OBJS += $(BUILD_DIR)/kernel/sched/core.o
 OBJS += $(BUILD_DIR)/kernel/sched/rt.o
+OBJS += $(BUILD_DIR)/kernel/sched/fair.o
 OBJS += $(BUILD_DIR)/kernel/sched/wait.o
 OBJS += $(BUILD_DIR)/kernel/sched/completion.o
 OBJS += $(BUILD_DIR)/kernel/ipc/msgq.o
@@ -109,7 +114,7 @@ $(KERNEL_BIN): $(KERNEL_ELF)
 	$(OBJCOPY) -O binary $< $@
 
 $(KERNEL_ELF): $(OBJS) $(LDSCRIPT) | $(BUILD_DIR)
-	$(LD) $(LDFLAGS) -o $@ $(OBJS)
+	$(LD) $(LDFLAGS) -o $@ $(OBJS) $(LIBGCC)
 
 $(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
 	@mkdir -p $(dir $@)

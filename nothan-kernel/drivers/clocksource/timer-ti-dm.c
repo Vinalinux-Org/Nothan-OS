@@ -83,6 +83,18 @@ unsigned long get_jiffies(void)
 }
 
 /*
+ * sched_clock() - monotonic nanoseconds for vruntime accounting.
+ *
+ * TODO(P0): replace with a fine-grained free-running DMTimer3 counter. This
+ * provisional version only has 10 ms (one tick) resolution — too coarse for
+ * real fairness, but it lets fair.c build and run until the clocksource lands.
+ */
+u64 sched_clock(void)
+{
+	return (u64)jiffies * 10000000ULL;	/* 10 ms per tick, in ns */
+}
+
+/*
  * timer_probe - Initialize DMTimer2 as a 10 ms scheduler tick
  *
  * Configures the PRCM to enable the timer clock from the 24 MHz M_OSC,
