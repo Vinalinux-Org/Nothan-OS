@@ -9,6 +9,7 @@
 #include <nothan/mm.h>
 #include <nothan/slab.h>
 #include <nothan/printk.h>
+#include <nothan/time.h>		/* sched_clock() for vruntime timestamps */
 #include <asm/irqflags.h>
 
 struct rq runqueue;
@@ -198,8 +199,11 @@ static void idle_task_init(void)
 		idle_tsk.comm[i] = name[i];
 	idle_tsk.comm[i] = '\0';
 
-	enqueue_task(&runqueue, &idle_tsk);
-		runqueue.curr = &idle_tsk;
+	/* Idle stays OFF the fair tree — it's the fallback pick_next_task()
+	 * returns nothing (see __schedule). It never accrues vruntime. */
+	idle_tsk.rt.vruntime = 0;
+	idle_tsk.rt.exec_start = 0;
+	runqueue.curr = &idle_tsk;
 
 	task_register(&idle_tsk);
 }
@@ -211,12 +215,10 @@ void sched_init(void)
 {
 	struct rq *rq = &runqueue;
 
-	rq->active.bitmap = 0;
+	rb_init(&rq->tasks_timeline);		/* CFS-lite: runnable tasks keyed by vruntime */
+	rq->min_vruntime = 0;
 	rq->nr_running = 0;
 	rq->curr = NULL;
-
-	for (unsigned int i = 0; i < MAX_PRIO; i++)
-		list_init(&rq->active.queue[i]);
 
 	need_resched = 0;
 
@@ -235,8 +237,8 @@ void sched_init(void)
 	 */
 	rq->curr = &idle_tsk;
 
-	printk("[SCHED] %d prio levels, RR timeslice=%d tick(s), idle at %d\n",
-	       MAX_PRIO, RR_TIMESLICE, IDLE_PRIO);
+	printk("[SCHED] CFS-lite: fair virtual-time, target latency %llu ns\n",
+	       (unsigned long long)24000000ULL);
 }
 
 /**
@@ -265,15 +267,21 @@ void __schedule(void)
 
 	struct task_struct *prev = runqueue.curr;
 
-	if (prev && prev->__state == TASK_RUNNING)
+	/* Charge prev for the CPU time it just used (idle is off the tree). */
+	if (prev && prev != &idle_tsk)
+		update_curr(&runqueue);
+
+	/* Put a still-runnable prev back into the tree (never idle). */
+	if (prev && prev->__state == TASK_RUNNING && prev != &idle_tsk)
 		enqueue_task(&runqueue, prev);
 
 	struct task_struct *next = pick_next_task(&runqueue);
-	if (!next) {
-		/* Should never happen — idle task is always available. */
-		runqueue.curr = NULL;
-		return;
-	}
+	if (!next)
+		next = &idle_tsk;		/* nothing runnable → run idle */
+
+	/* Begin next's run: start its slice clock. */
+	next->rt.exec_start = sched_clock();
+	next->rt.prev_sum_exec_runtime = next->rt.sum_exec_runtime;
 
 	runqueue.curr = next;
 	need_resched = 0;
@@ -335,14 +343,14 @@ void scheduler_tick(void)
 {
 	struct task_struct *curr = runqueue.curr;
 
-	if (!curr)
+	if (!curr || curr == &idle_tsk)
 		return;
 
-	if (--curr->rt.time_slice > 0)
-		return;
-
-	curr->rt.time_slice = RR_TIMESLICE;
+	update_curr(&runqueue);			/* advance curr's vruntime */
 #if SCHED_PREEMPT
-	need_resched = 1;
+	/* Preempt once curr has used its fair share of this period. */
+	u64 ran = curr->rt.sum_exec_runtime - curr->rt.prev_sum_exec_runtime;
+	if (ran >= sched_slice(&runqueue))
+		need_resched = 1;
 #endif
 }

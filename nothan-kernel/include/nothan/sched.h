@@ -187,6 +187,11 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name);
 void enqueue_task(struct rq *rq, struct task_struct *p);
 void dequeue_task(struct rq *rq, struct task_struct *p);
 struct task_struct *pick_next_task(struct rq *rq);
+
+/* CFS-lite fair-scheduling core (kernel/sched/fair.c) */
+void update_curr(struct rq *rq);			/* charge the running task's vruntime */
+void place_entity(struct rq *rq, struct task_struct *p, int initial);	/* wakeup/new clamp */
+u64  sched_slice(struct rq *rq);			/* a task's share of one period */
 void schedule(void);
 void __schedule(void);	/* core reschedule; caller must hold IRQs masked */
 void scheduler_tick(void);

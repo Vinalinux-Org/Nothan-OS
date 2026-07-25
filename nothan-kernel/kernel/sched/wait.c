@@ -59,6 +59,7 @@ static void __wake_one(struct wait_queue_head *wq)
 
 	list_del_init(&p->wait_node);
 	p->__state = TASK_RUNNING;
+	place_entity(&runqueue, p, 0);		/* clamp the woken task's vruntime */
 	enqueue_task(&runqueue, p);
 }
 
@@ -111,8 +112,10 @@ void wake_up_task(struct task_struct *t)
 		if (!list_empty(&t->wait_node))
 			list_del_init(&t->wait_node);
 		t->__state = TASK_RUNNING;
-		if (!t->rt.on_rq)
+		if (!t->rt.on_rq) {
+			place_entity(&runqueue, t, 0);	/* clamp on force-wake */
 			enqueue_task(&runqueue, t);
+		}
 	}
 	local_irq_restore(flags);
 }

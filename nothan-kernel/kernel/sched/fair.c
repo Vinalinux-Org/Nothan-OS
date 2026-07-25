@@ -73,7 +73,7 @@ static void update_min_vruntime(struct rq *rq)
 		rq->min_vruntime = v;		/* never goes backwards */
 }
 
-void enqueue_task_fair(struct rq *rq, struct task_struct *p)
+void enqueue_task(struct rq *rq, struct task_struct *p)
 {
 	if (p->rt.on_rq)
 		return;
@@ -82,7 +82,7 @@ void enqueue_task_fair(struct rq *rq, struct task_struct *p)
 	rq->nr_running++;
 }
 
-void dequeue_task_fair(struct rq *rq, struct task_struct *p)
+void dequeue_task(struct rq *rq, struct task_struct *p)
 {
 	if (!p->rt.on_rq)
 		return;
@@ -91,14 +91,24 @@ void dequeue_task_fair(struct rq *rq, struct task_struct *p)
 	rq->nr_running--;
 }
 
-/* The leftmost node has the smallest vruntime — that is the next task to run. */
-struct task_struct *pick_next_task_fair(struct rq *rq)
+/*
+ * Pick the next task: the leftmost node (smallest vruntime), removed from the
+ * tree. The running task lives OFF the tree — same contract as the old rt.c,
+ * so __schedule() and every caller need no change. Returns NULL when nothing is
+ * runnable (the caller then runs the idle task).
+ */
+struct task_struct *pick_next_task(struct rq *rq)
 {
 	struct rbnode *leftmost = rb_first(&rq->tasks_timeline);
+	struct task_struct *p;
 
 	if (!leftmost)
 		return NULL;
-	return task_of(rb_entry(leftmost, struct sched_rt_entity, run_node));
+	p = task_of(rb_entry(leftmost, struct sched_rt_entity, run_node));
+	rb_erase(&rq->tasks_timeline, &p->rt.run_node);
+	p->rt.on_rq = 0;
+	rq->nr_running--;
+	return p;
 }
 
 /* Charge the running task for the CPU time it has used since it was picked. */
@@ -139,7 +149,7 @@ void place_entity(struct rq *rq, struct task_struct *p, int initial)
 /* A task's share of one scheduling period: period / nr_running, floored. */
 u64 sched_slice(struct rq *rq)
 {
-	unsigned int n = rq->nr_running ? rq->nr_running : 1;
+	unsigned int n = rq->nr_running + 1;	/* queued tasks + the running one */
 	u64 period = (n > SCHED_NR_LATENCY) ? (SCHED_MIN_GRAN_NS * n)
 					    : SCHED_LATENCY_NS;
 	return period / n;

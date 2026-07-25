@@ -72,6 +72,12 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 	p->mm         = NULL;
 	p->refcount   = 1;	/* existence ref; dropped at reap */
 	list_init(&p->wait_node);	/* empty = on no wait queue */
+	/* CFS-lite: start at the current min_vruntime so a fresh task can't hog
+	 * the CPU with a stale-low vruntime (place_entity, initial case). */
+	p->rt.vruntime = runqueue.min_vruntime;
+	p->rt.exec_start = 0;
+	p->rt.sum_exec_runtime = 0;
+	p->rt.prev_sum_exec_runtime = 0;
 	p->cwd[0]     = '/';
 	p->cwd[1]     = '\0';
 
@@ -344,6 +350,12 @@ struct task_struct *user_task_create_bin(const char *name,
 	p->exit_code  = 0;
 	p->refcount   = 1;	/* existence ref; dropped at reap */
 	list_init(&p->wait_node);	/* empty = on no wait queue */
+	/* CFS-lite: start at the current min_vruntime so a fresh task can't hog
+	 * the CPU with a stale-low vruntime (place_entity, initial case). */
+	p->rt.vruntime = runqueue.min_vruntime;
+	p->rt.exec_start = 0;
+	p->rt.sum_exec_runtime = 0;
+	p->rt.prev_sum_exec_runtime = 0;
 	p->cwd[0]     = '/';
 	p->cwd[1]     = '\0';
 

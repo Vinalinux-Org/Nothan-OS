@@ -50,8 +50,10 @@ static void msleep_callback(struct timer_list *t)
 
 	if (task->__state != TASK_RUNNING) {
 		task->__state = TASK_RUNNING;
-		if (!task->rt.on_rq)
+		if (!task->rt.on_rq) {
+			place_entity(&runqueue, task, 0);	/* clamp on wake */
 			enqueue_task(&runqueue, task);
+		}
 	}
 }
 
