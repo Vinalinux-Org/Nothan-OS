@@ -71,6 +71,7 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 	p->exit_code  = 0;
 	p->mm         = NULL;
 	p->refcount   = 1;	/* existence ref; dropped at reap */
+	list_init(&p->wait_node);	/* empty = on no wait queue */
 	p->cwd[0]     = '/';
 	p->cwd[1]     = '\0';
 
@@ -342,6 +343,7 @@ struct task_struct *user_task_create_bin(const char *name,
 	p->mm         = mm;
 	p->exit_code  = 0;
 	p->refcount   = 1;	/* existence ref; dropped at reap */
+	list_init(&p->wait_node);	/* empty = on no wait queue */
 	p->cwd[0]     = '/';
 	p->cwd[1]     = '\0';
 

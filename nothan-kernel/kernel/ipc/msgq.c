@@ -39,7 +39,12 @@ void msgq_send(struct msgq *q, const void *msg)
 	local_irq_save(flags);
 
 	while (q->used == q->max_msgs) {		/* full — sleep on not_full */
-		__prepare_to_wait(&q->not_full, TASK_UNINTERRUPTIBLE);
+		if (task_should_exit(runqueue.curr)) {	/* killed while blocked */
+			__finish_wait();
+			local_irq_restore(flags);
+			return;				/* bail — do NOT touch the ring */
+		}
+		__prepare_to_wait(&q->not_full, TASK_INTERRUPTIBLE);
 		__schedule();
 	}
 	__finish_wait();
@@ -63,7 +68,12 @@ void msgq_recv(struct msgq *q, void *out)
 	local_irq_save(flags);
 
 	while (q->used == 0) {				/* empty — sleep on not_empty */
-		__prepare_to_wait(&q->not_empty, TASK_UNINTERRUPTIBLE);
+		if (task_should_exit(runqueue.curr)) {	/* killed while blocked */
+			__finish_wait();
+			local_irq_restore(flags);
+			return;				/* bail — do NOT touch the ring */
+		}
+		__prepare_to_wait(&q->not_empty, TASK_INTERRUPTIBLE);
 		__schedule();
 	}
 	__finish_wait();

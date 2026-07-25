@@ -82,6 +82,14 @@ struct task_struct {
 	int				refcount;
 	struct list_head		tasks;
 	struct list_head		pid_hash;
+
+	/*
+	 * Wait-queue membership node — SEPARATE from rt.run_list (runqueue node).
+	 * Keeping them distinct (à la Linux's wait_queue_entry vs se.run_node) is
+	 * what lets a blocked task be removed from its wait queue unambiguously,
+	 * without the stale-pointer hazard of reusing one node for both.
+	 */
+	struct list_head		wait_node;
 };
 
 /**
@@ -148,6 +156,12 @@ static inline void list_move_tail(struct list_head *entry, struct list_head *hea
 #define set_current_state(state)			\
 	do { runqueue.curr->__state = (state); } while (0)
 
+/* Cooperative-kill flag test — true once sys_kill has marked this task. */
+static inline int task_should_exit(struct task_struct *t)
+{
+	return (t->flags & TASK_SHOULD_EXIT) != 0;
+}
+
 void sched_init(void);
 struct task_struct *task_create(void (*fn)(void), int prio, const char *name);
 void enqueue_task(struct rq *rq, struct task_struct *p);
@@ -163,6 +177,13 @@ extern bool sched_running;  /* true after first real context switch */
 
 void do_exit(int code);
 void sched_defer_free(struct task_struct *tsk);
+
+/*
+ * Force a blocked task runnable so it reaches its next kill check and exits.
+ * No-op unless the task is in a killable (TASK_INTERRUPTIBLE) sleep. Used by
+ * sys_kill to reach tasks blocked off the runqueue.
+ */
+void wake_up_task(struct task_struct *t);
 
 /*
  * Memory-bound task registry — every task (kernel + user + idle) is linked on

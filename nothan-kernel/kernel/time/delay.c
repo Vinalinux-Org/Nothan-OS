@@ -83,11 +83,11 @@ void msleep(unsigned long msecs)
 	__asm__ __volatile__ ("cpsid i" : : : "memory");
 
 	add_timer(&timer);
-	set_current_state(TASK_UNINTERRUPTIBLE);
+	set_current_state(TASK_INTERRUPTIBLE);	/* killable: wake_up_task can end the sleep early */
 
 	__asm__ __volatile__ ("cpsie i" : : : "memory");
 
-	schedule();		/* block until timer callback wakes us */
+	schedule();		/* block until timer callback (or a kill) wakes us */
 
 	del_timer(&timer);
 }

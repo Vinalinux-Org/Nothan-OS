@@ -190,6 +190,7 @@ static void idle_task_init(void)
 		idle_tsk.exit_code  = 0;
 		idle_tsk.mm         = NULL;
 		idle_tsk.refcount   = 1;	/* never exits/reaped → never put → never freed */
+		list_init(&idle_tsk.wait_node);	/* idle never blocks; empty node */
 
 	const char *name = "idle";
 	unsigned int i = 0;

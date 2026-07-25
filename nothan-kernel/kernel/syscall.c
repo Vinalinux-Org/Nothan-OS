@@ -286,9 +286,6 @@ static long sys_kill(unsigned long a0, unsigned long a1, unsigned long a2)
 	 * task_find() returns a REFFED task: t stays valid across the derefs below
 	 * even if it exits + gets reaped meanwhile (reap's free is deferred to our
 	 * put). Every exit path must put_task_struct(t) — hence the single put.
-	 *
-	 * SP2 (TODO): after raising the flag, wake_up_task(t) if t is blocked in a
-	 * killable sleep, so it runs, sees the flag, and exits.
 	 */
 	struct task_struct *t = task_find(target_pid);
 	if (!t)
@@ -301,6 +298,8 @@ static long sys_kill(unsigned long a0, unsigned long a1, unsigned long a2)
 		/* already dying, awaiting reap */
 	} else {
 		t->flags |= TASK_SHOULD_EXIT;	/* cooperative: exits at next syscall boundary */
+		wake_up_task(t);		/* if blocked in a killable sleep, run it so
+						 * it reaches that boundary and exits */
 		ret = 0;
 	}
 

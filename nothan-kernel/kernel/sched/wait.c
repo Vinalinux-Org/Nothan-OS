@@ -29,7 +29,8 @@ void __prepare_to_wait(struct wait_queue_head *wq, unsigned int state)
 	struct task_struct *curr = runqueue.curr;
 
 	curr->__state = state;
-	list_add_tail(&curr->rt.run_list, &wq->task_list);
+	if (list_empty(&curr->wait_node))	/* not already queued (loop re-entry) */
+		list_add_tail(&curr->wait_node, &wq->task_list);
 }
 
 /**
@@ -42,16 +43,21 @@ void __prepare_to_wait(struct wait_queue_head *wq, unsigned int state)
  */
 void __finish_wait(void)
 {
-	runqueue.curr->__state = TASK_RUNNING;
+	struct task_struct *curr = runqueue.curr;
+
+	curr->__state = TASK_RUNNING;
+	/* Remove our own wait_node if a waker (or wake_up_task) hasn't already. */
+	if (!list_empty(&curr->wait_node))
+		list_del_init(&curr->wait_node);
 }
 
 /* Move the first waiter off @wq onto the runqueue. Caller holds IRQs masked. */
 static void __wake_one(struct wait_queue_head *wq)
 {
 	struct task_struct *p = list_first_entry(&wq->task_list,
-					struct task_struct, rt.run_list);
+					struct task_struct, wait_node);
 
-	list_del(&p->rt.run_list);
+	list_del_init(&p->wait_node);
 	p->__state = TASK_RUNNING;
 	enqueue_task(&runqueue, p);
 }
@@ -82,5 +88,31 @@ void wake_up_all(struct wait_queue_head *wq)
 	local_irq_save(flags);
 	while (!list_empty(&wq->task_list))
 		__wake_one(wq);
+	local_irq_restore(flags);
+}
+
+/**
+ * wake_up_task - force a specific task runnable, wherever it is blocked
+ *
+ * Used by sys_kill to reach a task blocked off the runqueue in a killable
+ * (TASK_INTERRUPTIBLE) sleep. Removes it from its wait queue via the dedicated
+ * wait_node (no stale-pointer hazard — that node is never the runqueue node)
+ * and enqueues it. Once scheduled it hits its kill check and exits.
+ *
+ * A task in an uninterruptible sleep is left alone (not killable). A msleep()
+ * timer sleeper is on no wait queue (wait_node empty), so this just enqueues it.
+ */
+void wake_up_task(struct task_struct *t)
+{
+	unsigned long flags;
+
+	local_irq_save(flags);
+	if (t->__state == TASK_INTERRUPTIBLE) {
+		if (!list_empty(&t->wait_node))
+			list_del_init(&t->wait_node);
+		t->__state = TASK_RUNNING;
+		if (!t->rt.on_rq)
+			enqueue_task(&runqueue, t);
+	}
 	local_irq_restore(flags);
 }
