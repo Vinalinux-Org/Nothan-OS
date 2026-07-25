@@ -12,6 +12,8 @@
 #include <nothan/printk.h>
 #include <nothan/platform.h>
 #include <nothan/init.h>
+#include <nothan/time.h>
+#include <asm/irqflags.h>
 
 /*
  * DMTimer2 at PA 0x48040000 (L4_PER), VA 0xF0040000.
@@ -34,6 +36,18 @@
 
 /* PRCM CM_DPLL domain (VA: PA 0x44E00500 -> 0xF0E00500) */
 #define CM_DPLL_CLKSEL_TIMER2	0xF0E00508	/* PA 0x44E00508 */
+
+/*
+ * DMTimer3 — free-running clocksource for sched_clock()/vruntime (P0).
+ * All addresses verified from reference/am335x/ (Ch.2 memory map, Ch.8 PRCM):
+ *   DMTimer3 regs   PA 0x48042000 -> VA 0xF0042000 (in the L4_PER 32 MB map)
+ *   TIMER3 CLKCTRL  PA 0x44E00084 -> VA 0xF0E00084 (CM_PER + 0x84)
+ *   CLKSEL_TIMER3   PA 0x44E0050C -> VA 0xF0E0050C (CM_DPLL + 0x0C)
+ * Register offsets are identical to DMTimer2 (same peripheral).
+ */
+#define DMTIMER3_BASE		0xF0042000
+#define CM_PER_TIMER3_CLKCTRL	0xF0E00084
+#define CM_DPLL_CLKSEL_TIMER3	0xF0E0050C
 
 #define CLKTRCTRL_SW_WKUP	0x2
 #define CLKSEL_M_OSC		0x1
@@ -83,15 +97,94 @@ unsigned long get_jiffies(void)
 }
 
 /*
+ * timer3_clocksource_init() - DMTimer3 as a free-running 24 MHz counter.
+ *
+ * Same PRCM bring-up as the DMTimer2 tick, but configured to free-run with NO
+ * interrupt: reload 0 (full 32-bit range) + auto-reload + start. sched_clock()
+ * then just reads TCRR. Called from timer_probe() so it is up before the
+ * scheduler ever accounts vruntime.
+ */
+static void timer3_clocksource_init(void)
+{
+	unsigned int timeout;
+	u32 val;
+
+	/* L4LS clock domain (shared with DMTimer2) — ensure it is awake. */
+	if ((mmio_read32(CM_PER_L4LS_CLKSTCTRL) & 0x3) != CLKTRCTRL_SW_WKUP) {
+		mmio_write32(CM_PER_L4LS_CLKSTCTRL, CLKTRCTRL_SW_WKUP);
+		timeout = 10000;
+		while (((mmio_read32(CM_PER_L4LS_CLKSTCTRL) & 0x3) != CLKTRCTRL_SW_WKUP) && timeout--)
+			;
+	}
+
+	/* Select M_OSC (24 MHz) and confirm. */
+	mmio_write32(CM_DPLL_CLKSEL_TIMER3, CLKSEL_M_OSC);
+	while ((mmio_read32(CM_DPLL_CLKSEL_TIMER3) & 0x3) != CLKSEL_M_OSC)
+		;
+
+	/* Enable the module clock, wait until functional. */
+	mmio_write32(CM_PER_TIMER3_CLKCTRL, MODULEMODE_ENABLE);
+	timeout = 100000;
+	while (timeout--) {
+		val = mmio_read32(CM_PER_TIMER3_CLKCTRL);
+		if ((val & IDLEST_MASK) == IDLEST_FUNCTIONAL && (val & 0x3) == MODULEMODE_ENABLE)
+			break;
+	}
+
+	/* Soft reset. */
+	mmio_write32(DMTIMER3_BASE + TIOCP_CFG, TIOCP_SOFTRESET);
+	timeout = 10000;
+	while ((mmio_read32(DMTIMER3_BASE + TIOCP_CFG) & TIOCP_SOFTRESET) && timeout--)
+		;
+
+	/* Posted mode; stop before configuring. */
+	mmio_write32(DMTIMER3_BASE + TSICR, TSICR_POSTED);
+	mmio_write32(DMTIMER3_BASE + TCLR, 0);
+	timeout = 10000;
+	while ((mmio_read32(DMTIMER3_BASE + TWPS) & TWPS_W_PEND_TCLR) && timeout--)
+		;
+
+	/* Free-run: reload 0 (wrap 0xFFFFFFFF -> 0), start at 0, auto-reload, NO IRQ. */
+	mmio_write32(DMTIMER3_BASE + TLDR, 0);
+	timeout = 10000;
+	while ((mmio_read32(DMTIMER3_BASE + TWPS) & TWPS_W_PEND_TLDR) && timeout--)
+		;
+	mmio_write32(DMTIMER3_BASE + TCRR, 0);
+	timeout = 10000;
+	while ((mmio_read32(DMTIMER3_BASE + TWPS) & TWPS_W_PEND_TCRR) && timeout--)
+		;
+	mmio_write32(DMTIMER3_BASE + TCLR, TCLR_AR | TCLR_ST);
+	timeout = 10000;
+	while ((mmio_read32(DMTIMER3_BASE + TWPS) & TWPS_W_PEND_TCLR) && timeout--)
+		;
+
+	printk("[TIMER] DMTimer3 @ 24 MHz free-running clocksource (sched_clock)\n");
+}
+
+/*
  * sched_clock() - monotonic nanoseconds for vruntime accounting.
  *
- * TODO(P0): replace with a fine-grained free-running DMTimer3 counter. This
- * provisional version only has 10 ms (one tick) resolution — too coarse for
- * real fairness, but it lets fair.c build and run until the clocksource lands.
+ * Reads the 24 MHz DMTimer3 counter (~41.7 ns resolution). The 32-bit counter
+ * wraps every ~179 s; a software high word extends it to 64 bits. Safe against
+ * the tick ISR via IRQ masking (single core). 1 cycle = 1000/24 ns.
  */
 u64 sched_clock(void)
 {
-	return (u64)jiffies * 10000000ULL;	/* 10 ms per tick, in ns */
+	static u32 last;
+	static u64 cyc_hi;
+	unsigned long flags;
+	u32 now;
+	u64 cycles;
+
+	local_irq_save(flags);
+	now = mmio_read32(DMTIMER3_BASE + TCRR);
+	if (now < last)
+		cyc_hi += 0x100000000ULL;	/* 32-bit counter wrapped */
+	last = now;
+	cycles = cyc_hi + now;
+	local_irq_restore(flags);
+
+	return cycles * 1000ULL / 24ULL;	/* 24 MHz cycles -> ns */
 }
 
 /*
@@ -171,6 +264,9 @@ static int timer_probe(struct platform_device *pdev)
 		;
 	/* Timer intentionally NOT started yet — timer_start() after sched_init() */
 	printk("[TIMER] DMTimer2 @ 24 MHz, 10 ms tick, IRQ %d\n", DMTIMER2_IRQ);
+
+	/* Bring up the free-running clocksource that feeds sched_clock()/vruntime. */
+	timer3_clocksource_init();
 	return 0;
 }
 
