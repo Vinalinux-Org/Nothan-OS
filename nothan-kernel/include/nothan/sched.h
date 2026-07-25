@@ -3,6 +3,7 @@
 
 #include <nothan/types.h>
 #include <nothan/mm.h>
+#include <nothan/rbtree.h>
 
 /* Task state constants (Linux v6.17 compatible, bitmask-style) */
 #define TASK_RUNNING		0x00000000	/* running or on runqueue */
@@ -44,6 +45,21 @@ struct sched_rt_entity {
 	struct list_head	run_list;
 	unsigned int		time_slice;
 	int					on_rq;
+
+	/*
+	 * CFS-lite fair-scheduling fields (added alongside the current rt fields;
+	 * the live scheduler still uses run_list/time_slice until fair.c takes over).
+	 * @vruntime:              virtual runtime — total CPU time this task has run.
+	 * @exec_start:            sched_clock() at the start of the current run.
+	 * @sum_exec_runtime:      real CPU time accumulated (for tick slice check).
+	 * @prev_sum_exec_runtime: sum_exec_runtime snapshot when last picked.
+	 * @run_node:              node in rq.tasks_timeline (keyed by vruntime).
+	 */
+	u64			vruntime;
+	u64			exec_start;
+	u64			sum_exec_runtime;
+	u64			prev_sum_exec_runtime;
+	struct rbnode		run_node;
 };
 
 /**
@@ -109,9 +125,13 @@ struct rt_prio_array {
  * @curr:       pointer to the currently executing task
  */
 struct rq {
-	struct rt_prio_array	active;
+	struct rt_prio_array	active;		/* current (rt.c) — removed at the switch */
 	unsigned int			nr_running;
 	struct task_struct		*curr;
+
+	/* CFS-lite fair runqueue (populated by fair.c; not yet driving schedule()) */
+	struct rbtree			tasks_timeline;	/* runnable tasks keyed by vruntime */
+	u64				min_vruntime;	/* monotonic floor; see place_entity */
 };
 
 /* Bitmap helpers */

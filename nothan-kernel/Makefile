@@ -34,6 +34,7 @@ OBJS += $(BUILD_DIR)/kernel/time/delay.o
 OBJS += $(BUILD_DIR)/kernel/time/timer.o
 OBJS += $(BUILD_DIR)/mm/page_alloc.o
 OBJS += $(BUILD_DIR)/mm/slab.o
+OBJS += $(BUILD_DIR)/lib/rbtree.o
 OBJS += $(BUILD_DIR)/kernel/spawn.o
 OBJS += $(BUILD_DIR)/kernel/sched/core.o
 OBJS += $(BUILD_DIR)/kernel/sched/rt.o
@@ -120,6 +121,13 @@ $(BUILD_DIR)/%.o: %.S | $(BUILD_DIR)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
+
+# Host-side logic tests (native gcc, no board). Add pure-logic tests here.
+HOSTCC ?= cc
+.PHONY: test-rbtree
+test-rbtree:
+	$(HOSTCC) -Wall -Wextra -I include -o $(BUILD_DIR)/rbtree_test \
+		tools/test/rbtree_test.c lib/rbtree.c && $(BUILD_DIR)/rbtree_test
 
 .PHONY: clean
 clean:
