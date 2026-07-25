@@ -185,8 +185,7 @@ static void idle_task_init(void)
 		idle_tsk.__state    = TASK_RUNNING;
 		idle_tsk.flags      = 0;
 		idle_tsk.pid        = 0;
-		idle_tsk.prio       = IDLE_PRIO;
-		idle_tsk.rt.time_slice = RR_TIMESLICE;
+		idle_tsk.prio       = DEFAULT_PRIO;
 		idle_tsk.rt.on_rq   = 0;
 		idle_tsk.exit_code  = 0;
 		idle_tsk.mm         = NULL;

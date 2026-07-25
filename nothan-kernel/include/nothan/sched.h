@@ -29,32 +29,26 @@
  */
 #define TASK_SHOULD_EXIT	0x00000001	/* cooperative kill: task exits at its next syscall boundary */
 
-/* Scheduling constants */
-#define MAX_PRIO			32	/* 32 fixed priority levels */
-#define IDLE_PRIO			(MAX_PRIO - 1)	/* lowest: idle task */
-#define DEFAULT_PRIO		16	/* mid-point for normal tasks */
-#define RR_TIMESLICE		1	/* ticks per timeslice (1 tick = 10 ms) */
+/*
+ * Default task priority. Vestigial under CFS-lite (no priority scheduling) —
+ * kept only as a task attribute reported by the ps syscall.
+ */
+#define DEFAULT_PRIO		16
 
 /**
- * struct sched_rt_entity - per-task scheduling entity
- * @run_list:   node linking this entity into rt_prio_array.queue[prio]
- * @time_slice: remaining ticks before RR rotation
- * @on_rq:      1 if currently enqueued in the runqueue
+ * struct sched_rt_entity - per-task CFS-lite scheduling entity
+ * @run_list:              spare list node, now reused only for the dead_list.
+ * @on_rq:                 1 if the task is runnable (in tasks_timeline).
+ * @vruntime:              virtual runtime — total CPU time this task has run.
+ * @exec_start:            sched_clock() at the start of the current run.
+ * @sum_exec_runtime:      real CPU time accumulated (for the tick slice check).
+ * @prev_sum_exec_runtime: sum_exec_runtime snapshot when last picked.
+ * @run_node:              node in rq.tasks_timeline, keyed by vruntime.
  */
 struct sched_rt_entity {
 	struct list_head	run_list;
-	unsigned int		time_slice;
-	int					on_rq;
+	int			on_rq;
 
-	/*
-	 * CFS-lite fair-scheduling fields (added alongside the current rt fields;
-	 * the live scheduler still uses run_list/time_slice until fair.c takes over).
-	 * @vruntime:              virtual runtime — total CPU time this task has run.
-	 * @exec_start:            sched_clock() at the start of the current run.
-	 * @sum_exec_runtime:      real CPU time accumulated (for tick slice check).
-	 * @prev_sum_exec_runtime: sum_exec_runtime snapshot when last picked.
-	 * @run_node:              node in rq.tasks_timeline (keyed by vruntime).
-	 */
 	u64			vruntime;
 	u64			exec_start;
 	u64			sum_exec_runtime;
@@ -67,7 +61,7 @@ struct sched_rt_entity {
  * @stack:     saved kernel SP (top of saved register frame on kernel stack)
  * @__state:   TASK_RUNNING / TASK_INTERRUPTIBLE / TASK_UNINTERRUPTIBLE / ...
  * @pid:       process identifier (monotonically increasing)
- * @prio:      static priority, 0 = highest, MAX_PRIO-1 = lowest
+ * @prio:      task priority attribute (vestigial under CFS-lite; shown by ps)
  * @rt:        embedded scheduling entity
  * @comm:      human-readable task name (for printk debugging)
  * @mm:        NULL = kernel thread
@@ -109,62 +103,18 @@ struct task_struct {
 };
 
 /**
- * struct rt_prio_array - O(1) priority queue with bitmap
- * @bitmap: u32 bitmask of active priority levels (bit 0 = prio 0)
- * @queue:  per-priority circular doubly-linked list of task entities
- */
-struct rt_prio_array {
-	u32					bitmap;
-	struct list_head	queue[MAX_PRIO];
-};
-
-/**
- * struct rq - the global runqueue
- * @active:     the priority array holding all runnable tasks
- * @nr_running: number of tasks currently on the runqueue
- * @curr:       pointer to the currently executing task
+ * struct rq - the global runqueue (CFS-lite)
+ * @nr_running:     runnable tasks queued in tasks_timeline (excludes curr)
+ * @curr:           the currently executing task (lives off the tree)
+ * @tasks_timeline: runnable tasks keyed by vruntime (leftmost = next to run)
+ * @min_vruntime:   monotonic floor; see place_entity()
  */
 struct rq {
-	struct rt_prio_array	active;		/* current (rt.c) — removed at the switch */
 	unsigned int			nr_running;
 	struct task_struct		*curr;
-
-	/* CFS-lite fair runqueue (populated by fair.c; not yet driving schedule()) */
-	struct rbtree			tasks_timeline;	/* runnable tasks keyed by vruntime */
-	u64				min_vruntime;	/* monotonic floor; see place_entity */
+	struct rbtree			tasks_timeline;
+	u64				min_vruntime;
 };
-
-/* Bitmap helpers */
-static inline void sched_set_bit(struct rq *rq, int prio)
-{
-	rq->active.bitmap |= (1u << prio);
-}
-
-static inline void sched_clear_bit(struct rq *rq, int prio)
-{
-	rq->active.bitmap &= ~(1u << prio);
-}
-
-/*
- * sched_find_first_bit - find highest priority occupied level
- * @bitmap: the active bitmap
- *
- * Returns the index of the least-significant set bit.
- * Return: priority index, or MAX_PRIO if bitmap is zero.
- */
-static inline int sched_find_first_bit(u32 bitmap)
-{
-	if (!bitmap)
-		return MAX_PRIO;
-	return __builtin_ctz(bitmap);
-}
-
-/* list_move_tail: re-append entry to tail of list */
-static inline void list_move_tail(struct list_head *entry, struct list_head *head)
-{
-	list_del(entry);
-	list_add_tail(entry, head);
-}
 
 /* list_first_entry: return pointer to first struct in list */
 #define list_first_entry(head, type, member) \

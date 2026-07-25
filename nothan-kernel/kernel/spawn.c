@@ -66,7 +66,6 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 	p->flags      = 0;
 	p->pid        = next_pid++;
 	p->prio       = prio;
-	p->rt.time_slice = RR_TIMESLICE;
 	p->rt.on_rq   = 0;
 	p->exit_code  = 0;
 	p->mm         = NULL;
@@ -344,7 +343,6 @@ struct task_struct *user_task_create_bin(const char *name,
 	p->flags      = 0;
 	p->pid        = next_pid++;
 	p->prio       = DEFAULT_PRIO;
-	p->rt.time_slice = RR_TIMESLICE;
 	p->rt.on_rq   = 0;
 	p->mm         = mm;
 	p->exit_code  = 0;
