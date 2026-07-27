@@ -44,6 +44,32 @@ static unsigned int uart_current_baud = 115200;	/* console (UART0) */
 /* ------------------------------------------------------------------ */
 /* RX ring (single-producer ISR / single-consumer read) + polled TX    */
 /* ------------------------------------------------------------------ */
+/*
+ * Locking: NONE, on purpose.  This is a single-producer / single-consumer
+ * ring and the two ends never write the same variable:
+ *
+ *      rx_head  written ONLY by the ISR      (uart_irq_handler)
+ *      rx_tail  written ONLY by the consumer (uart_read / uart_getchar)
+ *      rx_buf   written by the ISR at [head], read by the consumer at [tail]
+ *
+ * Each side reads the other's index but never writes it, so there is no
+ * read-modify-write to tear.  `volatile` is what stops the compiler caching
+ * an index in a register across the loop; that is all that is needed HERE.
+ *
+ * Why no barrier between "write rx_buf[head]" and "publish rx_head":
+ * an ISR runs to completion with respect to the interrupted code - mainline
+ * cannot resume in the middle of it - so on this single core the consumer can
+ * never observe the new head without the byte that goes with it.
+ *
+ * WHAT BREAKS LATER (checked 2026-07-27, deliberately left alone):
+ * on a multi-core, weakly-ordered ARM the two stores can become visible to
+ * another core out of order, and the consumer reads a head that points at a
+ * byte not yet written.  The fix that day is WRITE_ONCE + smp_wmb() before
+ * publishing head, and smp_rmb() after reading it - NOT a lock; the SPSC
+ * structure is already correct, only the ordering is missing.  `volatile` is
+ * also the wrong tool then: it orders nothing, it only defeats caching.
+ * See Documentation/locking-map.md.
+ */
 
 static void uart_irq_handler(unsigned int irq)
 {
