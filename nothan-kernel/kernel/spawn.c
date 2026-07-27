@@ -8,8 +8,39 @@
 #include <nothan/slab.h>
 #include <nothan/printk.h>
 #include <nothan/fs.h>
+#include <asm/irqflags.h>
 
 static int next_pid = 1;
+
+/**
+ * pid_alloc() - hand out the next unused PID
+ *
+ * next_pid++ is a read-modify-write: load, add, store.  Two creators that
+ * interleave between the load and the store both read the same value and both
+ * hand it out, so two live tasks share a PID - and pid_hash then resolves that
+ * number to whichever one hashed last, making kill() and wait() hit the wrong
+ * process.
+ *
+ * Today this cannot happen by luck, not by design: every task is created from
+ * kernel_main at boot, sequentially, before anything else runs.  It becomes
+ * live the day spawn() is a syscall and two processes can create at once.
+ * Fixed now because the fix is three lines and the failure mode - a signal
+ * delivered to the wrong process - is one UART cannot explain.
+ *
+ * Deliberately not reused after a task dies: a recycled PID lets a parent's
+ * wait(pid) collect a brand-new process that merely inherited the number.
+ */
+static int pid_alloc(void)
+{
+	unsigned long flags;
+	int pid;
+
+	local_irq_save(flags);
+	pid = next_pid++;
+	local_irq_restore(flags);
+
+	return pid;
+}
 
 static void task_exit(void)
 {
@@ -64,7 +95,7 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 	p->user_lr    = 0;
 	p->__state    = TASK_RUNNING;
 	p->flags      = 0;
-	p->pid        = next_pid++;
+	p->pid        = pid_alloc();
 	p->prio       = prio;
 	p->rt.on_rq   = 0;
 	p->exit_code  = 0;
@@ -341,7 +372,7 @@ struct task_struct *user_task_create_bin(const char *name,
 	p->user_lr    = 0;
 	p->__state    = TASK_RUNNING;
 	p->flags      = 0;
-	p->pid        = next_pid++;
+	p->pid        = pid_alloc();
 	p->prio       = DEFAULT_PRIO;
 	p->rt.on_rq   = 0;
 	p->mm         = mm;
