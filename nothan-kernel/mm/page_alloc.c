@@ -8,6 +8,42 @@
 #include <nothan/mm.h>
 #include <nothan/printk.h>
 #include <asm/memory.h>
+#include <asm/irqflags.h>
+
+/*
+ * WHAT THE CRITICAL SECTIONS BELOW PROTECT
+ *
+ *   zone->free_area[].free_list   buddy free lists
+ *   zone->free_pages              running free-page count
+ *   page->flags / page->private   only for pages being moved in or out of a
+ *                                 free list; a page already handed to a caller
+ *                                 is owned by that caller and needs no lock
+ *
+ * Why IRQ masking is the right tool here, and why it is enough:
+ *
+ *   Two contexts can interleave on this core - the timer preempting a task
+ *   mid-update, and an ISR.  No ISR in this kernel allocates (every caller of
+ *   alloc_pages/kmalloc is process or syscall context), so preemption is the
+ *   real threat; but preemption is *driven by* the timer IRQ, so masking IRQs
+ *   shuts out both sources at once.  That makes it correct, not merely
+ *   convenient.  It is wider than strictly necessary - a preempt_disable()
+ *   would fit the need exactly - but this kernel has no preempt_count yet, and
+ *   inventing one here means a new mechanism in the same change as a bug fix.
+ *
+ *   The window matters: __free_pages() coalesces up to MAX_ORDER times with
+ *   IRQs masked.  That is bounded and short (pointer surgery only, no I/O and
+ *   no printk), so the added interrupt latency is acceptable.  Do not put a
+ *   printk inside these sections - it would hold IRQs off for milliseconds.
+ *
+ *   One boundary for the whole zone, not one per order: __free_pages() walks
+ *   *across* orders while coalescing (del from order N, retry at N+1).  A
+ *   per-order lock would mean holding several at once in an order that varies
+ *   with the merge - an ABBA deadlock built by hand.
+ *
+ * On SMP this is NOT a lock (it masks only the local core) and every section
+ * here becomes a real zone->lock.  That day is deliberately deferred; see R3
+ * in Documentation/process-mm-design.md.
+ */
 
 /*
  * DDR pool end address.
@@ -125,11 +161,16 @@ static void expand(struct page *page, struct zone *zone, unsigned int low, unsig
 struct page *alloc_pages(gfp_t gfp, unsigned int order)
 {
 	struct zone *zone = &mem_zone;
+	unsigned long flags;
 
 	(void)gfp;
 
+	/* Cheap argument check, no shared state touched yet - keep it outside
+	 * the masked section so a bad order costs nothing in latency. */
 	if (order > MAX_ORDER)
 		return NULL;
+
+	local_irq_save(flags);
 
 	for (unsigned int current_order = order; current_order <= MAX_ORDER; current_order++) {
 		struct free_area *area = &zone->free_area[current_order];
@@ -148,9 +189,13 @@ struct page *alloc_pages(gfp_t gfp, unsigned int order)
 		if (current_order > order)
 			expand(page, zone, order, current_order);
 
+		/* The page is off every free list and refcounted to us before we
+		 * unmask, so it is ours alone by the time anyone else can run. */
+		local_irq_restore(flags);
 		return page;
 	}
 
+	local_irq_restore(flags);
 	return NULL;
 }
 
@@ -164,6 +209,12 @@ void __free_pages(struct page *page, unsigned int order)
 	struct zone *zone = &mem_zone;
 	unsigned long pfn = page - zone->page_array;
 	unsigned long nr_freed = 1UL << order;	/* pages actually being freed */
+	unsigned long flags;
+
+	/* The whole coalescing walk must be one indivisible step.  Splitting it
+	 * would let another context observe - or worse, allocate - a buddy that
+	 * we have already unlinked but not yet merged. */
+	local_irq_save(flags);
 
 	while (order < MAX_ORDER) {
 		unsigned long buddy_pfn = __find_buddy_pfn(pfn, order);
@@ -193,4 +244,6 @@ void __free_pages(struct page *page, unsigned int order)
 	 * freed, so adding the full (1<<order) coalesced size double-counts. */
 	zone->free_pages += nr_freed;
 	page->_refcount = 0;
+
+	local_irq_restore(flags);
 }

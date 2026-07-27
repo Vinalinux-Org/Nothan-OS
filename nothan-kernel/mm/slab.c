@@ -9,6 +9,42 @@
 #include <nothan/mm.h>
 #include <nothan/printk.h>
 #include <asm/memory.h>
+#include <asm/irqflags.h>
+
+/*
+ * WHAT THE CRITICAL SECTIONS BELOW PROTECT
+ *
+ *   cache->free_list      singly-linked list of free objects, threaded through
+ *                         the first word of each free object itself
+ *   cache->free_objects   running count
+ *   page->slab            set when a page is handed to a cache, read by kfree()
+ *                         to decide slab-object vs whole-buddy-block
+ *
+ * The subtle part is not the list surgery - it is that kmalloc() does
+ * CHECK -> REFILL -> ACT on cache->free_list with a call to alloc_pages() in
+ * the middle:
+ *
+ *      if (!cache->free_list)      <- CHECK
+ *              slab_fill_page(...) <- REFILL (allocates a page)
+ *      obj = cache->free_list;     <- ACT
+ *
+ * Masking inside alloc_pages() alone would leave CHECK..ACT open: a preemption
+ * after CHECK lets another task drain the very list we just found non-empty,
+ * and we come back to read a NULL free_list and dereference it.  So the
+ * boundary has to enclose the whole sequence, which means it NESTS over the
+ * one inside alloc_pages().  That nesting is safe by construction:
+ * local_irq_restore() puts back the flags that local_irq_save() captured, so
+ * the inner section leaves IRQs masked - it never re-enables them under us.
+ * (This is exactly the property the header comment in asm/irqflags.h calls
+ * out, and exactly what an unconditional "cpsie i" would get wrong.)
+ *
+ * Cost accepted: IRQs stay masked across alloc_pages() + slab_fill_page() on a
+ * refill.  That is bounded - a buddy walk plus one page of pointer writes, no
+ * I/O and no printk - so it is short in the same way the buddy section is.
+ *
+ * On SMP each of these becomes a real cache->lock; see R3 in
+ * Documentation/process-mm-design.md.
+ */
 
 #define SLAB_SIZES		7
 
@@ -92,6 +128,8 @@ void slab_init(void)
  */
 void *kmalloc(size_t size, unsigned int flags)
 {
+	unsigned long irqflags;
+
 	(void)flags;
 
 	/* Sizes larger than the biggest cache go to the buddy allocator. */
@@ -99,6 +137,10 @@ void *kmalloc(size_t size, unsigned int flags)
 		unsigned int order = 0;
 		while ((PAGE_SIZE << order) < size)
 			order++;
+
+		/* No slab state is touched on this path: alloc_pages() masks for
+		 * its own free lists, and the page it returns is exclusively ours
+		 * before it returns, so page->slab/private need no section. */
 		struct page *page = alloc_pages(GFP_KERNEL, order);
 		if (!page)
 			return NULL;
@@ -110,6 +152,7 @@ void *kmalloc(size_t size, unsigned int flags)
 		return (void *)__phys_to_virt(page_to_phys(get_zone(), page));
 	}
 
+	/* Picking the cache reads only immutable table data - keep it out. */
 	unsigned int idx = 0;
 	for (; idx < SLAB_SIZES; idx++)
 		if (cache_sizes[idx] >= size)
@@ -117,16 +160,23 @@ void *kmalloc(size_t size, unsigned int flags)
 
 	struct slab_cache *cache = &caches[idx];
 
+	/* CHECK -> REFILL -> ACT must be indivisible; see the file header. */
+	local_irq_save(irqflags);
+
 	if (!cache->free_list) {
 		struct page *page = alloc_pages(GFP_KERNEL, 0);
-		if (!page)
+		if (!page) {
+			local_irq_restore(irqflags);
 			return NULL;
+		}
 		slab_fill_page(cache, page);
 	}
 
 	void *obj = cache->free_list;
 	cache->free_list = *(void **)obj;
 	cache->free_objects--;
+
+	local_irq_restore(irqflags);
 
 	return obj;
 }
@@ -137,6 +187,8 @@ void *kmalloc(size_t size, unsigned int flags)
  */
 void kfree(void *ptr)
 {
+	unsigned long irqflags;
+
 	if (!ptr)
 		return;
 
@@ -156,13 +208,24 @@ void kfree(void *ptr)
 		 * Direct buddy allocation (size > largest cache). kmalloc() stashed
 		 * the order in page->private; release the whole block so large
 		 * allocations (e.g. a task's 16 KB kernel stack) don't leak.
+		 *
+		 * No slab section needed - __free_pages() masks for the buddy
+		 * lists, and page->slab/private belong to a block only this
+		 * caller still holds.
 		 */
 		__free_pages(page, page->private);
 		return;
 	}
 
+	/* Push onto the free list: two stores that must not be split, or a
+	 * preempting allocator sees a list head pointing at an object whose
+	 * next-pointer is still stale. */
+	local_irq_save(irqflags);
+
 	void **head = (void **)ptr;
 	*head = cache->free_list;
 	cache->free_list = ptr;
 	cache->free_objects++;
+
+	local_irq_restore(irqflags);
 }
