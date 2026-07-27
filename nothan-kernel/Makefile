@@ -10,9 +10,15 @@ KBUILD_CFLAGS += -mno-unaligned-access -fno-common
 KBUILD_CFLAGS += -ffreestanding -nostdlib -fno-stack-protector
 KBUILD_CFLAGS += -Wno-array-bounds -Wno-unused-parameter
 KBUILD_CFLAGS += -I include -I arch/arm/include
+# Header dependency tracking. Without this, editing a header does NOT rebuild
+# the .c files that include it, so an incremental build can link objects
+# compiled against two different versions of the same inline function — a
+# corruption class that is invisible until it misbehaves on the board.
+KBUILD_CFLAGS += -MMD -MP
 
 KBUILD_AFLAGS := -mcpu=cortex-a8 -marm -D__ASSEMBLY__
 KBUILD_AFLAGS += -I include -I arch/arm/include
+KBUILD_AFLAGS += -MMD -MP
 
 LDSCRIPT := arch/arm/kernel/kernel.ld
 LDFLAGS  := -nostdlib -T $(LDSCRIPT) -Map $(BUILD_DIR)/kernel.map
@@ -75,6 +81,8 @@ OBJS += $(BUILD_DIR)/drivers/i2c/i2c-core.o
 OBJS += $(BUILD_DIR)/drivers/i2c/i2c-omap.o
 OBJS += $(BUILD_DIR)/drivers/usb/musb-hcd.o
 
+DEPS := $(OBJS:.o=.d)
+
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 KERNEL_BIN := $(BUILD_DIR)/kernel.bin
 
@@ -126,13 +134,47 @@ $(BUILD_DIR)/%.o: %.S | $(BUILD_DIR)
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-# Host-side logic tests (native gcc, no board). Add pure-logic tests here.
+# ---------------------------------------------------------------------------
+# Host-side logic tests (native gcc, no board).
+#
+# Race and lost-wakeup bugs cannot be investigated over UART, so anything that
+# touches shared state gets shaken out here first, on a machine with a real
+# debugger and ThreadSanitizer.
+#
+# tools/test/include is searched FIRST so that <asm/...> resolves to the host
+# stubs instead of the ARM headers. The kernel headers themselves are NOT
+# forked — include/nothan/wait.h pulls in <asm/irqflags.h> unconditionally, and
+# the stub is what lets it compile off-target. One source of truth.
+# ---------------------------------------------------------------------------
 HOSTCC ?= cc
+HOST_CFLAGS := -Wall -Wextra -I tools/test/include -I include
+
 .PHONY: test-rbtree
-test-rbtree:
-	$(HOSTCC) -Wall -Wextra -I include -o $(BUILD_DIR)/rbtree_test \
+test-rbtree: | $(BUILD_DIR)
+	$(HOSTCC) $(HOST_CFLAGS) -o $(BUILD_DIR)/rbtree_test \
 		tools/test/rbtree_test.c lib/rbtree.c && $(BUILD_DIR)/rbtree_test
+
+.PHONY: test-fair
+test-fair: | $(BUILD_DIR)
+	$(HOSTCC) $(HOST_CFLAGS) -o $(BUILD_DIR)/fair_sim \
+		tools/test/fair_sim.c lib/rbtree.c && $(BUILD_DIR)/fair_sim
+
+# msgq/wait compiled from the SAME sources the board builds, run on a pthread
+# scheduler stub (tools/test/host_sched.c). Catches lost wakeups and dropped or
+# duplicated messages — the failures UART cannot show, because their symptom on
+# the board is silence or a fault far from the cause.
+.PHONY: test-msgq
+test-msgq: | $(BUILD_DIR)
+	$(HOSTCC) $(HOST_CFLAGS) -I tools/test -o $(BUILD_DIR)/msgq_test \
+		tools/test/msgq_test.c tools/test/host_sched.c \
+		kernel/ipc/msgq.c kernel/sched/wait.c -lpthread \
+		&& $(BUILD_DIR)/msgq_test
+
+.PHONY: test
+test: test-rbtree test-fair test-msgq
 
 .PHONY: clean
 clean:
 	rm -rf $(BUILD_DIR)
+
+-include $(DEPS)
