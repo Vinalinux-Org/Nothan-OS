@@ -27,23 +27,68 @@ static struct list_head dead_list;
 
 void sched_defer_free(struct task_struct *tsk)
 {
+	unsigned long flags;
+
+	/*
+	 * do_exit() runs with IRQs enabled, so this list_add() can be preempted
+	 * partway through - and list_add() is several stores, not one.  The next
+	 * task to schedule runs reap_dead(), which walks dead_list; catching it
+	 * half-linked means following a pointer into nothing.  Mask for the
+	 * surgery only.
+	 */
+	local_irq_save(flags);
 	list_add(&tsk->rt.run_list, &dead_list);
+	local_irq_restore(flags);
+
+	/* Deliberately outside the mask: printk is slow (it busy-waits on the
+	 * UART), and holding IRQs off across it costs milliseconds. */
 	pr_debug("[DEAD] queued pid=%d kstack=%p\n",
 		 tsk->pid, tsk->kstack_base);
 }
 
+/*
+ * reap_dead() - free the corpses queued by sched_defer_free()
+ *
+ * Runs from the schedule() wrapper with IRQs in whatever state the caller had
+ * them, NOT from inside __schedule() under the mask.  That matters: reaping
+ * does a pr_debug (busy-waits on the UART) and two kfree()s, and holding IRQs
+ * off across a printk costs milliseconds.
+ *
+ * Shape: claim ONE victim under the mask, then process it unmasked, repeat.
+ * Walking the list unmasked would be a fresh bug, not a fix - two contexts
+ * entering schedule() would both see the same corpse, both unregister it and
+ * both put_task_struct() it, i.e. a double free.  Unlinking is what makes a
+ * corpse ours, so unlinking is the part that must be indivisible.
+ *
+ * Everything after the unlink is safe unmasked because the victim is now
+ * reachable from nowhere: off dead_list here, off all_tasks + pid_hash in
+ * task_unregister(), and its stack is not the one we are running on.
+ */
 static void reap_dead(void)
 {
-	struct sched_rt_entity *rt, *tmp;
+	unsigned long flags;
 
-	list_for_each_entry_safe(rt, tmp, &dead_list,
-				 struct sched_rt_entity, run_list) {
-		struct task_struct *z = container_of(rt, struct task_struct, rt);
+	for (;;) {
+		struct sched_rt_entity *rt, *tmp;
+		struct task_struct *z = NULL;
 
-		if (z == runqueue.curr)
-			continue;	/* never free the stack we're running on */
+		local_irq_save(flags);
+		list_for_each_entry_safe(rt, tmp, &dead_list,
+					 struct sched_rt_entity, run_list) {
+			struct task_struct *c = container_of(rt, struct task_struct, rt);
+
+			if (c == runqueue.curr)
+				continue;	/* never free the stack we're running on */
+			list_del(&rt->run_list);	/* off dead_list: now ours */
+			z = c;
+			break;
+		}
+		local_irq_restore(flags);
+
+		if (!z)
+			return;			/* nothing left we may reap */
+
 		pr_debug("[REAP] put pid=%d kstack=%p\n", z->pid, z->kstack_base);
-		list_del(&rt->run_list);	/* off dead_list */
 		task_unregister(z);		/* off all_tasks + pid_hash */
 		/*
 		 * Drop the existence ref. Frees now if nobody else holds one; if a
@@ -262,7 +307,11 @@ void sched_init(void)
  */
 void __schedule(void)
 {
-	reap_dead();
+	/* reap_dead() used to run here.  It moved up into the schedule()
+	 * wrapper so the printk + kfree it does are not done with IRQs masked;
+	 * see reap_dead().  Semantics are unchanged: at the top of schedule(),
+	 * runqueue.curr is still prev, so the "never reap the stack we run on"
+	 * test sees exactly what it saw here. */
 
 	struct task_struct *prev = runqueue.curr;
 
@@ -324,6 +373,19 @@ void __schedule(void)
 void schedule(void)
 {
 	unsigned long flags;
+
+	/*
+	 * Reap before masking, so the corpse cleanup (printk + two kfree()s)
+	 * runs with the caller's IRQ state rather than under our mask.
+	 *
+	 * Honest limit: callers that already have IRQs off - the vector_irq
+	 * preemption path, and blocking primitives that call __schedule()
+	 * directly - get no latency win here.  The first still reaps (just
+	 * masked, as before); the second does not reap at all, which is fine
+	 * because reaping is best-effort catch-up work and the tick drives
+	 * schedule() regularly.
+	 */
+	reap_dead();
 
 	local_irq_save(flags);
 	__schedule();
