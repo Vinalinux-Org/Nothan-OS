@@ -9,6 +9,7 @@
 #include <nothan/mm.h>
 #include <nothan/slab.h>
 #include <nothan/printk.h>
+#include <nothan/fs.h>
 
 /**
  * do_exit() - terminate the current task and release resources
@@ -30,6 +31,20 @@ void do_exit(int code)
 
 	tsk->exit_code = code;
 	tsk->__state = TASK_DEAD;	/* EXIT_DEAD: done, on dead_list, awaiting reap */
+
+	/*
+	 * Close whatever this task left open, before the address space goes.
+	 * Until this existed, every task that died with a file open leaked the
+	 * struct file, its inode and the driver's private_data - not
+	 * occasionally, every time, because nothing else ever closed them.
+	 *
+	 * This is also the mechanism the rest of the kernel's resource
+	 * lifetimes are meant to hang off: anything given an fd gets released
+	 * here for free, with no per-resource teardown code (see D5 in
+	 * Documentation/process-mm-design.md).
+	 */
+	files_free(tsk->files);
+	tsk->files = NULL;
 
 	/* Release user-space resources if any */
 	if (tsk->mm) {

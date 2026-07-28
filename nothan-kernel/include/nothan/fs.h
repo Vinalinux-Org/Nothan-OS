@@ -81,6 +81,35 @@ struct file_entry {
 	unsigned long size;
 };
 
+#define MAX_FDS		16
+
+/**
+ * struct files_struct - one process's open files
+ * @fd: descriptor slots; NULL = free. fd 0/1/2 are reserved for the UART
+ *      console and are never handed out (see FD_FIRST in vfs.c).
+ *
+ * Per process, not global.  A global table meant any process could reach any
+ * other process's open file by guessing a small integer - and, worse, that two
+ * tasks could legitimately hold the same fd number, which turns the
+ * "check non-NULL then use" in vfs_read/write/ioctl into a use-after-free the
+ * moment one of them closes.
+ *
+ * No lock here, and the reason is a decision rather than an oversight: a
+ * process is single-threaded (C6, see Documentation/process-mm-design.md), so
+ * exactly one task ever reaches a given table.  The day threads exist, this
+ * struct is where their lock goes, and struct file will need a refcount so a
+ * close on one thread cannot free a file another is mid-read on.
+ */
+struct files_struct {
+	struct file *fd[MAX_FDS];
+};
+
+struct files_struct *files_alloc(void);		/* empty table, or NULL */
+void		     files_free(struct files_struct *files);	/* closes all */
+
+/* PID 0's table. Static so it exists before the allocator has users; see vfs.c. */
+extern struct files_struct init_files;
+
 /* VFS API */
 int vfs_mount(const char *dev_name, const char *fs_type);
 int vfs_open(const char *pathname, int flags);

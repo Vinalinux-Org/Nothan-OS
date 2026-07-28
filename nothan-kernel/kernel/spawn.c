@@ -100,6 +100,7 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 	p->rt.on_rq   = 0;
 	p->exit_code  = 0;
 	p->mm         = NULL;
+	p->files      = NULL;	/* kernel thread: opens nothing, so owns no table */
 	p->refcount   = 1;	/* existence ref; dropped at reap */
 	list_init(&p->wait_node);	/* empty = on no wait queue */
 	/* CFS-lite: start at the current min_vruntime so a fresh task can't hog
@@ -175,6 +176,18 @@ struct task_struct *user_task_create_bin(const char *name,
 		return NULL;
 
 	/*
+	 * Descriptor table first, so every failure path below has exactly one
+	 * extra thing to undo. A user task always gets one - it is what lets it
+	 * open anything at all - and it is per process, never shared with the
+	 * creator (Q5: spawn passes argv and nothing else).
+	 */
+	p->files = files_alloc();
+	if (!p->files) {
+		kfree(p);
+		return NULL;
+	}
+
+	/*
 	 * Kernel (SVC) stack: 16 KB. 4 KB was risky — a user task takes a
 	 * syscall (vector_svc re-enables IRQs), and a timer IRQ can then nest
 	 * vector_irq → irq_handler → schedule → __switch_to on top of the
@@ -184,6 +197,7 @@ struct task_struct *user_task_create_bin(const char *name,
 #define KSTACK_SIZE  (4u * PAGE_SIZE)
 	unsigned long *ksp = (unsigned long *)kmalloc(KSTACK_SIZE, GFP_KERNEL);
 	if (!ksp) {
+		files_free(p->files);
 		kfree(p);
 		return NULL;
 	}
@@ -191,6 +205,7 @@ struct task_struct *user_task_create_bin(const char *name,
 	struct mm_struct *mm = (struct mm_struct *)kmalloc(sizeof(*mm), GFP_KERNEL);
 	if (!mm) {
 		kfree(ksp);
+		files_free(p->files);
 		kfree(p);
 		return NULL;
 	}
@@ -202,6 +217,7 @@ struct task_struct *user_task_create_bin(const char *name,
 		printk("[SPAWN] %s: blob too small (%lu B)\n", name, blob_size);
 		kfree(mm);
 		kfree(ksp);
+		files_free(p->files);
 		kfree(p);
 		return NULL;
 	}
@@ -211,6 +227,7 @@ struct task_struct *user_task_create_bin(const char *name,
 		       name, (unsigned)hdr->magic, (unsigned)USER_BIN_MAGIC);
 		kfree(mm);
 		kfree(ksp);
+		files_free(p->files);
 		kfree(p);
 		return NULL;
 	}
@@ -227,6 +244,7 @@ struct task_struct *user_task_create_bin(const char *name,
 		printk("[SPAWN] %s: alloc_pages(code, order=%u) failed\n", name, order);
 		kfree(mm);
 		kfree(ksp);
+		files_free(p->files);
 		kfree(p);
 		return NULL;
 	}
@@ -267,7 +285,8 @@ struct task_struct *user_task_create_bin(const char *name,
 				__free_pages(code_pg, order);
 				kfree(mm);
 				kfree(ksp);
-				kfree(p);
+				files_free(p->files);
+		kfree(p);
 				return NULL;
 			}
 
@@ -286,7 +305,8 @@ struct task_struct *user_task_create_bin(const char *name,
 				__free_pages(code_pg, order);
 				kfree(mm);
 				kfree(ksp);
-				kfree(p);
+				files_free(p->files);
+		kfree(p);
 				return NULL;
 			}
 
@@ -320,6 +340,7 @@ struct task_struct *user_task_create_bin(const char *name,
 		__free_pages(code_pg, order);
 		kfree(mm);
 		kfree(ksp);
+		files_free(p->files);
 		kfree(p);
 		return NULL;
 	}
@@ -343,6 +364,7 @@ struct task_struct *user_task_create_bin(const char *name,
 		__free_pages(code_pg, order);
 		kfree(mm);
 		kfree(ksp);
+		files_free(p->files);
 		kfree(p);
 		return NULL;
 	}

@@ -5,6 +5,10 @@
 #include <nothan/mm.h>
 #include <nothan/rbtree.h>
 
+/* Only ever stored as a pointer here; fs.h has the definition. Forward-declared
+ * rather than included so the host test harness does not drag in the VFS. */
+struct files_struct;
+
 /* Task state constants (Linux v6.17 compatible, bitmask-style) */
 #define TASK_RUNNING		0x00000000	/* running or on runqueue */
 #define TASK_INTERRUPTIBLE	0x00000001	/* sleep, wakeable by signal */
@@ -79,6 +83,7 @@ struct task_struct {
 	struct sched_rt_entity		rt;
 	char				comm[16];
 	struct mm_struct		*mm;    /* NULL = kernel thread */
+	struct files_struct		*files;	/* NULL = kernel thread (opens nothing) */
 	int				exit_code;
 	char				cwd[64];
 

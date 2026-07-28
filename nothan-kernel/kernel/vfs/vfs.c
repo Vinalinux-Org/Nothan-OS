@@ -8,10 +8,73 @@
 #include <nothan/genhd.h>
 #include <nothan/printk.h>
 #include <nothan/slab.h>
+#include <nothan/sched.h>
 #include <asm/irqflags.h>
 
-#define MAX_FDS 16
-static struct file *fd_table[MAX_FDS];
+/*
+ * The descriptor table is per process (task_struct.files); see struct
+ * files_struct in fs.h for why it is not global any more.
+ *
+ * Every vfs_* entry point resolves it through current_fdt(), which returns
+ * NULL for a kernel thread - kernel threads have no descriptor table because
+ * they never open anything, and giving them one would only create a place for
+ * an fd to leak with nobody to close it.
+ */
+/* Placeholder marking a slot as "reserved while we build the file". Any
+ * non-NULL value works — the fd is claimed under a masked region, then the
+ * slow work (walk_path, kmalloc, fops->open) runs unmasked, and only then is
+ * the real pointer stored. fd_lookup() treats it as absent so a concurrent
+ * read/write/ioctl cannot follow it as a pointer. */
+#define FD_RESERVED  ((struct file *)(uintptr_t)0x1)
+
+/* fd 0/1/2 are stdin/stdout/stderr — the UART, special-cased by NUMBER in
+ * sys_read (fd 0) and sys_writefile (fd 1). Never hand those numbers to a real
+ * file: if we did, a write to that file would silently go to the UART instead
+ * (it does, in the monkey build where /dev/input0 is not opened, so fd 1 is
+ * free and a persistence save lands on it). Allocate file fds from 3 up. */
+#define FD_FIRST  3
+
+/*
+ * Descriptor table of PID 0 (the idle/swapper task).
+ *
+ * kernel_main() runs as PID 0 once sched_init() has installed the idle task as
+ * runqueue.curr, and it legitimately opens files there - mounting, and the FAT
+ * write self-test. Without a table of its own that code would get "no
+ * descriptor table" and the boot self-tests would fail in a way that looks
+ * like a filesystem fault.
+ *
+ * Static, not kmalloc'd, for the same reason Linux gives init_task a static
+ * init_files: it must exist before any allocator-backed process does, and PID 0
+ * never exits, so nothing ever frees it. BSS zeroing is what makes every slot
+ * start free.
+ */
+struct files_struct init_files;
+
+static struct files_struct *current_fdt(void)
+{
+	struct task_struct *t = runqueue.curr;
+
+	return t ? t->files : NULL;
+}
+
+/**
+ * fd_lookup() - resolve a descriptor number to its open file
+ *
+ * Returns NULL for every bad case (no table, out of range, free slot, or a
+ * slot still reserved by an in-flight vfs_open) so callers have one check
+ * instead of four.
+ */
+static struct file *fd_lookup(int fd)
+{
+	struct files_struct *fdt = current_fdt();
+
+	if (!fdt || fd < 0 || fd >= MAX_FDS)
+		return NULL;
+
+	struct file *f = fdt->fd[fd];
+
+	return (f == FD_RESERVED) ? NULL : f;
+}
 
 extern int fat32_mount(struct super_block *sb);
 struct super_block *root_sb = NULL;
@@ -212,32 +275,30 @@ static struct inode *vfs_create_path(const char *pathname)
  *
  * Return: File descriptor (fd >= 0) on success, -1 on error.
  */
-/* Placeholder marking a slot as "reserved while we build the file". Any
- * non-NULL value works — vfs_ioctl/read/write/close re-read fd_table[]
- * and would only follow it as a real pointer; the race is purely about
- * preventing two concurrent vfs_open calls from picking the same fd. */
-#define FD_RESERVED  ((struct file *)(uintptr_t)0x1)
-
-/* fd 0/1/2 are stdin/stdout/stderr — the UART, special-cased by NUMBER in
- * sys_read (fd 0) and sys_writefile (fd 1). Never hand those numbers to a real
- * file: if we did, a write to that file would silently go to the UART instead
- * (it does, in the monkey build where /dev/input0 is not opened, so fd 1 is
- * free and a persistence save lands on it). Allocate file fds from 3 up. */
-#define FD_FIRST  3
-
 int vfs_open(const char *pathname, int flags)
 {
+	struct files_struct *fdt = current_fdt();
+
+	if (!fdt) {
+		printk("[VFS] open from a task with no descriptor table\n");
+		return -1;
+	}
+
 	/*
-	 * Atomically reserve a free fd slot before doing the slow work
-	 * (walk_path, kmalloc, fops->open) so a preempting vfs_open in
-	 * another task cannot pick the same fd.
+	 * Claim a free slot before the slow work.
+	 *
+	 * With a per-process table and one thread per process this masking is
+	 * currently redundant - nothing else can reach this table. It stays
+	 * because removing it would be work spent to REDUCE safety, and because
+	 * this is exactly the claim that must stay indivisible the day a second
+	 * thread can share the table.
 	 */
 	unsigned long irqf;
 	int fd = -1;
 	local_irq_save(irqf);
 	for (int i = FD_FIRST; i < MAX_FDS; i++) {
-		if (!fd_table[i]) {
-			fd_table[i] = FD_RESERVED;
+		if (!fdt->fd[i]) {
+			fdt->fd[i] = FD_RESERVED;
 			fd = i;
 			break;
 		}
@@ -253,21 +314,21 @@ int vfs_open(const char *pathname, int flags)
 	if (!inode && (flags & O_CREAT))
 		inode = vfs_create_path(pathname);
 	if (!inode) {
-		fd_table[fd] = NULL;
+		fdt->fd[fd] = NULL;
 		return -1;
 	}
 
 	/* Directories cannot be opened as files */
 	if (inode->i_mode & S_IFDIR) {
 		vfs_free_inode(inode);
-		fd_table[fd] = NULL;
+		fdt->fd[fd] = NULL;
 		return -1;
 	}
 
 	struct file *f = (struct file *)kmalloc(sizeof(*f), GFP_KERNEL);
 	if (!f) {
 		vfs_free_inode(inode);
-		fd_table[fd] = NULL;
+		fdt->fd[fd] = NULL;
 		return -1;
 	}
 
@@ -281,12 +342,12 @@ int vfs_open(const char *pathname, int flags)
 		if (f->f_op->open(inode, f) != 0) {
 			kfree(f);
 			vfs_free_inode(inode);
-			fd_table[fd] = NULL;
+			fdt->fd[fd] = NULL;
 			return -1;
 		}
 	}
 
-	fd_table[fd] = f;
+	fdt->fd[fd] = f;
 	return fd;
 }
 
@@ -300,9 +361,10 @@ int vfs_open(const char *pathname, int flags)
  */
 int vfs_read(int fd, char *buf, size_t count)
 {
-	if (fd < 0 || fd >= MAX_FDS || !fd_table[fd])
+	struct file *f = fd_lookup(fd);
+
+	if (!f)
 		return -1;
-	struct file *f = fd_table[fd];
 	if (f->f_op && f->f_op->read)
 		return f->f_op->read(f, buf, count);
 	return 0;
@@ -318,9 +380,10 @@ int vfs_read(int fd, char *buf, size_t count)
  */
 int vfs_write(int fd, const char *buf, size_t count)
 {
-	if (fd < 0 || fd >= MAX_FDS || !fd_table[fd])
+	struct file *f = fd_lookup(fd);
+
+	if (!f)
 		return -1;
-	struct file *f = fd_table[fd];
 	if (f->f_op && f->f_op->write)
 		return f->f_op->write(f, buf, count);
 	return -1;
@@ -332,17 +395,82 @@ int vfs_write(int fd, const char *buf, size_t count)
  *
  * Return: 0 on success, -1 on error.
  */
-int vfs_close(int fd)
+/*
+ * file_release() - tear down one open file. The single place that undoes what
+ * vfs_open() built, so vfs_close() and files_free() cannot drift apart.
+ */
+static void file_release(struct file *f)
 {
-	if (fd < 0 || fd >= MAX_FDS || !fd_table[fd])
-		return -1;
-	struct file *f = fd_table[fd];
 	if (f->f_op && f->f_op->release)
 		f->f_op->release(f->f_inode, f);
 	vfs_free_inode(f->f_inode);
 	kfree(f);
-	fd_table[fd] = NULL;
+}
+
+int vfs_close(int fd)
+{
+	struct files_struct *fdt = current_fdt();
+	struct file *f = fd_lookup(fd);
+
+	if (!f)
+		return -1;
+
+	/* Clear the slot BEFORE releasing: after this the descriptor names
+	 * nothing, so a later close of the same number cannot reach the file a
+	 * second time. */
+	fdt->fd[fd] = NULL;
+	file_release(f);
 	return 0;
+}
+
+/**
+ * files_alloc() - empty descriptor table for a new process
+ */
+struct files_struct *files_alloc(void)
+{
+	struct files_struct *fdt =
+		(struct files_struct *)kmalloc(sizeof(*fdt), GFP_KERNEL);
+
+	if (!fdt)
+		return NULL;
+
+	for (int i = 0; i < MAX_FDS; i++)
+		fdt->fd[i] = NULL;
+
+	return fdt;
+}
+
+/**
+ * files_free() - close everything this process left open, then drop the table
+ *
+ * Called from do_exit(). Before this existed, a task that died with files open
+ * leaked the struct file, its inode and the driver's private_data every time -
+ * not occasionally, every time.
+ *
+ * A slot still holding FD_RESERVED means a vfs_open() was in flight when the
+ * task died, which cannot happen (the task itself is the only one that can be
+ * inside its own vfs_open, and it is here instead). Skip it rather than
+ * dereference the placeholder.
+ */
+void files_free(struct files_struct *fdt)
+{
+	if (!fdt)
+		return;
+
+	for (int i = 0; i < MAX_FDS; i++) {
+		struct file *f = fdt->fd[i];
+
+		fdt->fd[i] = NULL;
+		if (f && f != FD_RESERVED)
+			file_release(f);
+	}
+
+	/* PID 0's table is static and never dies with it; kfree()ing a BSS
+	 * object would corrupt the heap. Unreachable today (idle never exits)
+	 * but checked, because "unreachable" is exactly what stops being true
+	 * later, and the failure would be a silent heap corruption. */
+	if (fdt != &init_files)
+		kfree(fdt);
 }
 
 /**
@@ -384,9 +512,10 @@ int vfs_chdir(const char *path)
  */
 int vfs_ioctl(int fd, unsigned int cmd, unsigned long arg)
 {
-	if (fd < 0 || fd >= MAX_FDS || !fd_table[fd])
+	struct file *f = fd_lookup(fd);
+
+	if (!f)
 		return -1;
-	struct file *f = fd_table[fd];
 	if (f->f_op && f->f_op->ioctl)
 		return f->f_op->ioctl(f, cmd, arg);
 	return -1;

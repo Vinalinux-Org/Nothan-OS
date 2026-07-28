@@ -9,6 +9,7 @@
 #include <nothan/mm.h>
 #include <nothan/slab.h>
 #include <nothan/printk.h>
+#include <nothan/fs.h>
 #include <nothan/time.h>		/* sched_clock() for vruntime timestamps */
 #include <asm/irqflags.h>
 
@@ -247,6 +248,12 @@ static void idle_task_init(void)
 	 * returns nothing (see __schedule). It never accrues vruntime. */
 	idle_tsk.rt.vruntime = 0;
 	idle_tsk.rt.exec_start = 0;
+
+	/* PID 0 owns the static descriptor table: kernel_main() keeps running
+	 * as this task after sched_init() and opens files (mount, self-tests),
+	 * so it needs somewhere to put them. See init_files in kernel/vfs. */
+	idle_tsk.files = &init_files;
+
 	runqueue.curr = &idle_tsk;
 
 	task_register(&idle_tsk);
