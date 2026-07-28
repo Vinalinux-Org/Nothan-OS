@@ -28,8 +28,9 @@
 #define __NR_msgq_send  21  /* send a message to system queue qid */
 #define __NR_msgq_recv  22  /* recv a message from system queue qid */
 #define __NR_spawn      23  /* start a program from the embedded set */
+#define __NR_wait       24  /* collect a dead child's exit status */
 
-#define NR_SYSCALLS     24
+#define NR_SYSCALLS     25
 
 /*
  * Programs this kernel can start. Fixed at build time (C4 nac 3): spawning
@@ -65,6 +66,20 @@ struct task_info {
 struct sys_info {
 	unsigned long total_pages;
 	unsigned long free_pages;
+};
+
+/**
+ * struct exit_status - what wait() reports about a dead child
+ * @how:   EXIT_HOW_EXITED (ran to completion) or EXIT_HOW_KILLED
+ * @value: exit status if EXITED, signal number if KILLED
+ *
+ * Two fields, not one packed int: "exited with status 11" and "killed by
+ * signal 11" are different events and must not share a representation. Linux
+ * packs them and then needs WIFEXITED/WTERMSIG to undo the packing.
+ */
+struct exit_status {
+	int how;
+	int value;
 };
 
 /**

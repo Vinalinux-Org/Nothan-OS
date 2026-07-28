@@ -24,6 +24,7 @@ static void cmd_help(void)
 	puts("  ps\t\t\tList running tasks\n");
 	puts("  kill <pid>\t\tTerminate a task\n");
 	puts("  spawn <name>\t\tStart a program from the built-in set\n");
+	puts("  wait\t\t\tCollect a dead child (blocks)\n");
 	puts("  info\t\t\tMemory info\n");
 	puts("  uname\t\t\tOS identification\n");
 	puts("  reboot\t\tWarm reboot\n");
@@ -75,6 +76,8 @@ static const char *state_str(int state)
 	case 1: return "SLEEP";
 	case 2: return "BLOCKED";
 	case 4: return "STOPPED";
+	case 0x10: return "DEAD";
+	case 0x20: return "ZOMBIE";	/* dead, status not collected yet */
 	default: return "???";
 	}
 }
@@ -336,6 +339,19 @@ static void execute(char *line, char *cwd)
 		}
 	} else if (strcmp(cmd, "spawn") == 0) {
 		cmd_spawn(argc, argv);
+	} else if (strcmp(cmd, "wait") == 0) {
+		struct exit_status st;
+		long pid = wait(&st);
+
+		if (pid < 0) {
+			puts("wait: no children\n");
+		} else {
+			puts("child ");
+			putint((int)pid, 1);
+			puts(st.how == EXIT_HOW_KILLED ? " killed by signal " : " exited, status ");
+			putint(st.value, 1);
+			putchar('\n');
+		}
 	} else if (strcmp(cmd, "ps") == 0) {
 		cmd_ps();
 	} else if (strcmp(cmd, "info") == 0) {

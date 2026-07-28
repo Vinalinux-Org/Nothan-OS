@@ -6,13 +6,11 @@
 #include <nothan/sched.h>
 #include <asm/irqflags.h>
 
-/**
- * struct wait_queue_head - queue of tasks waiting for an event
- * @task_list: linked list of sleeping tasks (linked via task->rt.run_list)
+/*
+ * struct wait_queue_head is defined in <nothan/sched.h>, not here: task_struct
+ * embeds one by value (child_wait), and sched.h cannot include this header
+ * without a cycle. The queue lives with the task, the operations live here.
  */
-struct wait_queue_head {
-	struct list_head task_list;
-};
 
 static inline void init_waitqueue_head(struct wait_queue_head *wq)
 {

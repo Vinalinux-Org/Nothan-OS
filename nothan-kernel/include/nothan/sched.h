@@ -25,7 +25,25 @@ struct files_struct;
 
 #define TASK_NEW		0x00000800	/* just spawned, not yet seen by scheduler */
 
-#define TASK_DEAD		0x00000010	/* done exiting, on dead_list, awaiting reap (EXIT_DEAD) */
+#define TASK_DEAD		0x00000010	/* released; nothing left to collect (EXIT_DEAD) */
+#define EXIT_ZOMBIE		0x00000020	/* dead, but exit status not collected yet */
+
+/*
+ * A task dies in THREE steps, not two. The split exists because the three
+ * things being released have different owners and different deadlines:
+ *
+ *   1. do_exit()   frees everything heavy - mm, page tables, open files - and
+ *                  marks the task EXIT_ZOMBIE. Heavy resources are returned
+ *                  IMMEDIATELY; nothing waits on a parent for those.
+ *   2. reaper      frees the KERNEL STACK, and only that. It cannot be freed
+ *                  in step 1 because the dying task is still executing on it.
+ *   3. wait()      reads the exit status, then release_task() unregisters and
+ *                  drops the last reference.
+ *
+ * What a zombie costs is therefore one task_struct - a few hundred bytes -
+ * NOT the 16 KB kernel stack. That distinction is what makes keeping corpses
+ * around affordable: ten zombies holding stacks would pin 160 KB.
+ */
 
 /*
  * task_struct.flags bits — a SEPARATE field from __state. A flag is a request
@@ -38,6 +56,17 @@ struct files_struct;
  * kept only as a task attribute reported by the ps syscall.
  */
 #define DEFAULT_PRIO		16
+
+/**
+ * struct wait_queue_head - queue of tasks waiting for an event
+ * @task_list: sleeping tasks, linked through task->wait_node
+ *
+ * Defined here rather than in <nothan/wait.h> because task_struct embeds one
+ * by value; wait.h includes this header, so the definition cannot live there.
+ */
+struct wait_queue_head {
+	struct list_head task_list;
+};
 
 /**
  * struct sched_rt_entity - per-task CFS-lite scheduling entity
@@ -114,6 +143,17 @@ struct task_struct {
 	 * into a freed task_struct.
 	 */
 	struct task_struct		*parent;
+
+	/*
+	 * Where this task sleeps while waiting for one of its children to die.
+	 * A dying child wakes its parent's queue - the parent never polls.
+	 *
+	 * Per task rather than one global queue: waking every waiter whenever
+	 * any task anywhere dies would have each of them wake, walk the task
+	 * list, find nothing of theirs, and sleep again.
+	 */
+	struct wait_queue_head		child_wait;
+
 	char				cwd[64];
 
 	/*
@@ -243,5 +283,8 @@ struct task_struct *init_task_create(void);	/* PID 1; NULL on failure */
 int spawn_blob(unsigned int id);		/* PID, or -1 */
 const char *blob_name(unsigned int id);
 void reparent_to_init(struct task_struct *dying);
+void release_task(struct task_struct *p);	/* wait() collected it; delete for good */
+struct exit_status;
+int do_wait(struct exit_status *st);	/* PID collected, or -1 */
 
 #endif /* _NOTHAN_SCHED_H */

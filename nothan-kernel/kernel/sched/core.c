@@ -10,6 +10,7 @@
 #include <nothan/slab.h>
 #include <nothan/printk.h>
 #include <nothan/fs.h>
+#include <nothan/wait.h>
 #include <nothan/time.h>		/* sched_clock() for vruntime timestamps */
 #include <asm/irqflags.h>
 
@@ -89,15 +90,63 @@ static void reap_dead(void)
 		if (!z)
 			return;			/* nothing left we may reap */
 
-		pr_debug("[REAP] put pid=%d kstack=%p\n", z->pid, z->kstack_base);
-		task_unregister(z);		/* off all_tasks + pid_hash */
 		/*
-		 * Drop the existence ref. Frees now if nobody else holds one; if a
-		 * task_find() caller (e.g. sys_kill) still holds a ref, the free is
-		 * deferred until they put() — closing the UAF.
+		 * Free the KERNEL STACK, and nothing else.
+		 *
+		 * This used to also unregister the task and drop its last
+		 * reference, i.e. delete it outright. It cannot any more: the
+		 * task is a zombie, and its whole purpose is to still be
+		 * findable by pid until a parent collects its exit status.
+		 *
+		 * The stack is the one thing that genuinely could not be freed
+		 * in do_exit() - the dying task was still executing on it - and
+		 * it is also the expensive part (16 KB against a few hundred
+		 * bytes of task_struct). Freeing it here is what makes a corpse
+		 * cheap enough to keep around.
 		 */
-		put_task_struct(z);
+		pr_debug("[REAP] kstack pid=%d kstack=%p\n", z->pid, z->kstack_base);
+		if (z->kstack_base) {
+			kfree(z->kstack_base);
+			z->kstack_base = NULL;	/* also marks the corpse collectible */
+		}
+
+		/*
+		 * NOW tell the parent, and not one moment earlier.
+		 *
+		 * Reaching this line means the corpse is off the CPU (the loop
+		 * above refuses to touch runqueue.curr) and its stack is gone.
+		 * That is precisely when a parent may safely release_task() it.
+		 * Notifying from do_exit() instead would let the parent free the
+		 * stack out from under a task still running on it.
+		 *
+		 * kstack_base == NULL is the flag wait() tests, so the two halves
+		 * cannot disagree: one assignment marks the corpse ready, and the
+		 * wakeup is only a hint - a parent that missed it still finds the
+		 * zombie on the task list, which is the point of zombies.
+		 */
+		if (z->parent)
+			wake_up(&z->parent->child_wait);
 	}
+}
+
+/**
+ * release_task() - delete a task for good, after its status has been collected
+ * @p: a zombie whose exit status the parent has just read
+ *
+ * The third and last step of dying (see the state comments in sched.h). Only
+ * sys_wait() calls this: until somebody reads the status, the corpse has to
+ * stay findable, and after that there is nothing left to find it for.
+ */
+void release_task(struct task_struct *p)
+{
+	p->__state = TASK_DEAD;
+	task_unregister(p);		/* off all_tasks + pid_hash */
+	/*
+	 * Drop the existence ref. Frees now if nobody else holds one; if a
+	 * task_find() caller (e.g. sys_kill) still holds a ref, the free is
+	 * deferred until they put() — closing the UAF.
+	 */
+	put_task_struct(p);
 }
 
 /*
@@ -274,6 +323,7 @@ static void idle_task_init(void)
 		idle_tsk.mm         = NULL;
 		idle_tsk.refcount   = 1;	/* never exits/reaped → never put → never freed */
 		list_init(&idle_tsk.wait_node);	/* idle never blocks; empty node */
+		init_waitqueue_head(&idle_tsk.child_wait);
 
 	const char *name = "idle";
 	unsigned int i = 0;

@@ -23,6 +23,7 @@
 #define __NR_msgq_send  21
 #define __NR_msgq_recv  22
 #define __NR_spawn      23
+#define __NR_wait       24
 
 #define REBOOT_WARM     0
 #define REBOOT_HALT     1
@@ -174,6 +175,29 @@ static inline long kill(int pid)
 static inline long spawn(int blob_id)
 {
 	return __syscall1(__NR_spawn, (long)blob_id);
+}
+
+/*
+ * struct exit_status - how a child died.
+ *
+ * Two fields, not one packed int: "exited with status 11" and "killed by
+ * signal 11" are different events. Must match include/nothan/syscall.h.
+ */
+#define EXIT_HOW_EXITED		0
+#define EXIT_HOW_KILLED		1
+
+struct exit_status {
+	int how;
+	int value;
+};
+
+/*
+ * wait - collect one dead child; blocks only if none has died yet.
+ * Returns the child's PID, or -1 if the caller has no children.
+ */
+static inline long wait(struct exit_status *st)
+{
+	return __syscall1(__NR_wait, (long)st);
 }
 
 static inline long reboot(int cmd)

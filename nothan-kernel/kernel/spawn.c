@@ -10,6 +10,7 @@
 #include <nothan/fs.h>
 #include <nothan/syscall.h>
 #include <nothan/delay.h>
+#include <nothan/wait.h>
 #include <asm/irqflags.h>
 
 /* No <limits.h> in a freestanding build. */
@@ -109,12 +110,35 @@ static void init_main(void)
 	pr_info("[INIT] pid=%d up\n", runqueue.curr->pid);
 
 	/*
-	 * Sleep forever, without spinning. msleep() puts us in an
-	 * interruptible sleep off the runqueue, so init consumes no CPU - it
-	 * only has to be reachable as a pointer, not runnable.
+	 * Reap forever.
+	 *
+	 * This is what makes zombies affordable rather than a leak. Every
+	 * orphan is reparented here, so without somebody collecting them the
+	 * corpses would accumulate until reboot - a task_struct each, findable
+	 * by pid forever, holding a PID that is never reused.
+	 *
+	 * do_wait() blocks when there is nothing to collect, so this loop costs
+	 * no CPU; init is asleep except in the instant after a child dies.
 	 */
-	while (1)
-		msleep(60000);
+	for (;;) {
+		struct exit_status st;
+		int pid = do_wait(&st);
+
+		if (pid < 0) {
+			/*
+			 * No children at all - only possible before the boot
+			 * tasks are created, or if every one of them has been
+			 * collected. Nothing to wait on, so wait for one to
+			 * appear rather than spinning on the check.
+			 */
+			msleep(1000);
+			continue;
+		}
+
+		pr_info("[INIT] reaped pid=%d (%s %d)\n", pid,
+			st.how == EXIT_HOW_KILLED ? "killed by" : "status",
+			st.value);
+	}
 }
 
 struct task_struct *init_task_create(void)
@@ -193,6 +217,7 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 	p->files      = NULL;	/* kernel thread: opens nothing, so owns no table */
 	p->refcount   = 1;	/* existence ref; dropped at reap */
 	list_init(&p->wait_node);	/* empty = on no wait queue */
+	init_waitqueue_head(&p->child_wait);
 	/* CFS-lite: start at the current min_vruntime so a fresh task can't hog
 	 * the CPU with a stale-low vruntime (place_entity, initial case). */
 	p->rt.vruntime = runqueue.min_vruntime;
@@ -498,6 +523,7 @@ struct task_struct *user_task_create_bin(const char *name,
 	p->parent     = parent_for_new_task();
 	p->refcount   = 1;	/* existence ref; dropped at reap */
 	list_init(&p->wait_node);	/* empty = on no wait queue */
+	init_waitqueue_head(&p->child_wait);
 	/* CFS-lite: start at the current min_vruntime so a fresh task can't hog
 	 * the CPU with a stale-low vruntime (place_entity, initial case). */
 	p->rt.vruntime = runqueue.min_vruntime;

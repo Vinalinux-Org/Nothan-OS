@@ -18,6 +18,7 @@
 #include <nothan/delay.h>
 #include <nothan/uaccess.h>
 #include <nothan/msgq.h>
+#include <nothan/wait.h>
 #include <asm/irqflags.h>
 
 /* Longest path/string a syscall will scan out of user space. */
@@ -311,8 +312,11 @@ static long sys_kill(unsigned long a0, unsigned long a1, unsigned long a2)
 	long ret = -1;
 	if (!t->mm) {
 		/* kernel thread (idle/musb) — unkillable */
-	} else if (t->__state == TASK_DEAD) {
-		/* already dying, awaiting reap */
+	} else if (t->__state == EXIT_ZOMBIE || t->__state == TASK_DEAD) {
+		/* Already dead. A zombie is not a running task that has not got
+		 * around to dying - it is a corpse kept only so its parent can
+		 * read the status. Marking it TASK_SHOULD_EXIT would set a flag
+		 * on something that will never reach a syscall boundary. */
 	} else {
 		t->flags |= TASK_SHOULD_EXIT;	/* cooperative: exits at next syscall boundary */
 		wake_up_task(t);		/* if blocked in a killable sleep, run it so
@@ -322,6 +326,33 @@ static long sys_kill(unsigned long a0, unsigned long a1, unsigned long a2)
 
 	put_task_struct(t);			/* release the ref task_find() took */
 	return ret;
+}
+
+/**
+ * sys_wait - collect a dead child's exit status
+ * @a0: user pointer to struct exit_status, or NULL to discard the status
+ *
+ * Thin wrapper: the logic lives in do_wait() so init - a kernel thread, which
+ * cannot issue syscalls - can reap with exactly the same code path.
+ *
+ * Return: PID of the collected child, or -1 if this task has no children.
+ */
+static long sys_wait(unsigned long a0, unsigned long a1, unsigned long a2)
+{
+	(void)a1; (void)a2;
+
+	struct exit_status *out = (struct exit_status *)a0;
+	struct exit_status st;
+	int pid;
+
+	if (out && !access_ok(out, sizeof(*out)))
+		return -1;
+
+	pid = do_wait(&st);
+	if (pid >= 0 && out)
+		*out = st;
+
+	return pid;
 }
 
 /**
@@ -620,6 +651,7 @@ static const syscall_fn_t syscall_table[NR_SYSCALLS] = {
 	[__NR_msgq_send]   = sys_msgq_send,
 	[__NR_msgq_recv]   = sys_msgq_recv,
 	[__NR_spawn]       = sys_spawn,
+	[__NR_wait]        = sys_wait,
 };
 
 /**

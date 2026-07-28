@@ -11,6 +11,8 @@
 #include <nothan/printk.h>
 #include <nothan/fs.h>
 #include <nothan/signal.h>
+#include <nothan/wait.h>
+#include <nothan/syscall.h>
 
 static void __do_exit(unsigned int how, int value);
 
@@ -90,7 +92,7 @@ static void __do_exit(unsigned int how, int value)
 
 	tsk->exit_how = how;
 	tsk->exit_value = value;
-	tsk->__state = TASK_DEAD;	/* EXIT_DEAD: done, on dead_list, awaiting reap */
+	tsk->__state = EXIT_ZOMBIE;	/* dead; status still to be collected */
 
 	/*
 	 * Close whatever this task left open, before the address space goes.
@@ -113,6 +115,20 @@ static void __do_exit(unsigned int how, int value)
 	 * nothing detects until something follows it.
 	 */
 	reparent_to_init(tsk);
+
+	/*
+	 * The parent is NOT notified here, deliberately.
+	 *
+	 * do_exit() runs with IRQs enabled and on this task's own kernel stack.
+	 * Waking the parent now lets it be scheduled immediately, call wait(),
+	 * and release_task() this very corpse - freeing the stack we are still
+	 * executing on. Use-after-free, inside the scheduler, on the one class
+	 * of bug the UART cannot investigate.
+	 *
+	 * The reaper does the notifying instead: it only touches a corpse once
+	 * that corpse is no longer the running task, which is exactly the
+	 * condition that makes collection safe. See reap_dead().
+	 */
 
 	/* Release user-space resources if any */
 	if (tsk->mm) {
@@ -175,4 +191,102 @@ static void __do_exit(unsigned int how, int value)
 	/* NOTREACHED */
 	while (1)
 		;
+}
+
+/**
+ * find_zombie_child() - one collected corpse belonging to @parent, if any
+ *
+ * Walks all_tasks rather than a per-parent children list, for the same reason
+ * reparent_to_init() does: nothing else traverses downward, so an index would
+ * be state to maintain and get wrong for one reader. Iterative, never
+ * recursive - tree depth is deliberately unbounded (Q7).
+ *
+ * @any_child tells the caller whether this parent has ANY children left, which
+ * is how wait() distinguishes "nothing dead yet, go to sleep" from "nothing
+ * will ever arrive, return an error". Computed in the same masked walk so the
+ * two answers cannot disagree.
+ *
+ * Caller must hold IRQs masked: this walks the registry.
+ */
+static struct task_struct *find_zombie_child(struct task_struct *parent,
+					     int *any_child)
+{
+	struct task_struct *p;
+
+	*any_child = 0;
+	list_for_each_entry(p, &all_tasks, struct task_struct, tasks) {
+		if (p->parent != parent)
+			continue;
+		*any_child = 1;
+		/*
+		 * kstack_base == NULL means the reaper has finished with this
+		 * corpse, i.e. it is off the CPU and its stack is freed. A
+		 * zombie that has not reached that point is dead but still
+		 * standing on its own stack; releasing it would free memory it
+		 * is executing on.
+		 */
+		if (p->__state == EXIT_ZOMBIE && !p->kstack_base)
+			return p;
+	}
+	return NULL;
+}
+
+/**
+ * do_wait() - collect one dead child's exit status
+ * @st: filled in with how the child died; may be NULL to discard it
+ *
+ * "Come and collect", not "stand guard": if a corpse is already waiting this
+ * returns immediately, and only an empty-handed caller blocks. That is what
+ * the zombie state buys - a parent need not be present at the moment its child
+ * dies.
+ *
+ * Callable from kernel context (init reaps with it) as well as from sys_wait().
+ *
+ * Return: PID of the collected child, or -1 if the caller has no children.
+ */
+int do_wait(struct exit_status *st)
+{
+	struct task_struct *me = runqueue.curr;
+	unsigned long flags;
+	int ret = -1;
+
+	/*
+	 * The whole loop runs masked, and the mask is HELD ACROSS __schedule()
+	 * - the same shape msgq_send/recv use, and for the same reason: the
+	 * test ("is there a zombie?") and the decision to sleep must not be
+	 * separable, or a child that dies in between wakes nobody and the
+	 * parent sleeps forever. See Documentation/locking-map.md.
+	 */
+	local_irq_save(flags);
+	for (;;) {
+		int any_child;
+		struct task_struct *z = find_zombie_child(me, &any_child);
+
+		if (z) {
+			int pid = z->pid;
+
+			if (st) {
+				st->how = (int)z->exit_how;
+				st->value = z->exit_value;
+			}
+			release_task(z);	/* third step of dying: gone */
+			local_irq_restore(flags);
+			return pid;
+		}
+
+		if (!any_child)
+			break;			/* nothing to wait for, ever */
+
+		if (task_should_exit(me)) {	/* killed while waiting */
+			__finish_wait();
+			break;
+		}
+
+		__prepare_to_wait(&me->child_wait, TASK_INTERRUPTIBLE);
+		__schedule();
+	}
+	__finish_wait();
+	local_irq_restore(flags);
+
+	return ret;
 }
