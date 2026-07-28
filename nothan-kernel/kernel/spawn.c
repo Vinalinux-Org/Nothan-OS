@@ -8,6 +8,7 @@
 #include <nothan/slab.h>
 #include <nothan/printk.h>
 #include <nothan/fs.h>
+#include <nothan/delay.h>
 #include <asm/irqflags.h>
 
 static int next_pid = 1;
@@ -45,6 +46,70 @@ static int pid_alloc(void)
 static void task_exit(void)
 {
 	do_exit(0);
+}
+
+/**
+ * parent_for_new_task() - who owns a task about to be created
+ *
+ * The creator, normally. Two exceptions, both about PID 0:
+ *
+ * PID 0 is not a process. It is the scheduler's fallback - the thing that runs
+ * when nothing else can - and it is also whatever kernel_main() happens to be
+ * executing as during boot. Letting it be a parent would put a non-process at
+ * the root of the process tree and make "the tree" mean two different things.
+ * Tasks created during boot are therefore children of init.
+ *
+ * And init itself has no parent: it IS the root. That is the one legitimate
+ * NULL, and reparent_to_init() refuses to touch it.
+ */
+static struct task_struct *parent_for_new_task(void)
+{
+	struct task_struct *cur = runqueue.curr;
+
+	if (cur && cur->pid > 0)
+		return cur;
+
+	return init_task;	/* boot-time creation, or PID 0; NULL before init exists */
+}
+
+/**
+ * init_task_create() - create PID 1
+ *
+ * Must be the FIRST task created, because PIDs are handed out in order and
+ * init is defined by its number. Today PID 1 is whatever task happens to be
+ * created first - by ordering in init/main.c, that is the GUI - which makes
+ * sys_kill's "protect pid <= 1" guard protect the GUI by accident. Creating
+ * init first is what turns that guard into what its comment already claims.
+ *
+ * init does nothing but exist, and that is its whole job for now: be the root
+ * of the tree and the adoptive parent of orphans. It gains a wait() loop the
+ * day zombies exist; until then a task with no work to do costs one
+ * task_struct and one 4 KB stack.
+ */
+static void init_main(void)
+{
+	pr_info("[INIT] pid=%d up\n", runqueue.curr->pid);
+
+	/*
+	 * Sleep forever, without spinning. msleep() puts us in an
+	 * interruptible sleep off the runqueue, so init consumes no CPU - it
+	 * only has to be reachable as a pointer, not runnable.
+	 */
+	while (1)
+		msleep(60000);
+}
+
+struct task_struct *init_task_create(void)
+{
+	struct task_struct *p = task_create(init_main, DEFAULT_PRIO, "init");
+
+	if (!p)
+		return NULL;
+
+	init_task = p;
+	p->parent = NULL;	/* the root; nobody adopts init */
+
+	return p;
 }
 
 extern void task_entry(void);
@@ -100,6 +165,7 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 	p->rt.on_rq   = 0;
 	p->exit_how   = EXIT_HOW_EXITED;
 	p->exit_value = 0;
+	p->parent     = parent_for_new_task();
 	p->mm         = NULL;
 	p->files      = NULL;	/* kernel thread: opens nothing, so owns no table */
 	p->refcount   = 1;	/* existence ref; dropped at reap */
@@ -401,6 +467,7 @@ struct task_struct *user_task_create_bin(const char *name,
 	p->mm         = mm;
 	p->exit_how   = EXIT_HOW_EXITED;
 	p->exit_value = 0;
+	p->parent     = parent_for_new_task();
 	p->refcount   = 1;	/* existence ref; dropped at reap */
 	list_init(&p->wait_node);	/* empty = on no wait queue */
 	/* CFS-lite: start at the current min_vruntime so a fresh task can't hog

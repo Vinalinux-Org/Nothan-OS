@@ -111,6 +111,8 @@ static void reap_dead(void)
 LIST_HEAD(all_tasks);	/* every live task; walked by sys_gettasklist */
 static struct list_head pid_hash_table[PID_HASH_SIZE];
 
+struct task_struct *init_task;		/* PID 1; see init_task_create() */
+
 static inline struct list_head *pid_bucket(int pid)
 {
 	return &pid_hash_table[(unsigned)pid % PID_HASH_SIZE];
@@ -195,6 +197,40 @@ void put_task_struct(struct task_struct *p)
 			kfree(p->kstack_base);
 		kfree(p);
 	}
+}
+
+/**
+ * reparent_to_init() - hand a dying task's children to PID 1
+ * @dying: the task being torn down
+ *
+ * Without this every orphan is left with @parent pointing into a task_struct
+ * that reap_dead() is about to free - a dangling pointer that nothing would
+ * notice until something followed it, which is the worst kind on a machine
+ * with only a UART.
+ *
+ * Walks all_tasks rather than a per-parent children list. There is no such
+ * list on purpose (see task_struct.parent): nothing traverses downward yet, so
+ * the list would be state to maintain and get wrong for no reader. The walk is
+ * O(live tasks), which is small, and it is inherently ITERATIVE - process tree
+ * depth is unbounded by design (Q7), so nothing may recurse per level; 500
+ * frames on a 16 KB kernel stack overruns into the neighbouring kmalloc block.
+ *
+ * Runs masked: task_register/unregister mutate this list, and a half-linked
+ * list walked here would follow a pointer into nothing.
+ */
+void reparent_to_init(struct task_struct *dying)
+{
+	unsigned long flags;
+	struct task_struct *p;
+
+	if (!init_task || dying == init_task)
+		return;
+
+	local_irq_save(flags);
+	list_for_each_entry(p, &all_tasks, struct task_struct, tasks)
+		if (p->parent == dying)
+			p->parent = init_task;
+	local_irq_restore(flags);
 }
 
 /* Idle task — always runnable, lowest priority, no kmalloc needed. */

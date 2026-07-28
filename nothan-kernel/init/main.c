@@ -190,6 +190,23 @@ void kernel_main(void)
 	 */
 	__asm__ __volatile__ ("cpsid i" : : : "memory");
 
+	/*
+	 * init FIRST, so it gets PID 1 — init is defined by its number, and PIDs
+	 * are handed out in creation order. Until now PID 1 was whichever task
+	 * happened to be created first (the GUI), which made sys_kill's
+	 * "protect pid <= 1" guard shield the GUI by accident.
+	 *
+	 * Everything created below is therefore a child of init, and every
+	 * orphan has somewhere to go when its parent dies.
+	 */
+	struct task_struct *init = init_task_create();
+	if (init) {
+		printk("[KERN] Spawning init (PID 1)\n");
+		enqueue_task(&runqueue, init);
+	} else {
+		panic("cannot create init");
+	}
+
 	/* BOOT_GUI: 1 spawns the LVGL GUI (+ shell). 0 skips it (blank screen),
 	 * useful when bringing up lower layers without the GUI on top. */
 #define BOOT_GUI 1

@@ -274,7 +274,20 @@ static long sys_kill(unsigned long a0, unsigned long a1, unsigned long a2)
 	(void)a1; (void)a2;
 	int target_pid = (int)a0;
 
-	if (target_pid <= 1)			/* protect idle(0) + first task/gui(1) */
+	/*
+	 * Protect PID 0 (idle — not a process, and the scheduler's fallback)
+	 * and PID 1 (init — the root of the tree and every orphan's adoptive
+	 * parent; killing it strands every future orphan on a dangling
+	 * pointer). This guard already claimed to do exactly this; before init
+	 * existed it was shielding whichever task was created first, which by
+	 * boot ordering was the GUI. It now means what it says.
+	 *
+	 * Consequence, stated because it IS a behaviour change: the GUI is an
+	 * ordinary process now and can be killed. That is correct — nothing
+	 * about a UI makes it kernel-critical — but it was previously immune by
+	 * accident.
+	 */
+	if (target_pid <= 1)
 		return -1;
 
 	if (runqueue.curr && runqueue.curr->pid == target_pid) {

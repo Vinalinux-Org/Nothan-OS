@@ -106,6 +106,14 @@ static void __do_exit(unsigned int how, int value)
 	files_free(tsk->files);
 	tsk->files = NULL;
 
+	/*
+	 * Hand any children to init BEFORE this task_struct can be freed.
+	 * A child holds a raw pointer to its parent and has no other way to
+	 * reach it; leaving it pointing at a corpse is a dangling pointer that
+	 * nothing detects until something follows it.
+	 */
+	reparent_to_init(tsk);
+
 	/* Release user-space resources if any */
 	if (tsk->mm) {
 		struct zone *zone = get_zone();

@@ -99,6 +99,21 @@ struct task_struct {
 	 */
 	unsigned int			exit_how;
 	int				exit_value;
+
+	/*
+	 * @parent: who created this task. NULL only for init and for PID 0.
+	 *
+	 * A child knows its parent and nothing else - there is no children list,
+	 * because nothing needs one yet. Reparenting walks all_tasks instead;
+	 * with no cascade-kill and no wait(), an O(children) index would be
+	 * state to maintain (and get wrong) for no reader. Add the list when
+	 * something actually traverses downward.
+	 *
+	 * The pointer MUST be kept alive: when a parent dies its children are
+	 * handed to init, or every orphan is left holding a dangling pointer
+	 * into a freed task_struct.
+	 */
+	struct task_struct		*parent;
 	char				cwd[64];
 
 	/*
@@ -216,5 +231,15 @@ void get_task_struct(struct task_struct *p);
 void put_task_struct(struct task_struct *p);	/* frees kstack + task_struct when refcount hits 0 */
 
 extern struct list_head all_tasks;	/* global list of every live task */
+
+/*
+ * PID 1. The root of the process tree and the adoptive parent of every orphan.
+ * NULL until init_task_create() runs, which is the first thing kernel_main
+ * does after sched_init().
+ */
+extern struct task_struct *init_task;
+
+struct task_struct *init_task_create(void);	/* PID 1; NULL on failure */
+void reparent_to_init(struct task_struct *dying);
 
 #endif /* _NOTHAN_SCHED_H */
