@@ -23,6 +23,7 @@ static void cmd_help(void)
 	puts("  ls\t\t\tList current directory\n");
 	puts("  ps\t\t\tList running tasks\n");
 	puts("  kill <pid>\t\tTerminate a task\n");
+	puts("  spawn <name>\t\tStart a program from the built-in set\n");
 	puts("  info\t\t\tMemory info\n");
 	puts("  uname\t\t\tOS identification\n");
 	puts("  reboot\t\tWarm reboot\n");
@@ -76,6 +77,53 @@ static const char *state_str(int state)
 	case 4: return "STOPPED";
 	default: return "???";
 	}
+}
+
+/*
+ * spawn <name> - start one of the programs built into the image.
+ *
+ * This is the visible half of runtime process creation: until now the set of
+ * tasks was frozen after boot, and only kernel_main could create one.
+ */
+static const struct {
+	const char *name;
+	int	    id;
+} spawnable[] = {
+	{ "shell", BLOB_SHELL },
+	{ "gui", BLOB_GUI },
+	{ "phone_daemon", BLOB_PHONE_DAEMON },
+	{ "storage_daemon", BLOB_STORAGE_DAEMON },
+};
+
+static void cmd_spawn(int argc, char **argv)
+{
+	if (argc < 2) {
+		puts("usage: spawn <name>\n  known:");
+		for (unsigned i = 0; i < sizeof(spawnable) / sizeof(spawnable[0]); i++) {
+			puts(" ");
+			puts(spawnable[i].name);
+		}
+		puts("\n");
+		return;
+	}
+
+	for (unsigned i = 0; i < sizeof(spawnable) / sizeof(spawnable[0]); i++) {
+		if (strcmp(argv[1], spawnable[i].name) == 0) {
+			long pid = spawn(spawnable[i].id);
+
+			if (pid < 0) {
+				puts("spawn: failed (out of memory?)\n");
+				return;
+			}
+			puts("spawned ");
+			puts(spawnable[i].name);
+			puts(" as pid ");
+			putint((int)pid, 1);
+			putchar('\n');
+			return;
+		}
+	}
+	puts("spawn: no such program\n");
 }
 
 static void cmd_ps(void)
@@ -286,6 +334,8 @@ static void execute(char *line, char *cwd)
 				puts("kill: pid not found\n");
 			}
 		}
+	} else if (strcmp(cmd, "spawn") == 0) {
+		cmd_spawn(argc, argv);
 	} else if (strcmp(cmd, "ps") == 0) {
 		cmd_ps();
 	} else if (strcmp(cmd, "info") == 0) {

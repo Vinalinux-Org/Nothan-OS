@@ -325,6 +325,26 @@ static long sys_kill(unsigned long a0, unsigned long a1, unsigned long a2)
 }
 
 /**
+ * sys_spawn - start a program from the embedded set
+ * @a0: blob id (BLOB_*)
+ *
+ * The runtime task-creation path C4 nac 3 describes: a process can be created
+ * while the system runs, but only from a set fixed at build time. That is the
+ * line between "controllable" and "open-ended" - it is NOT an ELF loader.
+ *
+ * No argv (Q5): argv is the only customisation spawn will ever take, but
+ * nothing reads it yet and _start() takes no arguments. An ignored parameter
+ * would be worse than none.
+ *
+ * Return: PID of the new task, or -1.
+ */
+static long sys_spawn(unsigned long a0, unsigned long a1, unsigned long a2)
+{
+	(void)a1; (void)a2;
+	return spawn_blob((unsigned int)a0);
+}
+
+/**
  * sys_reboot - reboot or halt the system
  * @a0: REBOOT_WARM (0) or REBOOT_HALT (1)
  */
@@ -599,6 +619,7 @@ static const syscall_fn_t syscall_table[NR_SYSCALLS] = {
 	[__NR_sleep]       = sys_sleep,
 	[__NR_msgq_send]   = sys_msgq_send,
 	[__NR_msgq_recv]   = sys_msgq_recv,
+	[__NR_spawn]       = sys_spawn,
 };
 
 /**

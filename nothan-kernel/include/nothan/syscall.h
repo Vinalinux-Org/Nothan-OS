@@ -27,8 +27,26 @@
 #define __NR_sleep      20  /* block the task for N milliseconds  */
 #define __NR_msgq_send  21  /* send a message to system queue qid */
 #define __NR_msgq_recv  22  /* recv a message from system queue qid */
+#define __NR_spawn      23  /* start a program from the embedded set */
 
-#define NR_SYSCALLS     23
+#define NR_SYSCALLS     24
+
+/*
+ * Programs this kernel can start. Fixed at build time (C4 nac 3): spawning
+ * happens at runtime, but only from this set - which is what keeps the process
+ * tree enumerable instead of open-ended.
+ *
+ * No argv yet, deliberately. Q5 settled that argv is the ONLY thing spawn will
+ * ever customise, but nothing reads argv today, and _start() calls main() with
+ * no arguments. Taking an argv parameter and ignoring it would be an API that
+ * lies; adding it later costs a crt0 change and a rebuild, because NothanOS has
+ * no external binaries (R4).
+ */
+#define BLOB_SHELL		0
+#define BLOB_GUI		1
+#define BLOB_PHONE_DAEMON	2
+#define BLOB_STORAGE_DAEMON	3
+#define BLOB_NR			4
 
 /* reboot commands */
 #define REBOOT_WARM     0

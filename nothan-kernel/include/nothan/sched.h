@@ -240,6 +240,8 @@ extern struct list_head all_tasks;	/* global list of every live task */
 extern struct task_struct *init_task;
 
 struct task_struct *init_task_create(void);	/* PID 1; NULL on failure */
+int spawn_blob(unsigned int id);		/* PID, or -1 */
+const char *blob_name(unsigned int id);
 void reparent_to_init(struct task_struct *dying);
 
 #endif /* _NOTHAN_SCHED_H */

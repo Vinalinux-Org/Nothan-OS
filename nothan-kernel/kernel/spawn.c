@@ -8,8 +8,12 @@
 #include <nothan/slab.h>
 #include <nothan/printk.h>
 #include <nothan/fs.h>
+#include <nothan/syscall.h>
 #include <nothan/delay.h>
 #include <asm/irqflags.h>
+
+/* No <limits.h> in a freestanding build. */
+#define PID_MAX_VALUE		0x7FFFFFFF
 
 static int next_pid = 1;
 
@@ -28,8 +32,18 @@ static int next_pid = 1;
  * Fixed now because the fix is three lines and the failure mode - a signal
  * delivered to the wrong process - is one UART cannot explain.
  *
- * Deliberately not reused after a task dies: a recycled PID lets a parent's
- * wait(pid) collect a brand-new process that merely inherited the number.
+ * Not reused after a task dies: a recycled PID lets a parent's wait(pid)
+ * collect a brand-new process that merely inherited the number. That is
+ * affordable, not free - never reusing means the space is consumed forever, so
+ * the counter must be allowed to RUN OUT rather than wrap.
+ *
+ * Wrapping is the dangerous outcome, not exhaustion. Past INT_MAX the counter
+ * goes negative; sys_kill's "pid <= 1" guard would then treat every task as
+ * protected, pid_hash would still bucket on (unsigned)pid, and PIDs would
+ * silently start colliding with live ones. Refusing to allocate is loud and
+ * recoverable; wrapping is silent and wrong.
+ *
+ * Return: a fresh PID, or -1 when the space is gone.
  */
 static int pid_alloc(void)
 {
@@ -37,8 +51,12 @@ static int pid_alloc(void)
 	int pid;
 
 	local_irq_save(flags);
-	pid = next_pid++;
+	pid = (next_pid == PID_MAX_VALUE) ? -1 : next_pid++;
 	local_irq_restore(flags);
+
+	if (pid < 0)
+		pr_err("[SPAWN] PID space exhausted (never reused; %d handed out)\n",
+		       PID_MAX_VALUE);
 
 	return pid;
 }
@@ -124,6 +142,11 @@ extern void task_entry(void);
  */
 struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 {
+	int pid = pid_alloc();
+
+	if (pid < 0)			/* PID space gone — pid_alloc already said so */
+		return NULL;
+
 	struct task_struct *p = (struct task_struct *)kmalloc(sizeof(*p), GFP_KERNEL);
 	if (!p)
 		return NULL;
@@ -160,7 +183,7 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 	p->user_lr    = 0;
 	p->__state    = TASK_RUNNING;
 	p->flags      = 0;
-	p->pid        = pid_alloc();
+	p->pid        = pid;
 	p->prio       = prio;
 	p->rt.on_rq   = 0;
 	p->exit_how   = EXIT_HOW_EXITED;
@@ -238,6 +261,11 @@ struct user_bin_header {
 struct task_struct *user_task_create_bin(const char *name,
 	char *blob_start, char *blob_end)
 {
+	int pid = pid_alloc();
+
+	if (pid < 0)			/* PID space gone — pid_alloc already said so */
+		return NULL;
+
 	struct task_struct *p = (struct task_struct *)kmalloc(sizeof(*p), GFP_KERNEL);
 	if (!p)
 		return NULL;
@@ -461,7 +489,7 @@ struct task_struct *user_task_create_bin(const char *name,
 	p->user_lr    = 0;
 	p->__state    = TASK_RUNNING;
 	p->flags      = 0;
-	p->pid        = pid_alloc();
+	p->pid        = pid;
 	p->prio       = DEFAULT_PRIO;
 	p->rt.on_rq   = 0;
 	p->mm         = mm;
@@ -558,5 +586,84 @@ struct task_struct *user_task_create_storage_daemon(void)
 	return user_task_create_bin("storage_daemon",
 				    _binary_user_storage_daemon_start,
 				    _binary_user_storage_daemon_end);
+}
+
+/*
+ * The set of programs this kernel can start, as DATA rather than as four
+ * separate functions.
+ *
+ * That distinction is the whole point of the table. A syscall cannot be handed
+ * a function; it can be handed an index. And keeping the set as data is what
+ * lets it move to user space later - the day init is a user process reading a
+ * list, the machinery below does not change, only where the list lives.
+ *
+ * Static-first (C4 nac 3): spawning at runtime, but only from a set fixed at
+ * build time. That is deliberately NOT "load any binary from disk" - the
+ * process tree stays shallow and enumerable, which is the property that makes
+ * runtime creation controllable rather than open-ended.
+ */
+static const struct {
+	const char *name;
+	char	   *start;
+	char	   *end;
+} blob_table[] = {
+	[BLOB_SHELL]		= { "shell", _binary_user_shell_start,
+					     _binary_user_shell_end },
+	[BLOB_GUI]		= { "gui", _binary_user_gui_start,
+					   _binary_user_gui_end },
+	[BLOB_PHONE_DAEMON]	= { "phone_daemon", _binary_user_phone_daemon_start,
+						    _binary_user_phone_daemon_end },
+	[BLOB_STORAGE_DAEMON]	= { "storage_daemon", _binary_user_storage_daemon_start,
+						      _binary_user_storage_daemon_end },
+};
+
+const char *blob_name(unsigned int id)
+{
+	if (id >= BLOB_NR)
+		return NULL;
+	return blob_table[id].name;
+}
+
+/**
+ * spawn_blob() - create and enqueue a task from an embedded program
+ * @id: index into blob_table
+ *
+ * The runtime half of C4 nac 3. Everything it needs already exists:
+ * user_task_create_bin() builds the task and unwinds cleanly on every failure,
+ * pid_alloc() hands out a PID safely, files_alloc() gives it an empty
+ * descriptor table, and parent_for_new_task() records who asked.
+ *
+ * Return: PID of the new task, or -1.
+ */
+int spawn_blob(unsigned int id)
+{
+	if (id >= BLOB_NR) {
+		pr_err("[SPAWN] refused: no blob id %u (have %u)\n", id, BLOB_NR);
+		return -1;
+	}
+
+	struct task_struct *p = user_task_create_bin(blob_table[id].name,
+						     blob_table[id].start,
+						     blob_table[id].end);
+	if (!p) {
+		/*
+		 * The only limit is memory (Q7: no process count cap, no
+		 * per-process ceiling), so this is the one place the limit is
+		 * enforced - and it must SAY so. A silent NULL here would make
+		 * running out of RAM look like a corrupt blob.
+		 */
+		struct task_struct *cur = runqueue.curr;
+
+		pr_err("[SPAWN] refused \"%s\": out of memory (asked by pid=%d \"%s\")\n",
+		       blob_table[id].name,
+		       cur ? cur->pid : -1, cur ? cur->comm : "?");
+		return -1;
+	}
+
+	enqueue_task(&runqueue, p);
+	pr_info("[SPAWN] \"%s\" pid=%d parent=%d\n",
+		p->comm, p->pid, p->parent ? p->parent->pid : -1);
+
+	return p->pid;
 }
 

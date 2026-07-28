@@ -22,6 +22,7 @@
 /* 20 = __NR_sleep (kernel) — not wrapped here */
 #define __NR_msgq_send  21
 #define __NR_msgq_recv  22
+#define __NR_spawn      23
 
 #define REBOOT_WARM     0
 #define REBOOT_HALT     1
@@ -149,6 +150,30 @@ struct uname_info {
 static inline long kill(int pid)
 {
 	return __syscall1(__NR_kill, (long)pid);
+}
+
+/*
+ * Programs the kernel can start. Fixed at build time: spawn() creates a process
+ * at RUNTIME, but only from this set - which is what keeps the process tree
+ * enumerable rather than open-ended. Not an ELF loader.
+ *
+ * Must match include/nothan/syscall.h in the kernel.
+ */
+#define BLOB_SHELL		0
+#define BLOB_GUI		1
+#define BLOB_PHONE_DAEMON	2
+#define BLOB_STORAGE_DAEMON	3
+#define BLOB_NR			4
+
+/*
+ * spawn - start one of the embedded programs; returns its PID, or -1.
+ *
+ * No argv: nothing reads one yet and _start() takes no arguments. The kernel
+ * would rather take no parameter than take one it ignores.
+ */
+static inline long spawn(int blob_id)
+{
+	return __syscall1(__NR_spawn, (long)blob_id);
 }
 
 static inline long reboot(int cmd)
