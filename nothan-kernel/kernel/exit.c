@@ -10,26 +10,86 @@
 #include <nothan/slab.h>
 #include <nothan/printk.h>
 #include <nothan/fs.h>
+#include <nothan/signal.h>
+
+static void __do_exit(unsigned int how, int value);
+
+static const char *signame(int sig)
+{
+	switch (sig) {
+	case SIGILL:	return "SIGILL";
+	case SIGBUS:	return "SIGBUS";
+	case SIGKILL:	return "SIGKILL";
+	case SIGSEGV:	return "SIGSEGV";
+	default:	return "SIG?";
+	}
+}
 
 /**
- * do_exit() - terminate the current task and release resources
- * @code: exit status code
+ * do_exit() - terminate the current task, having finished of its own accord
+ * @code: exit status
+ */
+void do_exit(int code)
+{
+	__do_exit(EXIT_HOW_EXITED, code);
+}
+
+/**
+ * do_exit_killed() - terminate the current task, killed from outside
+ * @sig: what killed it (SIGSEGV, SIGILL, SIGBUS, SIGKILL)
+ *
+ * Split from do_exit() because the two are not the same event, and until now
+ * the kernel could not tell them apart: every fault handler called
+ * do_exit(-1), so "the task crashed" and "the task called exit(-1)" produced
+ * byte-identical state. The kernel is the ONLY observer of that difference -
+ * it has the fault class, DFAR and PC - and it was discarding it. On a machine
+ * whose only debugging tool is the UART, throwing away the one fact only the
+ * kernel knows is the expensive kind of simplification.
+ */
+void do_exit_killed(int sig)
+{
+	__do_exit(EXIT_HOW_KILLED, sig);
+}
+
+/**
+ * __do_exit() - the single teardown path both entry points share
+ * @how:   EXIT_HOW_EXITED / EXIT_HOW_KILLED
+ * @value: exit status, or signal number
  *
  * Linux: kernel/exit.c do_exit().
  * Freezes the task, releases user pages, then calls schedule()
  * never to return.
  */
-void do_exit(int code)
+static void __do_exit(unsigned int how, int value)
 {
 	struct task_struct *tsk = runqueue.curr;
 
-	/* Loud, earliest-possible marker: ANY task death lands here first,
-	 * whether from a fault (preceded by a [DABT]/[PABT] line) or a clean
-	 * exit syscall (main() returning -> crt0 svc, with no fault line). */
-	pr_debug("\n[DOEXIT] >>> pid=%d \"%s\" code=%d <<<\n",
-		 tsk->pid, tsk->comm, code);
+	/*
+	 * Earliest-possible marker: ANY task death lands here first, whether
+	 * from a fault (preceded by a [DABT]/[PABT] line) or a clean exit
+	 * syscall (main() returning -> crt0 svc, with no fault line).
+	 *
+	 * The two are printed differently, and at DIFFERENT LEVELS, on purpose:
+	 *
+	 *   killed  -> pr_err, so it survives the default build. A task dying
+	 *              involuntarily is never routine, and classifying the death
+	 *              is pointless if the classification is compiled out - the
+	 *              kernel would know why it died and still not say so, on a
+	 *              machine where the UART is the only way to find out.
+	 *   exited  -> pr_debug. Expected, routine, and noisy if always on.
+	 *
+	 * Reading a log, the question is never "what number" but "did this
+	 * thing crash or finish"; one word answers it with no status decoding.
+	 */
+	if (how == EXIT_HOW_KILLED)
+		pr_err("\n[DOEXIT] >>> pid=%d \"%s\" KILLED by %s (%d) <<<\n",
+		       tsk->pid, tsk->comm, signame(value), value);
+	else
+		pr_debug("\n[DOEXIT] >>> pid=%d \"%s\" exited, status=%d <<<\n",
+			 tsk->pid, tsk->comm, value);
 
-	tsk->exit_code = code;
+	tsk->exit_how = how;
+	tsk->exit_value = value;
 	tsk->__state = TASK_DEAD;	/* EXIT_DEAD: done, on dead_list, awaiting reap */
 
 	/*
@@ -94,8 +154,8 @@ void do_exit(int code)
 			 tsk->comm, tsk->pid);
 	}
 
-	pr_debug("[EXIT] task \"%s\" pid=%d exited with code %d\n",
-		 tsk->comm, tsk->pid, code);
+	pr_debug("[EXIT] task \"%s\" pid=%d teardown done\n",
+		 tsk->comm, tsk->pid);
 
 	/* We're still executing on this task's kernel stack, so we can't free
 	 * it (or the task_struct) here. Hand both to the reaper, which runs in

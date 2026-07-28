@@ -7,6 +7,7 @@
 #include <nothan/types.h>
 #include <nothan/irq.h>
 #include <nothan/printk.h>
+#include <nothan/signal.h>
 #include <nothan/sched.h>
 #include <nothan/mm.h>
 #include <nothan/panic.h>
@@ -75,12 +76,21 @@ static void show_backtrace(unsigned int spsr)
  * reschedule. Only halt if the fault came from kernel mode — kernel
  * exceptions are unrecoverable.
  */
-static void handle_user_or_panic(unsigned int spsr, const char *tag)
+/*
+ * @sig: which kind of death this fault is, in Linux signal numbers.
+ *
+ * Every fault used to funnel into do_exit(-1), which threw away the only fact
+ * the kernel alone knows: WHY the task died. "Crashed on a bad pointer",
+ * "executed garbage" and "called exit(-1)" all produced the same state, so
+ * nothing downstream - a log reader, and later a parent - could tell them
+ * apart. The fault class is free here and unrecoverable anywhere else.
+ */
+static void handle_user_or_panic(unsigned int spsr, const char *tag, int sig)
 {
 	if ((spsr & SPSR_MODE_MASK) == MODE_USER) {
 		printk("  [%s] killing user task \"%s\" pid=%d\n",
 		       tag, runqueue.curr->comm, runqueue.curr->pid);
-		do_exit(-1);
+		do_exit_killed(sig);
 		/* NOTREACHED */
 	}
 	panic("%s in kernel mode", tag);
@@ -95,7 +105,7 @@ void und_handler(unsigned int spsr)
 	printk("\nException: Undefined Instruction!\n");
 	printk("  SPSR=0x%08x\n", spsr);
 	show_backtrace(spsr);
-	handle_user_or_panic(spsr, "UND");
+	handle_user_or_panic(spsr, "UND", SIGILL);
 }
 
 /**
@@ -130,7 +140,10 @@ void pabt_handler(unsigned int spsr, unsigned int lr_usr)
 	}
 	printk("  Reason: %s\n", reason);
 	show_backtrace(spsr);
-	handle_user_or_panic(spsr, "PABT");
+	/* A prefetch abort means the PC itself is unfetchable: a wild jump or a
+	 * bad return address, not a bad data pointer. Still SIGSEGV - the memory
+	 * access that failed happens to be the instruction fetch. */
+	handle_user_or_panic(spsr, "PABT", SIGSEGV);
 }
 
 /**
@@ -173,7 +186,12 @@ void dabt_handler(unsigned int spsr, unsigned int pc, unsigned int *regs)
 	}
 	printk("  Reason: %s\n", reason);
 	show_backtrace(spsr);
-	handle_user_or_panic(spsr, "DABT");
+	/* Alignment is its own kind of wrong: the address was mapped and
+	 * permitted, the CPU simply refuses the access shape. That is what
+	 * SIGBUS means, and keeping it distinct from SIGSEGV is the whole point
+	 * of recording a signal instead of -1. */
+	handle_user_or_panic(spsr, "DABT",
+			     ((dfsr & 0xF) == 1) ? SIGBUS : SIGSEGV);
 }
 
 /**

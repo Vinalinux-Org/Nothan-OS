@@ -69,7 +69,7 @@ struct sched_rt_entity {
  * @rt:        embedded scheduling entity
  * @comm:      human-readable task name (for printk debugging)
  * @mm:        NULL = kernel thread
- * @exit_code: exit status code set by do_exit()
+ * @exit_how/@exit_value: how this task died — see the fields themselves
  */
 struct task_struct {
 	void				*stack;
@@ -84,7 +84,21 @@ struct task_struct {
 	char				comm[16];
 	struct mm_struct		*mm;    /* NULL = kernel thread */
 	struct files_struct		*files;	/* NULL = kernel thread (opens nothing) */
-	int				exit_code;
+
+	/*
+	 * How this task died, in TWO fields rather than one packed int.
+	 *
+	 * The kind of death and the value that goes with it are different
+	 * questions, and "exited with status 11" must never be confusable with
+	 * "killed by signal 11". Linux packs both into one int and then needs
+	 * WIFEXITED/WTERMSIG to take them apart again - a shape it carries for
+	 * history, not because it is better. Diverging here is free (C1).
+	 *
+	 * @exit_how:   EXIT_HOW_EXITED or EXIT_HOW_KILLED
+	 * @exit_value: exit status if EXITED, signal number if KILLED
+	 */
+	unsigned int			exit_how;
+	int				exit_value;
 	char				cwd[64];
 
 	/*
@@ -163,7 +177,16 @@ extern struct rq runqueue;
 extern int need_resched;
 extern bool sched_running;  /* true after first real context switch */
 
-void do_exit(int code);
+/*
+ * Two ways a task can die, kept as two entry points rather than one function
+ * with a mode argument - the caller always knows statically which it is, and a
+ * fault handler that has to remember to pass a flag will eventually not.
+ */
+#define EXIT_HOW_EXITED		0	/* ran to completion / called exit() */
+#define EXIT_HOW_KILLED		1	/* fault or kill; exit_value = signal */
+
+void do_exit(int code);			/* voluntary: sys_exit, thread return */
+void do_exit_killed(int sig);		/* involuntary: fault handlers, sys_kill */
 void sched_defer_free(struct task_struct *tsk);
 
 /*

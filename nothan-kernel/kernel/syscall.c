@@ -8,6 +8,7 @@
 #include <nothan/syscall.h>
 #include <nothan/sched.h>
 #include <nothan/printk.h>
+#include <nothan/signal.h>
 #include <nothan/slab.h>
 #include <nothan/fs.h>
 #include <nothan/uart.h>
@@ -277,7 +278,10 @@ static long sys_kill(unsigned long a0, unsigned long a1, unsigned long a2)
 		return -1;
 
 	if (runqueue.curr && runqueue.curr->pid == target_pid) {
-		do_exit(0);			/* self — exit right here */
+		/* Killing yourself is still a kill, not a clean exit — same as
+		 * kill(getpid(), SIGKILL) on Linux. A task that wanted a clean
+		 * exit had exit() available. */
+		do_exit_killed(SIGKILL);	/* self — exit right here */
 		/* NOTREACHED */
 		return 0;
 	}
@@ -611,11 +615,18 @@ long do_syscall(unsigned int nr, unsigned long arg0,
 
 	/*
 	 * Cooperative-kill safe point: a task marked TASK_SHOULD_EXIT exits
-	 * HERE, at the syscall boundary — never mid-operation. do_exit() runs
-	 * on this task's own kernel stack (like sys_exit) and never returns.
+	 * HERE, at the syscall boundary — never mid-operation. It runs on this
+	 * task's own kernel stack (like sys_exit) and never returns.
+	 *
+	 * KILLED, not EXITED with status 0. The death is involuntary no matter
+	 * how politely it is carried out: the task never chose to stop, it was
+	 * asked to and complied at the first safe point. Recording it as a
+	 * clean exit would make a killed task indistinguishable from one that
+	 * finished its work - which is exactly the confusion the two-field exit
+	 * status exists to remove.
 	 */
 	if (runqueue.curr && (runqueue.curr->flags & TASK_SHOULD_EXIT))
-		do_exit(0);
+		do_exit_killed(SIGKILL);
 
 	return ret;
 }

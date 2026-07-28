@@ -98,7 +98,8 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 	p->pid        = pid_alloc();
 	p->prio       = prio;
 	p->rt.on_rq   = 0;
-	p->exit_code  = 0;
+	p->exit_how   = EXIT_HOW_EXITED;
+	p->exit_value = 0;
 	p->mm         = NULL;
 	p->files      = NULL;	/* kernel thread: opens nothing, so owns no table */
 	p->refcount   = 1;	/* existence ref; dropped at reap */
@@ -398,7 +399,8 @@ struct task_struct *user_task_create_bin(const char *name,
 	p->prio       = DEFAULT_PRIO;
 	p->rt.on_rq   = 0;
 	p->mm         = mm;
-	p->exit_code  = 0;
+	p->exit_how   = EXIT_HOW_EXITED;
+	p->exit_value = 0;
 	p->refcount   = 1;	/* existence ref; dropped at reap */
 	list_init(&p->wait_node);	/* empty = on no wait queue */
 	/* CFS-lite: start at the current min_vruntime so a fresh task can't hog
