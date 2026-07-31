@@ -29,7 +29,7 @@ LVGL_CFLAGS := $(CFLAGS) -I lib/lvgl -DLV_CONF_INCLUDE_SIMPLE \
 
 .PHONY: all clean size test-sms-rx
 
-all: $(BUILD)/shell.bin $(BUILD)/gui.bin $(BUILD)/phone_daemon.bin $(BUILD)/storage_daemon.bin
+all: $(BUILD)/init.bin $(BUILD)/shell.bin $(BUILD)/gui.bin $(BUILD)/phone_daemon.bin $(BUILD)/storage_daemon.bin
 
 # Host unit test for the incoming multipart-SMS reassembly (sms_rx.c).
 # Built with the native gcc + ASan/UBSan — no target hardware needed.
@@ -41,6 +41,17 @@ test-sms-rx:
 
 $(BUILD)/lib/crt0.o: lib/crt0.S | $(BUILD)/lib
 	$(CC) $(AFLAGS) -c -o $@ $<
+
+# init (PID 1) — links like the shell: crt0 + -lgcc, no newlib.
+$(BUILD)/init/main.o: init/main.c | $(BUILD)/init
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(BUILD)/init.elf: $(CRT0) $(BUILD)/init/main.o
+	$(CC) -nostdlib -T $(LDS) -o $@ $^ -lgcc
+	$(OBJDUMP) -d $@ > $(BUILD)/init.dis
+
+$(BUILD)/init.bin: $(BUILD)/init.elf
+	$(OBJCOPY) -O binary $< $@
 
 # Shell
 $(BUILD)/sh/main.o: sh/main.c | $(BUILD)/sh
@@ -133,7 +144,7 @@ $(BUILD)/gui.bin: $(BUILD)/gui.elf
 
 LVGL_LIB_DIRS := $(sort $(dir $(LVGL_OBJS)))
 
-DIRS := $(BUILD)/lib $(BUILD)/sh $(BUILD)/phone_daemon $(BUILD)/storage_daemon \
+DIRS := $(BUILD)/lib $(BUILD)/init $(BUILD)/sh $(BUILD)/phone_daemon $(BUILD)/storage_daemon \
         $(BUILD)/gui/port $(BUILD)/gui/core $(BUILD)/gui/services \
         $(BUILD)/gui/widgets $(BUILD)/gui/screens \
         $(BUILD)/gui/phone_daemon

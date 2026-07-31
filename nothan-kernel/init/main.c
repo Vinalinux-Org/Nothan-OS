@@ -18,10 +18,6 @@
 
 extern void mmu_log_config(void);
 extern void omap_intc_init(void);
-extern struct task_struct *user_task_create(const char *name);
-extern struct task_struct *user_task_create_gui(void);
-extern struct task_struct *user_task_create_phone_daemon(void);
-extern struct task_struct *user_task_create_storage_daemon(void);
 
 /*
  * Set to 1 to run the FAT32 write self-test at boot. Pure UART output —
@@ -184,20 +180,26 @@ void kernel_main(void)
 	timer_start();
 
 	/*
-	 * Mask IRQs while spawning all initial tasks. Timer IRQ is already
-	 * running (10ms tick), and would otherwise preempt kernel_main into
-	 * the first enqueued task before later tasks (GUI) get created.
+	 * Mask IRQs while creating init. The timer IRQ is already running (10ms
+	 * tick) and would otherwise preempt kernel_main into init before it is
+	 * enqueued.
 	 */
 	__asm__ __volatile__ ("cpsid i" : : : "memory");
 
 	/*
-	 * init FIRST, so it gets PID 1 — init is defined by its number, and PIDs
-	 * are handed out in creation order. Until now PID 1 was whichever task
-	 * happened to be created first (the GUI), which made sys_kill's
-	 * "protect pid <= 1" guard shield the GUI by accident.
+	 * init, and ONLY init.
 	 *
-	 * Everything created below is therefore a child of init, and every
-	 * orphan has somewhere to go when its parent dies.
+	 * The kernel creates exactly one process and then stops choosing what
+	 * runs: init is a user process (userspace/init/main.c) that spawns the
+	 * GUI, the shell and the daemons itself, through the same sys_spawn any
+	 * process uses. Adding a service is a change to init, not to the kernel.
+	 *
+	 * It is created FIRST because PIDs are handed out in creation order and
+	 * init is defined by its number - anything created before it would take
+	 * PID 1, and sys_kill's "protect pid <= 1" guard would shield that task
+	 * instead. Being first is also what makes init the parent of everything:
+	 * every later process is spawned BY it, and every orphan is reparented
+	 * to it.
 	 */
 	struct task_struct *init = init_task_create();
 	if (init) {
@@ -205,40 +207,6 @@ void kernel_main(void)
 		enqueue_task(&runqueue, init);
 	} else {
 		panic("cannot create init");
-	}
-
-	/* BOOT_GUI: 1 spawns the LVGL GUI (+ shell). 0 skips it (blank screen),
-	 * useful when bringing up lower layers without the GUI on top. */
-#define BOOT_GUI 1
-#if BOOT_GUI
-	struct task_struct *gui = user_task_create_gui();
-	if (gui) {
-		printk("[KERN] Spawning GUI\n");
-		enqueue_task(&runqueue, gui);
-	}
-
-	struct task_struct *sh = user_task_create("shell");
-	if (sh) {
-		printk("[KERN] Spawning shell\n");
-		enqueue_task(&runqueue, sh);
-	}
-#else
-	printk("[KERN] BOOT_GUI=0: GUI not spawned\n");
-#endif
-
-	/* Modem backend — runs regardless of BOOT_GUI (talks to /dev/uart1). */
-	struct task_struct *pd = user_task_create_phone_daemon();
-	if (pd) {
-		printk("[KERN] Spawning phone_daemon\n");
-		enqueue_task(&runqueue, pd);
-	}
-
-	/* FAT-write backend — takes storage_write() requests off the GUI task
-	 * so a slow SD card write never blocks touch input. */
-	struct task_struct *sd = user_task_create_storage_daemon();
-	if (sd) {
-		printk("[KERN] Spawning storage_daemon\n");
-		enqueue_task(&runqueue, sd);
 	}
 
 #if MSGQ_SELFTEST

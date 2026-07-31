@@ -41,8 +41,7 @@
  *   with the merge - an ABBA deadlock built by hand.
  *
  * On SMP this is NOT a lock (it masks only the local core) and every section
- * here becomes a real zone->lock.  That day is deliberately deferred; see R3
- * in Documentation/process-mm-design.md.
+ * here becomes a real zone->lock.  That day is deliberately deferred.
  */
 
 /*

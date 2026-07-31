@@ -1,0 +1,21 @@
+# /etc/inittab - services init starts at boot, one path per line.
+#
+# Read by userspace/init/main.c. Blank lines and '#' comments are ignored.
+# Order matters only in that the GUI comes up before the shell.
+#
+# This file is the whole boot policy. The kernel has no list of programs and
+# init has none compiled in: removing a line here is how a service stops
+# starting, and no rebuild of anything is needed.
+#
+# Names are 8.3 because the FAT driver reads short directory entries and skips
+# long-name (LFN) ones - "phone_daemon" would be stored under a mangled
+# "PHONE_~1" short name and never found. Keep each component <= 8 characters.
+
+/bin/gui
+/bin/shell
+
+# Modem backend - talks to /dev/uart1.
+/bin/phoned
+
+# FAT-write backend - keeps slow SD writes off the GUI task.
+/bin/storaged

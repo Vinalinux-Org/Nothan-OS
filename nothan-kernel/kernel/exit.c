@@ -13,6 +13,7 @@
 #include <nothan/signal.h>
 #include <nothan/wait.h>
 #include <nothan/syscall.h>
+#include <nothan/panic.h>
 
 static void __do_exit(unsigned int how, int value);
 
@@ -67,6 +68,29 @@ static void __do_exit(unsigned int how, int value)
 	struct task_struct *tsk = runqueue.curr;
 
 	/*
+	 * init must never die, and this is where that is enforced - not in
+	 * sys_kill.
+	 *
+	 * sys_kill's "pid <= 1" guard stops another PROCESS from killing init.
+	 * It cannot stop init from dying on its own: a fault in init's own code
+	 * (SIGSEGV/SIGILL) or main() returning both arrive here having asked
+	 * nobody's permission. That path exists only because init is a user
+	 * process now; as a kernel thread it could not fault into exit.
+	 *
+	 * Continuing without init is not an option worth building. Every orphan
+	 * is reparented to init, so a dead PID 1 leaves every future orphan
+	 * holding a pointer into a freed task_struct - a use-after-free that
+	 * surfaces later, somewhere else, as exactly the kind of bug a UART
+	 * cannot trace back. Fail-fast instead: stop here, where the log still
+	 * says which task died and why.
+	 */
+	if (tsk == init_task)
+		panic("init (pid=%d) died: %s %d - nothing can be reparented",
+		      tsk->pid,
+		      how == EXIT_HOW_KILLED ? "killed by" : "exited with status",
+		      value);
+
+	/*
 	 * Earliest-possible marker: ANY task death lands here first, whether
 	 * from a fault (preceded by a [DABT]/[PABT] line) or a clean exit
 	 * syscall (main() returning -> crt0 svc, with no fault line).
@@ -102,8 +126,7 @@ static void __do_exit(unsigned int how, int value)
 	 *
 	 * This is also the mechanism the rest of the kernel's resource
 	 * lifetimes are meant to hang off: anything given an fd gets released
-	 * here for free, with no per-resource teardown code (see D5 in
-	 * Documentation/process-mm-design.md).
+	 * here for free, with no per-resource teardown code.
 	 */
 	files_free(tsk->files);
 	tsk->files = NULL;
@@ -199,7 +222,7 @@ static void __do_exit(unsigned int how, int value)
  * Walks all_tasks rather than a per-parent children list, for the same reason
  * reparent_to_init() does: nothing else traverses downward, so an index would
  * be state to maintain and get wrong for one reader. Iterative, never
- * recursive - tree depth is deliberately unbounded (Q7).
+ * recursive - tree depth is deliberately unbounded.
  *
  * @any_child tells the caller whether this parent has ANY children left, which
  * is how wait() distinguishes "nothing dead yet, go to sleep" from "nothing

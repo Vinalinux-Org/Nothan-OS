@@ -19,7 +19,7 @@
 #define __NR_chdir      17
 #define __NR_getcwd     18
 #define __NR_getticks   19
-/* 20 = __NR_sleep (kernel) — not wrapped here */
+#define __NR_sleep      20
 #define __NR_msgq_send  21
 #define __NR_msgq_recv  22
 #define __NR_spawn      23
@@ -104,6 +104,9 @@ static inline long __syscall0(long nr)
 
 static inline void yield(void)		{ __syscall0(__NR_yield); }
 static inline void user_exit(int s)	{ __syscall1(__NR_exit, s); }
+/* Block this task for @ms. Sleeps on a kernel timer, so the CPU can reach
+ * idle WFI instead of spinning - unlike yield(), which stays runnable. */
+static inline void msleep(unsigned int ms) { __syscall1(__NR_sleep, (long)ms); }
 static inline long getpid(void)		{ return __syscall0(__NR_getpid); }
 static inline long write(const char *b){ return __syscall1(__NR_write, (long)b); }
 
@@ -154,27 +157,18 @@ static inline long kill(int pid)
 }
 
 /*
- * Programs the kernel can start. Fixed at build time: spawn() creates a process
- * at RUNTIME, but only from this set - which is what keeps the process tree
- * enumerable rather than open-ended. Not an ELF loader.
+ * spawn - start the program at @path; returns its PID, or -1.
  *
- * Must match include/nothan/syscall.h in the kernel.
- */
-#define BLOB_SHELL		0
-#define BLOB_GUI		1
-#define BLOB_PHONE_DAEMON	2
-#define BLOB_STORAGE_DAEMON	3
-#define BLOB_NR			4
-
-/*
- * spawn - start one of the embedded programs; returns its PID, or -1.
+ * Takes a path, not an id: the kernel keeps no list of what may be started. It
+ * opens the file, checks the image header and refuses anything else. Which
+ * programs exist is decided by what is on the disk.
  *
  * No argv: nothing reads one yet and _start() takes no arguments. The kernel
  * would rather take no parameter than take one it ignores.
  */
-static inline long spawn(int blob_id)
+static inline long spawn(const char *path)
 {
-	return __syscall1(__NR_spawn, (long)blob_id);
+	return __syscall1(__NR_spawn, (long)path);
 }
 
 /*

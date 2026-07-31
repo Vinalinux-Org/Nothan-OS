@@ -83,50 +83,31 @@ static const char *state_str(int state)
 }
 
 /*
- * spawn <name> - start one of the programs built into the image.
+ * spawn <path> - start the program at <path>.
  *
- * This is the visible half of runtime process creation: until now the set of
- * tasks was frozen after boot, and only kernel_main could create one.
+ * There is no list of known programs to check against any more: the kernel
+ * takes a path, and anything on the disk with a valid image header is a
+ * program. "ls /bin" is the list.
  */
-static const struct {
-	const char *name;
-	int	    id;
-} spawnable[] = {
-	{ "shell", BLOB_SHELL },
-	{ "gui", BLOB_GUI },
-	{ "phone_daemon", BLOB_PHONE_DAEMON },
-	{ "storage_daemon", BLOB_STORAGE_DAEMON },
-};
-
 static void cmd_spawn(int argc, char **argv)
 {
 	if (argc < 2) {
-		puts("usage: spawn <name>\n  known:");
-		for (unsigned i = 0; i < sizeof(spawnable) / sizeof(spawnable[0]); i++) {
-			puts(" ");
-			puts(spawnable[i].name);
-		}
-		puts("\n");
+		puts("usage: spawn <path>   (e.g. spawn /bin/gui; see ls /bin)\n");
 		return;
 	}
 
-	for (unsigned i = 0; i < sizeof(spawnable) / sizeof(spawnable[0]); i++) {
-		if (strcmp(argv[1], spawnable[i].name) == 0) {
-			long pid = spawn(spawnable[i].id);
+	long pid = spawn(argv[1]);
 
-			if (pid < 0) {
-				puts("spawn: failed (out of memory?)\n");
-				return;
-			}
-			puts("spawned ");
-			puts(spawnable[i].name);
-			puts(" as pid ");
-			putint((int)pid, 1);
-			putchar('\n');
-			return;
-		}
+	if (pid < 0) {
+		puts("spawn: failed (no such file, bad image, or out of memory)\n");
+		return;
 	}
-	puts("spawn: no such program\n");
+
+	puts("spawned ");
+	puts(argv[1]);
+	puts(" as pid ");
+	putint((int)pid, 1);
+	putchar('\n');
 }
 
 static void cmd_ps(void)

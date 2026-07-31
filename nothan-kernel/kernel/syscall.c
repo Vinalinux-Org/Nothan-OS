@@ -356,23 +356,25 @@ static long sys_wait(unsigned long a0, unsigned long a1, unsigned long a2)
 }
 
 /**
- * sys_spawn - start a program from the embedded set
- * @a0: blob id (BLOB_*)
+ * sys_spawn - start a program from a file
+ * @a0: pathname of the image, e.g. "/bin/gui"
  *
- * The runtime task-creation path C4 nac 3 describes: a process can be created
- * while the system runs, but only from a set fixed at build time. That is the
- * line between "controllable" and "open-ended" - it is NOT an ELF loader.
+ * The kernel holds no list of startable programs: it loads the path it is
+ * given and refuses anything without a valid user-image header. What exists
+ * and what runs is user space's business (init reads /etc/inittab).
  *
- * No argv (Q5): argv is the only customisation spawn will ever take, but
- * nothing reads it yet and _start() takes no arguments. An ignored parameter
- * would be worse than none.
+ * No argv: argv is the only customisation spawn will ever take, but nothing
+ * reads it yet and _start() takes no arguments. An ignored parameter would
+ * be worse than none.
  *
  * Return: PID of the new task, or -1.
  */
 static long sys_spawn(unsigned long a0, unsigned long a1, unsigned long a2)
 {
 	(void)a1; (void)a2;
-	return spawn_blob((unsigned int)a0);
+	if (strnlen_user((const char *)a0, USER_STR_MAX) < 0)
+		return -1;
+	return spawn_path((const char *)a0);
 }
 
 /**

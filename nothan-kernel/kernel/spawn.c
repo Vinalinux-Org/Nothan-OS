@@ -91,60 +91,37 @@ static struct task_struct *parent_for_new_task(void)
 	return init_task;	/* boot-time creation, or PID 0; NULL before init exists */
 }
 
+/* init's program image. NOT in blob_table - see the comment there. */
+extern char _binary_user_init_start[];
+extern char _binary_user_init_end[];
+
+/* Defined below; init_task_create() is the one caller that runs before it. */
+struct task_struct *user_task_create_bin(const char *name,
+					 char *blob_start, char *blob_end);
+
 /**
  * init_task_create() - create PID 1
  *
  * Must be the FIRST task created, because PIDs are handed out in order and
- * init is defined by its number. Today PID 1 is whatever task happens to be
- * created first - by ordering in init/main.c, that is the GUI - which makes
- * sys_kill's "protect pid <= 1" guard protect the GUI by accident. Creating
- * init first is what turns that guard into what its comment already claims.
+ * init is defined by its number. Creating anything before it would hand PID 1
+ * to that task instead, and sys_kill's "protect pid <= 1" guard would then be
+ * shielding whatever happened to be created first rather than init.
  *
- * init does nothing but exist, and that is its whole job for now: be the root
- * of the tree and the adoptive parent of orphans. It gains a wait() loop the
- * day zombies exist; until then a task with no work to do costs one
- * task_struct and one 4 KB stack.
+ * init is a USER PROCESS, not a kernel thread, and this is the one place a
+ * user process is created without a running process asking for it. Everything
+ * else reaches user_task_create_bin() through sys_spawn, i.e. because some
+ * process called spawn(); init cannot, because at this point in boot there is
+ * no process to do the calling. That is the whole of the bootstrap: one
+ * hard-coded creation, and from there user space starts user space.
+ *
+ * What init DOES - which services to start, and reaping forever - lives in
+ * userspace/init/main.c. The kernel no longer knows or decides.
  */
-static void init_main(void)
-{
-	pr_info("[INIT] pid=%d up\n", runqueue.curr->pid);
-
-	/*
-	 * Reap forever.
-	 *
-	 * This is what makes zombies affordable rather than a leak. Every
-	 * orphan is reparented here, so without somebody collecting them the
-	 * corpses would accumulate until reboot - a task_struct each, findable
-	 * by pid forever, holding a PID that is never reused.
-	 *
-	 * do_wait() blocks when there is nothing to collect, so this loop costs
-	 * no CPU; init is asleep except in the instant after a child dies.
-	 */
-	for (;;) {
-		struct exit_status st;
-		int pid = do_wait(&st);
-
-		if (pid < 0) {
-			/*
-			 * No children at all - only possible before the boot
-			 * tasks are created, or if every one of them has been
-			 * collected. Nothing to wait on, so wait for one to
-			 * appear rather than spinning on the check.
-			 */
-			msleep(1000);
-			continue;
-		}
-
-		pr_info("[INIT] reaped pid=%d (%s %d)\n", pid,
-			st.how == EXIT_HOW_KILLED ? "killed by" : "status",
-			st.value);
-	}
-}
-
 struct task_struct *init_task_create(void)
 {
-	struct task_struct *p = task_create(init_main, DEFAULT_PRIO, "init");
-
+	struct task_struct *p = user_task_create_bin("init",
+						     _binary_user_init_start,
+						     _binary_user_init_end);
 	if (!p)
 		return NULL;
 
@@ -246,15 +223,12 @@ extern void user_task_trampoline(void);
  */
 #define USER_STACK_TOP  0xBF000000UL
 
-/* Embedded user-space binaries (linked in by userspace_blobs.S). */
-extern char _binary_user_shell_start[];
-extern char _binary_user_shell_end[];
-extern char _binary_user_gui_start[];
-extern char _binary_user_gui_end[];
-extern char _binary_user_phone_daemon_start[];
-extern char _binary_user_phone_daemon_end[];
-extern char _binary_user_storage_daemon_start[];
-extern char _binary_user_storage_daemon_end[];
+/*
+ * init is the ONLY program embedded in the kernel image (userspace_blobs.S).
+ * Every other program is a file on disk, loaded by path - the kernel keeps no
+ * list of what exists. init is the exception because it is the bootstrap:
+ * nothing is running yet to ask for it.
+ */
 
 /*
  * NothanOS user binary header — see userspace/lib/user.lds.
@@ -270,21 +244,76 @@ struct user_bin_header {
 	u32 reserved[2];
 };
 
+/*
+ * struct bin_source - where a program image is being read from
+ * @mem:  embedded blob in kernel memory, or NULL
+ * @fd:   open file, or -1
+ * @size: image length in bytes, known before any of it is read
+ *
+ * Two sources, one loader. init comes from an embedded blob because at the
+ * moment it is created there is no process to have asked for it and no
+ * guarantee a filesystem is usable; everything else comes from a file, because
+ * which programs exist is not the kernel's business.
+ *
+ * @size is a field rather than something the loader discovers as it reads:
+ * user pages are physically contiguous, so the page count must be right BEFORE
+ * the first byte is copied.
+ */
+struct bin_source {
+	const char   *mem;
+	int           fd;
+	unsigned long size;
+};
+
+/*
+ * Pull the whole image into @dst.
+ *
+ * A short read is a failure, not a partial success: a truncated program is
+ * indistinguishable from a valid one once it is running, and it would fault
+ * somewhere far from here with a PC that means nothing.
+ */
+static int bin_source_load(struct bin_source *src, u8 *dst, const char *name)
+{
+	if (src->mem) {
+		for (unsigned long i = 0; i < src->size; i++)
+			dst[i] = src->mem[i];
+		return 0;
+	}
+
+	unsigned long done = 0;
+
+	while (done < src->size) {
+		int n = vfs_read(src->fd, (char *)(dst + done),
+				 src->size - done);
+
+		if (n <= 0) {
+			printk("[SPAWN] %s: short read at %lu/%lu B\n",
+			       name, done, src->size);
+			return -1;
+		}
+		done += (unsigned long)n;
+	}
+	return 0;
+}
+
 /**
- * user_task_create_bin() - Create a user-mode task from a binary blob
+ * user_task_create_image() - Create a user-mode task from a program image
  * @name: Task name for debugging
- * @blob_start: Start of the binary image in kernel memory
- * @blob_end: End of the binary image in kernel memory
+ * @src:  where to read the image from (embedded blob or open file)
  *
  * Allocates a task_struct, kernel stack (SVC mode), mm_struct, one or
  * more 4KB code pages, a 4KB user stack page, and a 1KB L2 table.
- * Copies the binary into the code pages and sets up the L2 mapping so
+ * Loads the image into the code pages and sets up the L2 mapping so
  * the task can run at PL0.
+ *
+ * The header is validated AFTER the load rather than before, because a file
+ * cannot be inspected without reading it anyway. The cost is that a bad image
+ * is detected one allocation later; the gain is one loader instead of two.
  *
  * Return: Pointer to the task_struct ready to enqueue, or NULL on failure.
  */
-struct task_struct *user_task_create_bin(const char *name,
-	char *blob_start, char *blob_end)
+static struct task_struct *user_task_create_image(const char *name,
+						  struct bin_source *src)
 {
 	int pid = pid_alloc();
 
@@ -299,7 +328,7 @@ struct task_struct *user_task_create_bin(const char *name,
 	 * Descriptor table first, so every failure path below has exactly one
 	 * extra thing to undo. A user task always gets one - it is what lets it
 	 * open anything at all - and it is per process, never shared with the
-	 * creator (Q5: spawn passes argv and nothing else).
+	 * creator.
 	 */
 	p->files = files_alloc();
 	if (!p->files) {
@@ -330,29 +359,17 @@ struct task_struct *user_task_create_bin(const char *name,
 		return NULL;
 	}
 
-	unsigned long blob_size = (unsigned long)(blob_end - blob_start);
+	unsigned long blob_size = src->size;
 
-	/* Parse binary header. Reject if magic mismatches or blob too small. */
+	/* Too small to even hold a header — nothing to validate against. */
 	if (blob_size < sizeof(struct user_bin_header)) {
-		printk("[SPAWN] %s: blob too small (%lu B)\n", name, blob_size);
+		printk("[SPAWN] %s: image too small (%lu B)\n", name, blob_size);
 		kfree(mm);
 		kfree(ksp);
 		files_free(p->files);
 		kfree(p);
 		return NULL;
 	}
-	struct user_bin_header *hdr = (struct user_bin_header *)blob_start;
-	if (hdr->magic != USER_BIN_MAGIC) {
-		printk("[SPAWN] %s: bad magic 0x%x (expected 0x%x)\n",
-		       name, (unsigned)hdr->magic, (unsigned)USER_BIN_MAGIC);
-		kfree(mm);
-		kfree(ksp);
-		files_free(p->files);
-		kfree(p);
-		return NULL;
-	}
-	unsigned long bss_size = hdr->bss_size;
-	printk("[SPAWN] %s: blob=%lu B, bss=%lu B\n", name, blob_size, bss_size);
 
 	unsigned int code_pages = (blob_size + PAGE_SIZE - 1) / PAGE_SIZE;
 	unsigned int order = 0;
@@ -374,8 +391,36 @@ struct task_struct *user_task_create_bin(const char *name,
 	mm->code_pages = code_pages;
 
 	u8 *code_kva = (u8 *)phys_to_kva(code_pa);
-	for (unsigned long i = 0; i < blob_size; i++)
-		code_kva[i] = blob_start[i];
+
+	if (bin_source_load(src, code_kva, name)) {
+		__free_pages(code_pg, order);
+		kfree(mm);
+		kfree(ksp);
+		files_free(p->files);
+		kfree(p);
+		return NULL;
+	}
+
+	/*
+	 * Validate the header now that the image is in memory. Same check for
+	 * both sources: a corrupt file on the SD card and a mislinked blob fail
+	 * identically, and say so before anything runs.
+	 */
+	struct user_bin_header *hdr = (struct user_bin_header *)code_kva;
+
+	if (hdr->magic != USER_BIN_MAGIC) {
+		printk("[SPAWN] %s: bad magic 0x%x (expected 0x%x)\n",
+		       name, (unsigned)hdr->magic, (unsigned)USER_BIN_MAGIC);
+		__free_pages(code_pg, order);
+		kfree(mm);
+		kfree(ksp);
+		files_free(p->files);
+		kfree(p);
+		return NULL;
+	}
+	unsigned long bss_size = hdr->bss_size;
+
+	printk("[SPAWN] %s: image=%lu B, bss=%lu B\n", name, blob_size, bss_size);
 
 	/*
 	 * Allocate and zero BSS pages. Linker pads .data to a 4 KB boundary
@@ -566,123 +611,120 @@ struct task_struct *user_task_create_bin(const char *name,
 }
 
 /**
- * user_task_create() - Create the init shell task from the embedded binary
- * @name: Task name passed to user_task_create_bin()
+ * user_task_create_bin() - create a task from an image embedded in the kernel
+ * @name: task name for debugging
+ * @blob_start: start of the image in kernel memory
+ * @blob_end: end of the image
  *
- * Return: Pointer to the task_struct, or NULL on failure.
+ * The bootstrap path, and the only user of it is init: at that point in boot
+ * nothing else is running to have asked for a process, and nothing guarantees
+ * the SD card mounted. Every other program is loaded from a file.
+ *
+ * Return: task ready to enqueue, or NULL.
  */
-struct task_struct *user_task_create(const char *name)
+struct task_struct *user_task_create_bin(const char *name,
+	char *blob_start, char *blob_end)
 {
-	return user_task_create_bin(name, _binary_user_shell_start,
-				    _binary_user_shell_end);
+	struct bin_source src = {
+		.mem  = blob_start,
+		.fd   = -1,
+		.size = (unsigned long)(blob_end - blob_start),
+	};
+
+	return user_task_create_image(name, &src);
 }
 
 /**
- * user_task_create_gui() - Create the GUI task from the embedded binary
+ * user_task_create_file() - create a task from a program file
+ * @name: task name for debugging
+ * @path: absolute path to the image
  *
- * Return: Pointer to the task_struct, or NULL on failure.
+ * The normal path. The kernel does not know which programs exist - it opens
+ * what it is given, checks the header, and refuses anything that is not a
+ * NothanOS user image.
+ *
+ * The fd is opened against whatever process is asking, and closed here on
+ * every exit: the loader borrows a descriptor, it does not hand one to the new
+ * task (which gets its own empty table).
+ *
+ * Return: task ready to enqueue, or NULL.
  */
-struct task_struct *user_task_create_gui(void)
+struct task_struct *user_task_create_file(const char *name, const char *path)
 {
-	return user_task_create_bin("gui", _binary_user_gui_start,
-				    _binary_user_gui_end);
-}
+	int fd = vfs_open(path, O_RDONLY);
 
-/**
- * user_task_create_phone_daemon() - Create the modem backend task from the
- * embedded binary.
- *
- * Return: Pointer to the task_struct, or NULL on failure.
- */
-struct task_struct *user_task_create_phone_daemon(void)
-{
-	return user_task_create_bin("phone_daemon",
-				    _binary_user_phone_daemon_start,
-				    _binary_user_phone_daemon_end);
-}
+	if (fd < 0) {
+		printk("[SPAWN] %s: cannot open \"%s\"\n", name, path);
+		return NULL;
+	}
 
-/**
- * user_task_create_storage_daemon() - Create the FAT-write backend task
- * from the embedded binary.
- *
- * Return: Pointer to the task_struct, or NULL on failure.
- */
-struct task_struct *user_task_create_storage_daemon(void)
-{
-	return user_task_create_bin("storage_daemon",
-				    _binary_user_storage_daemon_start,
-				    _binary_user_storage_daemon_end);
+	long size = vfs_size(fd);
+
+	if (size <= 0) {
+		printk("[SPAWN] %s: \"%s\" is empty or unsized\n", name, path);
+		vfs_close(fd);
+		return NULL;
+	}
+
+	struct bin_source src = {
+		.mem  = NULL,
+		.fd   = fd,
+		.size = (unsigned long)size,
+	};
+	struct task_struct *p = user_task_create_image(name, &src);
+
+	vfs_close(fd);
+	return p;
 }
 
 /*
- * The set of programs this kernel can start, as DATA rather than as four
- * separate functions.
+ * basename() - the last path component, for task->comm
  *
- * That distinction is the whole point of the table. A syscall cannot be handed
- * a function; it can be handed an index. And keeping the set as data is what
- * lets it move to user space later - the day init is a user process reading a
- * list, the machinery below does not change, only where the list lives.
- *
- * Static-first (C4 nac 3): spawning at runtime, but only from a set fixed at
- * build time. That is deliberately NOT "load any binary from disk" - the
- * process tree stays shallow and enumerable, which is the property that makes
- * runtime creation controllable rather than open-ended.
+ * "/bin/gui" is what the caller asked for; "gui" is what belongs in a log line
+ * and in ps output. comm is 16 bytes and a path is not.
  */
-static const struct {
-	const char *name;
-	char	   *start;
-	char	   *end;
-} blob_table[] = {
-	[BLOB_SHELL]		= { "shell", _binary_user_shell_start,
-					     _binary_user_shell_end },
-	[BLOB_GUI]		= { "gui", _binary_user_gui_start,
-					   _binary_user_gui_end },
-	[BLOB_PHONE_DAEMON]	= { "phone_daemon", _binary_user_phone_daemon_start,
-						    _binary_user_phone_daemon_end },
-	[BLOB_STORAGE_DAEMON]	= { "storage_daemon", _binary_user_storage_daemon_start,
-						      _binary_user_storage_daemon_end },
-};
-
-const char *blob_name(unsigned int id)
+static const char *basename(const char *path)
 {
-	if (id >= BLOB_NR)
-		return NULL;
-	return blob_table[id].name;
+	const char *last = path;
+
+	for (const char *c = path; *c; c++)
+		if (*c == '/')
+			last = c + 1;
+
+	return last;
 }
 
 /**
- * spawn_blob() - create and enqueue a task from an embedded program
- * @id: index into blob_table
+ * spawn_path() - create and enqueue a task from a program file
+ * @path: absolute path to the image, e.g. "/bin/gui"
  *
- * The runtime half of C4 nac 3. Everything it needs already exists:
- * user_task_create_bin() builds the task and unwinds cleanly on every failure,
- * pid_alloc() hands out a PID safely, files_alloc() gives it an empty
- * descriptor table, and parent_for_new_task() records who asked.
+ * The kernel keeps no list of what may be started. It is handed a path, it
+ * loads what is there, and it refuses anything without a valid user-image
+ * header. Which programs exist, and which of them run at boot, is decided
+ * entirely in user space (init reads /etc/inittab).
+ *
+ * Everything else it needs already exists: user_task_create_file() builds the
+ * task and unwinds cleanly on every failure, pid_alloc() hands out a PID
+ * safely, files_alloc() gives it an empty descriptor table, and
+ * parent_for_new_task() records who asked.
  *
  * Return: PID of the new task, or -1.
  */
-int spawn_blob(unsigned int id)
+int spawn_path(const char *path)
 {
-	if (id >= BLOB_NR) {
-		pr_err("[SPAWN] refused: no blob id %u (have %u)\n", id, BLOB_NR);
-		return -1;
-	}
+	struct task_struct *p = user_task_create_file(basename(path), path);
 
-	struct task_struct *p = user_task_create_bin(blob_table[id].name,
-						     blob_table[id].start,
-						     blob_table[id].end);
 	if (!p) {
 		/*
-		 * The only limit is memory (Q7: no process count cap, no
-		 * per-process ceiling), so this is the one place the limit is
-		 * enforced - and it must SAY so. A silent NULL here would make
-		 * running out of RAM look like a corrupt blob.
+		 * Loading can fail for reasons the caller cannot tell apart from
+		 * out here - missing file, bad header, out of memory - so the
+		 * layer that KNOWS has already said which on the log. This line
+		 * only records who asked, which that layer does not know.
 		 */
 		struct task_struct *cur = runqueue.curr;
 
-		pr_err("[SPAWN] refused \"%s\": out of memory (asked by pid=%d \"%s\")\n",
-		       blob_table[id].name,
-		       cur ? cur->pid : -1, cur ? cur->comm : "?");
+		pr_err("[SPAWN] refused \"%s\" (asked by pid=%d \"%s\")\n",
+		       path, cur ? cur->pid : -1, cur ? cur->comm : "?");
 		return -1;
 	}
 

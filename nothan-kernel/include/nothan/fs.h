@@ -95,8 +95,8 @@ struct file_entry {
  * moment one of them closes.
  *
  * No lock here, and the reason is a decision rather than an oversight: a
- * process is single-threaded (C6, see Documentation/process-mm-design.md), so
- * exactly one task ever reaches a given table.  The day threads exist, this
+ * process is single-threaded, so exactly one task ever reaches a given
+ * table.  The day threads exist, this
  * struct is where their lock goes, and struct file will need a refcount so a
  * close on one thread cannot free a file another is mid-read on.
  */
@@ -114,6 +114,7 @@ extern struct files_struct init_files;
 int vfs_mount(const char *dev_name, const char *fs_type);
 int vfs_open(const char *pathname, int flags);
 int vfs_read(int fd, char *buf, size_t count);
+long vfs_size(int fd);		/* bytes; program loader needs it before reading */
 int vfs_write(int fd, const char *buf, size_t count);
 int vfs_close(int fd);
 int vfs_ioctl(int fd, unsigned int cmd, unsigned long arg);

@@ -371,6 +371,25 @@ int vfs_read(int fd, char *buf, size_t count)
 }
 
 /**
+ * vfs_size() - Size in bytes of the file behind @fd
+ *
+ * Exists for the program loader, which must know how much to allocate BEFORE
+ * it reads anything: a user image is copied into physically contiguous pages,
+ * so the page count has to be right the first time. Measuring by reading to
+ * EOF would mean either reading the file twice or buffering all of it.
+ *
+ * Return: size in bytes, or -1 if @fd is not open.
+ */
+long vfs_size(int fd)
+{
+	struct file *f = fd_lookup(fd);
+
+	if (!f || !f->f_inode)
+		return -1;
+	return (long)f->f_inode->i_size;
+}
+
+/**
  * vfs_write() - Write to a file descriptor
  * @fd: File descriptor (returned by vfs_open)
  * @buf: User buffer containing data

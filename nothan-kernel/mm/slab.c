@@ -42,8 +42,7 @@
  * refill.  That is bounded - a buddy walk plus one page of pointer writes, no
  * I/O and no printk - so it is short in the same way the buddy section is.
  *
- * On SMP each of these becomes a real cache->lock; see R3 in
- * Documentation/process-mm-design.md.
+ * On SMP each of these becomes a real cache->lock.
  */
 
 #define SLAB_SIZES		7

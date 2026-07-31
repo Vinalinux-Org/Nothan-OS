@@ -90,32 +90,54 @@ KERNEL_BIN := $(BUILD_DIR)/kernel.bin
 .PHONY: all
 all: $(KERNEL_BIN)
 
-# User-space binary blobs (embedded into kernel image)
-USER_SHELL_BIN := $(BUILD_DIR)/shell.usr
-USER_GUI_BIN   := $(BUILD_DIR)/gui.usr
-USER_PHONE_DAEMON_BIN := $(BUILD_DIR)/phone_daemon.usr
-USER_STORAGE_DAEMON_BIN := $(BUILD_DIR)/storage_daemon.usr
+# init is the only program embedded in the kernel image (the bootstrap).
+# Everything else ships on the SD card - see the sdcard target below.
+USER_INIT_BIN  := $(BUILD_DIR)/init.usr
 
 .PHONY: userspace
 userspace:
 	$(MAKE) -C ../userspace
 
-$(USER_SHELL_BIN): userspace | $(BUILD_DIR)
-	cp ../userspace/build/shell.bin $@
-
-$(USER_GUI_BIN): userspace | $(BUILD_DIR)
-	cp ../userspace/build/gui.bin $@
-
-$(USER_PHONE_DAEMON_BIN): userspace | $(BUILD_DIR)
-	cp ../userspace/build/phone_daemon.bin $@
-
-$(USER_STORAGE_DAEMON_BIN): userspace | $(BUILD_DIR)
-	cp ../userspace/build/storage_daemon.bin $@
+$(USER_INIT_BIN): userspace | $(BUILD_DIR)
+	cp ../userspace/build/init.bin $@
 
 $(BUILD_DIR)/kernel/userspace_blobs.o: kernel/userspace_blobs.S \
-	$(USER_SHELL_BIN) $(USER_GUI_BIN) $(USER_PHONE_DAEMON_BIN) $(USER_STORAGE_DAEMON_BIN) | $(BUILD_DIR)
+	$(USER_INIT_BIN) | $(BUILD_DIR)
 	@mkdir -p $(dir $@)
 	$(CC) $(KBUILD_AFLAGS) -c -o $@ $<
+
+#
+# SD-card staging tree: what the running system loads by path.
+#
+# 'make sdcard' builds build/sdcard/ with the layout the board expects:
+#
+#   /bin/{gui,shell,phoned,storaged}
+#   /etc/inittab      - the services init starts, one path per line
+#
+# Copy the CONTENTS of build/sdcard/ onto the FAT partition, e.g.
+#   cp -r build/sdcard/* /media/$$USER/BOOT/
+#
+# Kernel and services are now separate artifacts: changing a service means
+# copying one file, not reflashing the kernel.
+#
+# NAMES ARE 8.3 ON PURPOSE. The FAT driver reads short directory entries and
+# skips long-name (LFN) ones, so a file must be findable by its 8.3 name:
+# "phone_daemon" would be stored as an LFN plus a mangled "PHONE_~1" short
+# name and would never be found. Keep every name here <= 8 characters.
+#
+SDCARD_DIR := $(BUILD_DIR)/sdcard
+
+.PHONY: sdcard
+sdcard: userspace
+	@rm -rf $(SDCARD_DIR)	# a renamed binary must not leave the old one behind
+	@mkdir -p $(SDCARD_DIR)/bin $(SDCARD_DIR)/etc
+	cp ../userspace/build/gui.bin            $(SDCARD_DIR)/bin/gui
+	cp ../userspace/build/shell.bin          $(SDCARD_DIR)/bin/shell
+	cp ../userspace/build/phone_daemon.bin   $(SDCARD_DIR)/bin/phoned
+	cp ../userspace/build/storage_daemon.bin $(SDCARD_DIR)/bin/storaged
+	cp inittab                               $(SDCARD_DIR)/etc/inittab
+	@echo "[SDCARD] staged in $(SDCARD_DIR) - copy its contents to the FAT partition"
+	@ls -la $(SDCARD_DIR)/bin $(SDCARD_DIR)/etc
 
 $(KERNEL_BIN): $(KERNEL_ELF)
 	$(OBJCOPY) -O binary $< $@

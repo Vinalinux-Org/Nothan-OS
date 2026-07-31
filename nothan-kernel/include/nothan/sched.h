@@ -121,7 +121,7 @@ struct task_struct {
 	 * questions, and "exited with status 11" must never be confusable with
 	 * "killed by signal 11". Linux packs both into one int and then needs
 	 * WIFEXITED/WTERMSIG to take them apart again - a shape it carries for
-	 * history, not because it is better. Diverging here is free (C1).
+	 * history, not because it is better. Diverging here is free.
 	 *
 	 * @exit_how:   EXIT_HOW_EXITED or EXIT_HOW_KILLED
 	 * @exit_value: exit status if EXITED, signal number if KILLED
@@ -280,8 +280,8 @@ extern struct list_head all_tasks;	/* global list of every live task */
 extern struct task_struct *init_task;
 
 struct task_struct *init_task_create(void);	/* PID 1; NULL on failure */
-int spawn_blob(unsigned int id);		/* PID, or -1 */
-const char *blob_name(unsigned int id);
+int spawn_path(const char *path);		/* PID, or -1 */
+struct task_struct *user_task_create_file(const char *name, const char *path);
 void reparent_to_init(struct task_struct *dying);
 void release_task(struct task_struct *p);	/* wait() collected it; delete for good */
 struct exit_status;

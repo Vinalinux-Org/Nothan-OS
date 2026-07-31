@@ -3,9 +3,9 @@
 /*
  * include/nothan/signal.h - signal NUMBERS only, no delivery machinery
  *
- * NothanOS has no signal handlers and no sigaction (C5/C9). What it has, so
- * far, is a vocabulary: a way for the kernel to say WHICH kind of death a task
- * died of, in a number everyone already knows.
+ * NothanOS has no signal handlers and no sigaction. What it has, so far, is a
+ * vocabulary: a way for the kernel to say WHICH kind of death a task died of,
+ * in a number everyone already knows.
  *
  * Linux numbering is used deliberately even though nothing here is
  * Linux-compatible yet. Numbering is the one part of signals that is pure

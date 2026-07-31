@@ -261,7 +261,7 @@ void put_task_struct(struct task_struct *p)
  * list on purpose (see task_struct.parent): nothing traverses downward yet, so
  * the list would be state to maintain and get wrong for no reader. The walk is
  * O(live tasks), which is small, and it is inherently ITERATIVE - process tree
- * depth is unbounded by design (Q7), so nothing may recurse per level; 500
+ * depth is unbounded by design, so nothing may recurse per level; 500
  * frames on a 16 KB kernel stack overruns into the neighbouring kmalloc block.
  *
  * Runs masked: task_register/unregister mutate this list, and a half-linked
