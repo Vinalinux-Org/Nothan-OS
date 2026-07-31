@@ -81,6 +81,22 @@ struct exit_status {
  */
 #define WAIT_ANY	(-1)
 
+/*
+ * Argument-vector limits. Part of the ABI: user space is entitled to know what
+ * spawn() will refuse rather than discovering it as a failed spawn.
+ *
+ * Bounded on purpose (design-philosophy.md §1). argv is memory one process
+ * makes ANOTHER process carry, so leaving it unbounded hands every caller a
+ * way to push a task into a stack it cannot afford. One page is far more than
+ * any real command line here; Linux allows megabytes because it has to run
+ * other people's software, which is not a constraint this kernel has.
+ *
+ * ARGV_MAX_BYTES covers the whole block - strings, pointer array and argc -
+ * because that is what actually lands on the new task's stack.
+ */
+#define ARGV_MAX_BYTES	4096
+#define ARGV_MAX_COUNT	32
+
 /**
  * do_syscall() - central syscall dispatcher
  * @nr:   syscall number (from r7)

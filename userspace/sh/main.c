@@ -83,20 +83,25 @@ static const char *state_str(int state)
 }
 
 /*
- * spawn <path> - start the program at <path>.
+ * spawn <path> [args...] - start the program at <path>.
  *
  * There is no list of known programs to check against any more: the kernel
  * takes a path, and anything on the disk with a valid image header is a
  * program. "ls /bin" is the list.
+ *
+ * Everything after the path is handed to the new program as its argv. The
+ * shell's own argv is already a NULL-terminated array of the right shape, so
+ * &argv[1] IS the child's argv - no copying, and argv[0] comes out as the path
+ * the user typed, which is the convention.
  */
 static void cmd_spawn(int argc, char **argv)
 {
 	if (argc < 2) {
-		puts("usage: spawn <path>   (e.g. spawn /bin/gui; see ls /bin)\n");
+		puts("usage: spawn <path> [args...]   (e.g. spawn /bin/gui; see ls /bin)\n");
 		return;
 	}
 
-	long pid = spawn(argv[1]);
+	long pid = spawn(argv[1], (const char *const *)&argv[1]);
 
 	if (pid < 0) {
 		puts("spawn: failed (no such file, bad image, or out of memory)\n");
@@ -258,7 +263,13 @@ static void cmd_simstat(void)
 
 static void execute(char *line, char *cwd)
 {
-	char *argv[MAX_ARGS];
+	/*
+	 * One slot past MAX_ARGS so the vector can always be NULL-terminated.
+	 * spawn() hands a tail of this array straight to the kernel as the new
+	 * program's argv, and a vector without its terminator is one the kernel
+	 * would walk off the end of.
+	 */
+	char *argv[MAX_ARGS + 1];
 	int argc = 0;
 
 	while (*line == ' ' || *line == '\t') {
@@ -282,6 +293,7 @@ static void execute(char *line, char *cwd)
 		}
 		line++;
 	}
+	argv[argc] = 0;		/* NULL-terminate: spawn() passes this on as argv */
 
 	if (argc == 0) {
 		return;

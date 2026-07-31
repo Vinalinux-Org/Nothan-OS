@@ -157,18 +157,26 @@ static inline long kill(int pid)
 }
 
 /*
+ * Argument-vector limits the kernel enforces. Must match
+ * include/nothan/syscall.h; spawn() fails rather than truncating.
+ */
+#define ARGV_MAX_BYTES	4096	/* strings + pointer array + argc, together */
+#define ARGV_MAX_COUNT	32
+
+/*
  * spawn - start the program at @path; returns its PID, or -1.
  *
  * Takes a path, not an id: the kernel keeps no list of what may be started. It
  * opens the file, checks the image header and refuses anything else. Which
  * programs exist is decided by what is on the disk.
  *
- * No argv: nothing reads one yet and _start() takes no arguments. The kernel
- * would rather take no parameter than take one it ignores.
+ * @argv is a NULL-terminated array, argv[0] being the program name by
+ * convention, or NULL to let the kernel supply argv[0] on its own. Either way
+ * the new program always finds an argv[0].
  */
-static inline long spawn(const char *path)
+static inline long spawn(const char *path, const char *const *argv)
 {
-	return __syscall1(__NR_spawn, (long)path);
+	return __syscall2(__NR_spawn, (long)path, (long)argv);
 }
 
 /*

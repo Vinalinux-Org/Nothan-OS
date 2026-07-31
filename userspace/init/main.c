@@ -31,7 +31,7 @@
 
 #define INITTAB      "/etc/inittab"
 #define INITTAB_MAX  1024	/* a service list, not a document */
-#define PATH_MAX     64
+#define MAX_ARGS     8		/* per service line, plus the NULL terminator */
 
 /*
  * start_services() - spawn everything /etc/inittab lists
@@ -71,29 +71,56 @@ static int start_services(void)
 	long i = 0;
 
 	while (i < n) {
-		char path[PATH_MAX];
-		int  len = 0;
+		long start = i;
 
-		/* Copy one line, stopping at the newline or the buffer end. */
-		while (i < n && buf[i] != '\n' && buf[i] != '\r') {
-			if (len < PATH_MAX - 1)
-				path[len++] = buf[i];
+		/* Find the line, then terminate it in place - the argument
+		 * strings handed to spawn() point straight into this buffer. */
+		while (i < n && buf[i] != '\n' && buf[i] != '\r')
 			i++;
-		}
-		while (i < n && (buf[i] == '\n' || buf[i] == '\r'))
+		buf[i] = '\0';
+		long end = i;
+
+		while (i < n && (buf[i] == '\0' || buf[i] == '\n' || buf[i] == '\r'))
 			i++;			/* swallow the line ending */
 
-		path[len] = '\0';
+		char *line = &buf[start];
 
-		if (len == 0 || path[0] == '#')
+		while (*line == ' ' || *line == '\t')
+			line++;
+
+		if (*line == '\0' || *line == '#')
 			continue;		/* blank or comment */
 
-		long pid = spawn(path);
+		/*
+		 * Split on whitespace into a NULL-terminated argv. argv[0] is
+		 * the path, which is both what spawn() loads and what the
+		 * program sees as its own name - the usual convention, and the
+		 * reason a service can be given options here without the kernel
+		 * learning anything about them.
+		 */
+		char *argv[MAX_ARGS + 1];
+		int   argc = 0;
+
+		for (char *c = line; c <= &buf[end] && argc < MAX_ARGS; ) {
+			while (*c == ' ' || *c == '\t')
+				*c++ = '\0';
+			if (*c == '\0')
+				break;
+			argv[argc++] = c;
+			while (*c && *c != ' ' && *c != '\t')
+				c++;
+		}
+		argv[argc] = 0;
+
+		if (argc == 0)
+			continue;
+
+		long pid = spawn(argv[0], (const char *const *)argv);
 
 		if (pid < 0) {
-			printf("[INIT] FAILED to spawn %s\n", path);
+			printf("[INIT] FAILED to spawn %s\n", argv[0]);
 		} else {
-			printf("[INIT] spawned %s pid=%ld\n", path, pid);
+			printf("[INIT] spawned %s pid=%ld\n", argv[0], pid);
 			started++;
 		}
 	}

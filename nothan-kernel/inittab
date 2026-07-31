@@ -1,7 +1,14 @@
-# /etc/inittab - services init starts at boot, one path per line.
+# /etc/inittab - services init starts at boot, one per line.
 #
 # Read by userspace/init/main.c. Blank lines and '#' comments are ignored.
 # Order matters only in that the GUI comes up before the shell.
+#
+# A line is a path followed by optional arguments, split on whitespace:
+#
+#     /bin/gui --no-splash
+#
+# The path is also argv[0]. The kernel never looks at the arguments - it copies
+# them onto the new task's stack and that is the end of its involvement.
 #
 # This file is the whole boot policy. The kernel has no list of programs and
 # init has none compiled in: removing a line here is how a service stops

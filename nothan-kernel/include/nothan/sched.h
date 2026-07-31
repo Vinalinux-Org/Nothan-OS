@@ -280,8 +280,9 @@ extern struct list_head all_tasks;	/* global list of every live task */
 extern struct task_struct *init_task;
 
 struct task_struct *init_task_create(void);	/* PID 1; NULL on failure */
-int spawn_path(const char *path);		/* PID, or -1 */
-struct task_struct *user_task_create_file(const char *name, const char *path);
+int spawn_path(const char *path, int argc, const char *const *argv);	/* PID, or -1 */
+struct task_struct *user_task_create_file(const char *name, const char *path,
+					  int argc, const char *const *argv);
 void reparent_to_init(struct task_struct *dying);
 void release_task(struct task_struct *p);	/* wait() collected it; delete for good */
 struct exit_status;

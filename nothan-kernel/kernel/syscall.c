@@ -360,23 +360,54 @@ static long sys_wait(unsigned long a0, unsigned long a1, unsigned long a2)
 /**
  * sys_spawn - start a program from a file
  * @a0: pathname of the image, e.g. "/bin/gui"
+ * @a1: NULL-terminated array of argument strings, or NULL for none
  *
  * The kernel holds no list of startable programs: it loads the path it is
  * given and refuses anything without a valid user-image header. What exists
  * and what runs is user space's business (init reads /etc/inittab).
  *
- * No argv: argv is the only customisation spawn will ever take, but nothing
- * reads it yet and _start() takes no arguments. An ignored parameter would
- * be worse than none.
+ * Every element of @a1 is validated here, before spawn_path() reads any of
+ * them: the array itself, then each string. A user pointer that survives this
+ * is dereferenced later while still in this caller's context, which is the
+ * same rule sys_open() follows for its path.
  *
  * Return: PID of the new task, or -1.
  */
 static long sys_spawn(unsigned long a0, unsigned long a1, unsigned long a2)
 {
-	(void)a1; (void)a2;
-	if (strnlen_user((const char *)a0, USER_STR_MAX) < 0)
+	(void)a2;
+
+	const char *path = (const char *)a0;
+	const char *const *uargv = (const char *const *)a1;
+
+	if (strnlen_user(path, USER_STR_MAX) < 0)
 		return -1;
-	return spawn_path((const char *)a0);
+
+	if (!uargv)
+		return spawn_path(path, 0, NULL);
+
+	/*
+	 * Count first, validating as we go. The array is read twice - once
+	 * here, once in the loader - which is safe because the caller is
+	 * blocked in this syscall and single-threaded, so nothing of its can
+	 * change in between.
+	 */
+	int argc = 0;
+
+	while (argc < ARGV_MAX_COUNT) {
+		if (!access_ok(&uargv[argc], sizeof(uargv[0])))
+			return -1;
+		if (!uargv[argc])
+			break;			/* NULL terminator */
+		if (strnlen_user(uargv[argc], USER_STR_MAX) < 0)
+			return -1;
+		argc++;
+	}
+
+	if (argc >= ARGV_MAX_COUNT)
+		return -1;			/* unterminated, or simply too many */
+
+	return spawn_path(path, argc, uargv);
 }
 
 /**

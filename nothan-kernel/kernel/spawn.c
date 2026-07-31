@@ -272,6 +272,84 @@ struct bin_source {
 };
 
 /*
+ * Lay out argc/argv at the top of a freshly allocated user stack, UNIX-style.
+ *
+ *   USER_STACK_TOP -> [ "prog\0" "arg1\0" ... ]   strings, packed at the top
+ *                     [ padding to 8 ]
+ *                     [ NULL         ]            argv[argc]
+ *                     [ &"arg1"      ]            argv[1]
+ *                     [ &"prog"      ]            argv[0]
+ *   initial sp     -> [ argc         ]
+ *
+ * argc sits AT sp and argv[0] immediately above it, so _start can read the two
+ * with an ldr and an add (see lib/crt0.S). The block base is 8-aligned because
+ * AAPCS requires that of sp at a call boundary, and _start calls main().
+ *
+ * @stack_kva is the kernel mapping of the same pages the task will see at
+ * [USER_STACK_TOP - @bytes, USER_STACK_TOP): the task is not running and its
+ * page tables are not live yet, so the block is written through the kernel's
+ * direct map and the user addresses are computed, not dereferenced.
+ *
+ * @argv entries are read, never written, and are valid in the CURRENT context:
+ * kernel strings for init, the caller's own strings for sys_spawn - which the
+ * caller cannot change underneath us, being blocked in the syscall and having
+ * no second thread to do it.
+ *
+ * Return: initial user sp, or 0 if the block would exceed ARGV_MAX_BYTES.
+ */
+static unsigned long setup_argv_block(u8 *stack_kva, unsigned long bytes,
+				      int argc, const char *const *argv)
+{
+	unsigned long str_bytes = 0;
+
+	for (int i = 0; i < argc; i++) {
+		unsigned long len = 0;
+
+		while (argv[i][len])
+			len++;
+		str_bytes += len + 1;		/* keep the NUL */
+	}
+
+	/* argc + (argc+1) pointers, rounded so the base lands 8-aligned. */
+	unsigned long block = ((unsigned long)(argc + 2) * 4 + 7) & ~7UL;
+
+	if (block + str_bytes > ARGV_MAX_BYTES || block + str_bytes > bytes)
+		return 0;
+
+	unsigned long stack_bottom_uva = USER_STACK_TOP - bytes;
+	unsigned long off = bytes;		/* offset of USER_STACK_TOP */
+
+	/* Strings first, at the very top, so their addresses are known before
+	 * the pointer array that has to hold them is written. */
+	unsigned long uva[ARGV_MAX_COUNT];
+
+	for (int i = argc - 1; i >= 0; i--) {
+		unsigned long len = 0;
+
+		while (argv[i][len])
+			len++;
+		len++;				/* the NUL travels too */
+
+		off -= len;
+		for (unsigned long j = 0; j < len; j++)
+			stack_kva[off + j] = (u8)argv[i][j];
+		uva[i] = stack_bottom_uva + off;
+	}
+
+	off &= ~7UL;				/* strings start 8-aligned */
+	off -= block;				/* => sp is 8-aligned too */
+
+	u32 *w = (u32 *)(stack_kva + off);
+
+	w[0] = (u32)argc;
+	for (int i = 0; i < argc; i++)
+		w[1 + i] = (u32)uva[i];
+	w[1 + argc] = 0;			/* argv[argc] = NULL */
+
+	return stack_bottom_uva + off;
+}
+
+/*
  * Pull the whole image into @dst.
  *
  * A short read is a failure, not a partial success: a truncated program is
@@ -306,6 +384,8 @@ static int bin_source_load(struct bin_source *src, u8 *dst, const char *name)
  * user_task_create_image() - Create a user-mode task from a program image
  * @name: Task name for debugging
  * @src:  where to read the image from (embedded blob or open file)
+ * @argc: number of arguments (>= 1; argv[0] is the program name by convention)
+ * @argv: the arguments, readable in the caller's current context
  *
  * Allocates a task_struct, kernel stack (SVC mode), mm_struct, one or
  * more 4KB code pages, a 4KB user stack page, and a 1KB L2 table.
@@ -319,7 +399,9 @@ static int bin_source_load(struct bin_source *src, u8 *dst, const char *name)
  * Return: Pointer to the task_struct ready to enqueue, or NULL on failure.
  */
 static struct task_struct *user_task_create_image(const char *name,
-						  struct bin_source *src)
+						  struct bin_source *src,
+						  int argc,
+						  const char *const *argv)
 {
 	int pid = pid_alloc();
 
@@ -517,11 +599,34 @@ static struct task_struct *user_task_create_image(const char *name,
 	}
 	unsigned long stack_pa = page_to_phys(zone, stack_pg);
 
+	/*
+	 * Put argc/argv at the top of that stack and start the task just below
+	 * them. Written through the kernel's direct map: the task is not running
+	 * and its page tables are not installed, so the only way to reach these
+	 * pages by their user addresses would be to switch address spaces first.
+	 */
+	unsigned long sp_top = setup_argv_block(
+		(u8 *)phys_to_kva(stack_pa),
+		(unsigned long)USER_STACK_PAGES * PAGE_SIZE, argc, argv);
+
+	if (!sp_top) {
+		printk("[SPAWN] %s: argv too large (max %u B)\n",
+		       name, (unsigned)ARGV_MAX_BYTES);
+		__free_pages(stack_pg, USER_STACK_ORDER);
+		mm_free_bss_chunks(mm, zone);
+		__free_pages(code_pg, order);
+		kfree(mm);
+		kfree(ksp);
+		files_free(p->files);
+		kfree(p);
+		return NULL;
+	}
+
 	mm->code_pa     = code_pa;
 	mm->stack_pa    = stack_pa;
 	mm->stack_pages = USER_STACK_PAGES;
 	mm->entry_va    = USER_BIN_ENTRY;	/* _start, after 16-byte binary header */
-	mm->sp_top      = USER_STACK_TOP;	/* high VA; stack grows down from here */
+	mm->sp_top      = sp_top;		/* just below argc/argv; grows down */
 
 	/*
 	 * Private page tables: a 16 KB L1 (kernel half shared with swapper),
@@ -636,14 +741,17 @@ struct task_struct *user_task_create_bin(const char *name,
 		.fd   = -1,
 		.size = (unsigned long)(blob_end - blob_start),
 	};
+	const char *argv[] = { name };
 
-	return user_task_create_image(name, &src);
+	return user_task_create_image(name, &src, 1, argv);
 }
 
 /**
  * user_task_create_file() - create a task from a program file
  * @name: task name for debugging
  * @path: absolute path to the image
+ * @argc: number of arguments, or 0 to synthesise argv = { @name }
+ * @argv: the arguments, readable in the caller's current context
  *
  * The normal path. The kernel does not know which programs exist - it opens
  * what it is given, checks the header, and refuses anything that is not a
@@ -655,7 +763,8 @@ struct task_struct *user_task_create_bin(const char *name,
  *
  * Return: task ready to enqueue, or NULL.
  */
-struct task_struct *user_task_create_file(const char *name, const char *path)
+struct task_struct *user_task_create_file(const char *name, const char *path,
+					  int argc, const char *const *argv)
 {
 	int fd = vfs_open(path, O_RDONLY);
 
@@ -677,7 +786,20 @@ struct task_struct *user_task_create_file(const char *name, const char *path)
 		.fd   = fd,
 		.size = (unsigned long)size,
 	};
-	struct task_struct *p = user_task_create_image(name, &src);
+
+	/*
+	 * argv[0] always exists, even when the caller passed nothing: a program
+	 * reading argv[0] for its own name is ordinary, and making every caller
+	 * build a one-element array to allow it would be ceremony.
+	 */
+	const char *self[] = { name };
+
+	if (argc <= 0) {
+		argc = 1;
+		argv = self;
+	}
+
+	struct task_struct *p = user_task_create_image(name, &src, argc, argv);
 
 	vfs_close(fd);
 	return p;
@@ -703,6 +825,8 @@ static const char *basename(const char *path)
 /**
  * spawn_path() - create and enqueue a task from a program file
  * @path: absolute path to the image, e.g. "/bin/gui"
+ * @argc: number of arguments, or 0 to let the callee synthesise argv[0]
+ * @argv: the arguments, readable in the caller's current context
  *
  * The kernel keeps no list of what may be started. It is handed a path, it
  * loads what is there, and it refuses anything without a valid user-image
@@ -716,9 +840,10 @@ static const char *basename(const char *path)
  *
  * Return: PID of the new task, or -1.
  */
-int spawn_path(const char *path)
+int spawn_path(const char *path, int argc, const char *const *argv)
 {
-	struct task_struct *p = user_task_create_file(basename(path), path);
+	struct task_struct *p = user_task_create_file(basename(path), path,
+						      argc, argv);
 
 	if (!p) {
 		/*
