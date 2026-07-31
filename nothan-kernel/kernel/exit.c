@@ -168,18 +168,12 @@ static void __do_exit(unsigned int how, int value)
 		unsigned long f_pgd __attribute__((unused)) =
 			zone->free_pages;			/* MEMCHK (pr_debug) */
 
-		/* Compute orders matching how spawn allocated. */
-		unsigned int code_order = 0;
-		while ((1u << code_order) < tsk->mm->code_pages)
-			code_order++;
+		/* Code and bss are scattered; each chunk remembers its own order,
+		 * so nothing here has to reconstruct how they were allocated. */
+		mm_free_chunks(tsk->mm->code_chunks, &tsk->mm->nr_code_chunks, zone);
+		mm_free_chunks(tsk->mm->bss_chunks, &tsk->mm->nr_bss_chunks, zone);
 
-		struct page *cp = pfn_to_page(zone,
-			(tsk->mm->code_pa - zone->base_pa) >> PAGE_SHIFT);
-		if (cp)
-			__free_pages(cp, code_order);
-
-		mm_free_bss_chunks(tsk->mm, zone);
-
+		/* The stack IS a single block, so its order is derived. */
 		unsigned int stack_order = 0;
 		while ((1u << stack_order) < tsk->mm->stack_pages)
 			stack_order++;

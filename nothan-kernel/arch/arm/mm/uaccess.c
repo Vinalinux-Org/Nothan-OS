@@ -39,7 +39,11 @@ bool access_ok(const void *ptr, size_t size)
 
 	code_start  = USER_CODE_VA;
 	bss_start   = code_start + (unsigned long)mm->code_pages * PAGE_SIZE;
-	stack_start = mm->sp_top - (unsigned long)mm->stack_pages * PAGE_SIZE;
+	/* The whole mapped stack REGION, which reaches above sp_top: the argc/argv
+	 * block lives up there, and a program passing its own argv[0] to a syscall
+	 * is passing a pointer into it. Measuring from sp_top would reject that
+	 * and accept an equal-sized unmapped range below the stack instead. */
+	stack_start = USER_STACK_TOP - (unsigned long)mm->stack_pages * PAGE_SIZE;
 
 	if (range_in(a, size, code_start, mm->code_pages))
 		return true;

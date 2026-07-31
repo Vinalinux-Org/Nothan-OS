@@ -244,25 +244,49 @@ static int map_user_range(struct mm_struct *mm, unsigned long va,
  * the stack (RW+XN) just below sp_top — the stack lives high (near
  * TASK_SIZE) so it can never collide with a growing bss/heap.
  */
-int mmu_map_user(struct mm_struct *mm)
+/*
+ * Lay a scatter-allocated region into consecutive VAs starting at @va.
+ * Returns the VA just past the region, or 0 on failure.
+ *
+ * This is the whole trick that lets code and bss be physically scattered: the
+ * chunks go down in array order, each immediately after the last in VIRTUAL
+ * space, so the program sees one flat run regardless of where the pages
+ * actually live.
+ */
+static unsigned long map_chunks(struct mm_struct *mm, unsigned long va,
+				const struct mm_chunk *chunks, unsigned int nr,
+				u32 prot)
 {
-	unsigned long code_va  = USER_CODE_VA;
-	unsigned long bss_va   = USER_CODE_VA +
-				 (unsigned long)mm->code_pages * PAGE_SIZE;
-	unsigned long stack_va = mm->sp_top -
-				 (unsigned long)mm->stack_pages * PAGE_SIZE;
+	for (unsigned int i = 0; i < nr; i++) {
+		unsigned int npages = 1u << chunks[i].order;
 
-	if (map_user_range(mm, code_va, mm->code_pa, mm->code_pages, PTE_USER_CODE))
-		return -1;
-
-	/* bss: lay each scatter-allocated chunk into consecutive VAs above code. */
-	unsigned long va = bss_va;
-	for (unsigned int i = 0; i < mm->nr_bss_chunks; i++) {
-		unsigned int npages = 1u << mm->bss_chunks[i].order;
-		if (map_user_range(mm, va, mm->bss_chunks[i].pa, npages, PTE_USER_DATA))
-			return -1;
+		if (map_user_range(mm, va, chunks[i].pa, npages, prot))
+			return 0;
 		va += (unsigned long)npages * PAGE_SIZE;
 	}
+	return va;
+}
+
+int mmu_map_user(struct mm_struct *mm)
+{
+	/* From the REGION top, not from sp_top: sp_top starts below the argv
+	 * block, so deriving the mapping from it would slide the stack down by
+	 * that block's size and off a page boundary. */
+	unsigned long stack_va = USER_STACK_TOP -
+				 (unsigned long)mm->stack_pages * PAGE_SIZE;
+
+	/* Code at USER_CODE_VA, then bss picking up exactly where code ended -
+	 * computed from the walk, not from a page count, so the two can never
+	 * disagree about where the boundary is. */
+	unsigned long va = map_chunks(mm, USER_CODE_VA,
+				      mm->code_chunks, mm->nr_code_chunks,
+				      PTE_USER_CODE);
+	if (!va)
+		return -1;
+
+	if (!map_chunks(mm, va, mm->bss_chunks, mm->nr_bss_chunks,
+			PTE_USER_DATA))
+		return -1;
 
 	if (map_user_range(mm, stack_va, mm->stack_pa, mm->stack_pages, PTE_USER_DATA))
 		return -1;

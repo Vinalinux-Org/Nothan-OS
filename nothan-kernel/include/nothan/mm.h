@@ -26,6 +26,22 @@ typedef unsigned int gfp_t;
 #define USER_CODE_VA		0x00010000UL
 
 /*
+ * Top of the user stack REGION: the stack occupies the pages just below this,
+ * always page-aligned and always at this address.
+ *
+ * Not the same thing as mm->sp_top, and the distinction matters. sp_top is
+ * where a task's sp STARTS, which sits below the argc/argv block the kernel
+ * writes at the top of the region - so it is neither page-aligned nor equal to
+ * the region top. Deriving the mapping from sp_top (as this once did) shifts
+ * the whole stack mapping down by the size of that block, and then the argv
+ * pointers, computed against the region top, address pages that are not there.
+ *
+ * Lives high, near TASK_SIZE, so it stays far from the low code+bss region -
+ * bss can grow without ever reaching the stack.
+ */
+#define USER_STACK_TOP		0xBF000000UL
+
+/*
  * Max L2 (coarse) page tables a process may own. Each covers a 1 MB VA
  * window; code+bss usually need 1-2, the high stack 1, leaving slack for
  * growth. Bump if a process maps more than ~16 MB of distinct windows.
@@ -38,17 +54,26 @@ struct mm_l2 {
 };
 
 /*
- * BSS is allocated as a handful of physically-contiguous chunks (each up to
- * one buddy MAX_ORDER block) rather than a single contiguous block. This lifts
- * the old ~4 MB ceiling (a single power-of-2 alloc capped at MAX_ORDER) and
- * survives physical fragmentation on respawn, since the chunks need not be
- * contiguous with each other — they are mapped into consecutive user VAs.
+ * A user region is a handful of physically-contiguous chunks rather than one
+ * contiguous block, each chunk at most a buddy MAX_ORDER allocation.
+ *
+ * Two things fall out of that. The region can exceed the ~4 MB a single
+ * power-of-2 allocation is capped at; and, more importantly, it can be built
+ * out of whatever the buddy allocator still has. A single-block region needs
+ * one run of free pages of exactly the right size, so a long-lived system
+ * whose memory has fragmented can refuse to start a program while holding
+ * plenty of free memory - the failure that looks like a leak and is not one.
+ *
+ * The chunks need not be adjacent to each other: mmu_map_user() lays them into
+ * CONSECUTIVE user virtual addresses, so the program sees one flat region no
+ * matter how scattered the physical pages are. That is what page tables are
+ * for, and it is why nothing above this layer has to know.
  */
-struct mm_bss_chunk {
+struct mm_chunk {
 	unsigned long pa;      /* physical base of this chunk */
 	unsigned int  order;   /* buddy order (chunk = 2^order pages) */
 };
-#define MM_MAX_BSS_CHUNKS  16
+#define MM_MAX_CHUNKS  16
 
 /*
  * struct mm_struct - per-process memory descriptor
@@ -65,14 +90,25 @@ struct mm_struct {
 	struct mm_l2  l2s[MM_MAX_L2];  /* owned L2 tables (for teardown) */
 	unsigned int  nr_l2;      /* number of L2 tables in use */
 
-	unsigned long code_pa;   /* physical address of user code pages   */
-	struct mm_bss_chunk bss_chunks[MM_MAX_BSS_CHUNKS]; /* scatter-allocated bss */
+	/*
+	 * Code and bss are both scatter-allocated; the stack is not.
+	 *
+	 * The stack stays a single block because it is one fixed, modest size
+	 * (128 KB, order 5) that the buddy allocator can nearly always satisfy,
+	 * and because nothing makes it grow. Code and bss are as large as the
+	 * program says they are - the GUI's code alone is a 1 MB order-8 run -
+	 * which is exactly the size that fragmentation starts refusing.
+	 */
+	struct mm_chunk code_chunks[MM_MAX_CHUNKS];
+	unsigned int  nr_code_chunks;
+	struct mm_chunk bss_chunks[MM_MAX_CHUNKS];
 	unsigned int  nr_bss_chunks;
+
 	unsigned long stack_pa;  /* physical address of user stack pages */
 	unsigned long entry_va;  /* user-space entry point VA */
 	unsigned long sp_top;    /* user stack top VA (initial sp) */
-	unsigned int  code_pages;  /* number of 4KB code pages  */
-	unsigned int  bss_pages;   /* total number of 4KB BSS pages (across chunks) */
+	unsigned int  code_pages;  /* total 4KB code pages (across chunks)  */
+	unsigned int  bss_pages;   /* total 4KB BSS pages (across chunks) */
 	unsigned int  stack_pages; /* number of 4KB stack pages */
 };
 
@@ -274,16 +310,23 @@ int  pgd_alloc(struct mm_struct *mm);
 void pgd_free(struct mm_struct *mm);
 int  mmu_map_user(struct mm_struct *mm);
 
-/* Release every BSS chunk back to the buddy allocator (spawn cleanup + exit). */
-static inline void mm_free_bss_chunks(struct mm_struct *mm, struct zone *zone)
+/*
+ * Release every chunk of a region back to the buddy allocator.
+ *
+ * Takes the array rather than the mm so code and bss share one implementation;
+ * @nr is zeroed through the pointer so a second call is a no-op, which is what
+ * lets the spawn unwind path free a region it may or may not have built yet.
+ */
+static inline void mm_free_chunks(struct mm_chunk *chunks, unsigned int *nr,
+				  struct zone *zone)
 {
-	for (unsigned int i = 0; i < mm->nr_bss_chunks; i++) {
+	for (unsigned int i = 0; i < *nr; i++) {
 		struct page *pg = pfn_to_page(zone,
-			(mm->bss_chunks[i].pa - zone->base_pa) >> PAGE_SHIFT);
+			(chunks[i].pa - zone->base_pa) >> PAGE_SHIFT);
 		if (pg)
-			__free_pages(pg, mm->bss_chunks[i].order);
+			__free_pages(pg, chunks[i].order);
 	}
-	mm->nr_bss_chunks = 0;
+	*nr = 0;
 }
 
 #endif /* _MM_H */

@@ -11,6 +11,7 @@
 #include <nothan/syscall.h>
 #include <nothan/delay.h>
 #include <nothan/wait.h>
+#include <nothan/panic.h>
 #include <asm/irqflags.h>
 
 /* No <limits.h> in a freestanding build. */
@@ -222,12 +223,9 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 
 extern void user_task_trampoline(void);
 
-/*
- * User stack top VA. Lives high (near TASK_SIZE, like Linux) so it stays
- * far from the low code+bss region — bss/heap can grow without ever
- * reaching the stack. The stack itself occupies the pages just below.
- */
-#define USER_STACK_TOP  0xBF000000UL
+/* USER_STACK_TOP lives in <nothan/mm.h>: mmu_map_user() and access_ok() must
+ * agree with this file about where the stack region is, and a constant defined
+ * in one .c file is how they stop agreeing. */
 
 /*
  * init is the ONLY program embedded in the kernel image (userspace_blobs.S).
@@ -350,32 +348,114 @@ static unsigned long setup_argv_block(u8 *stack_kva, unsigned long bytes,
 }
 
 /*
- * Pull the whole image into @dst.
+ * alloc_region() - back @pages of a user region with scattered buddy blocks
+ * @chunks/@nr: where to record what was taken (caller pre-zeroes @nr)
+ * @pages: how many 4 KB pages the region needs
+ * @zero: fill the pages with zeroes (bss wants this; code is overwritten)
+ *
+ * Takes the largest buddy block that still fits the remainder, backing the
+ * order off when the allocator cannot satisfy it. That back-off is the point:
+ * a region built this way needs enough FREE memory, not one unbroken run of
+ * it, so a fragmented system can still start a program.
+ *
+ * Failure leaves the chunks recorded so far in place - the caller frees them
+ * with mm_free_chunks() on its way out, rather than this having to unwind.
+ *
+ * Return: 0, or -1 if out of memory or the region needs more than MM_MAX_CHUNKS.
+ */
+static int alloc_region(struct mm_chunk *chunks, unsigned int *nr,
+			unsigned int pages, int zero, struct zone *zone)
+{
+	unsigned int remaining = pages;
+
+	while (remaining > 0) {
+		if (*nr >= MM_MAX_CHUNKS)
+			return -1;	/* too fragmented, or region far too big */
+
+		unsigned int ord = 0;
+
+		while ((1u << (ord + 1)) <= remaining && ord < MAX_ORDER)
+			ord++;
+
+		struct page *pg = alloc_pages(GFP_USER, ord);
+
+		while (!pg && ord > 0) {	/* buddy has nothing that big */
+			ord--;
+			pg = alloc_pages(GFP_USER, ord);
+		}
+		if (!pg)
+			return -1;
+
+		unsigned long pa = page_to_phys(zone, pg);
+
+		chunks[*nr].pa    = pa;
+		chunks[*nr].order = ord;
+		(*nr)++;
+
+		if (zero) {
+			u8 *kva = (u8 *)phys_to_kva(pa);
+			unsigned long nbytes = (unsigned long)(1u << ord) << PAGE_SHIFT;
+
+			for (unsigned long i = 0; i < nbytes; i++)
+				kva[i] = 0;
+		}
+
+		remaining -= (1u << ord);
+	}
+	return 0;
+}
+
+/*
+ * Pull the whole image into a scattered region.
+ *
+ * The image is one flat stream but the pages behind it are several separate
+ * runs, so the copy walks chunk by chunk. It works out because the chunks will
+ * be mapped into CONSECUTIVE user VAs in that same order - byte N of the file
+ * lands at USER_CODE_VA + N no matter which chunk holds it.
  *
  * A short read is a failure, not a partial success: a truncated program is
  * indistinguishable from a valid one once it is running, and it would fault
  * somewhere far from here with a PC that means nothing.
  */
-static int bin_source_load(struct bin_source *src, u8 *dst, const char *name)
+static int bin_source_load(struct bin_source *src, const struct mm_chunk *chunks,
+			   unsigned int nr, const char *name)
 {
-	if (src->mem) {
-		for (unsigned long i = 0; i < src->size; i++)
-			dst[i] = src->mem[i];
-		return 0;
-	}
-
 	unsigned long done = 0;
 
-	while (done < src->size) {
-		int n = vfs_read(src->fd, (char *)(dst + done),
-				 src->size - done);
+	for (unsigned int i = 0; i < nr && done < src->size; i++) {
+		u8 *dst = (u8 *)phys_to_kva(chunks[i].pa);
+		unsigned long room = (unsigned long)(1u << chunks[i].order) << PAGE_SHIFT;
+		unsigned long want = src->size - done;
 
-		if (n <= 0) {
-			printk("[SPAWN] %s: short read at %lu/%lu B\n",
-			       name, done, src->size);
-			return -1;
+		if (want > room)
+			want = room;
+
+		if (src->mem) {
+			for (unsigned long j = 0; j < want; j++)
+				dst[j] = src->mem[done + j];
+			done += want;
+			continue;
 		}
-		done += (unsigned long)n;
+
+		unsigned long got = 0;
+
+		while (got < want) {
+			int n = vfs_read(src->fd, (char *)(dst + got), want - got);
+
+			if (n <= 0) {
+				printk("[SPAWN] %s: short read at %lu/%lu B\n",
+				       name, done + got, src->size);
+				return -1;
+			}
+			got += (unsigned long)n;
+		}
+		done += got;
+	}
+
+	if (done != src->size) {
+		printk("[SPAWN] %s: region holds %lu B, image is %lu B\n",
+		       name, done, src->size);
+		return -1;
 	}
 	return 0;
 }
@@ -403,6 +483,7 @@ static struct task_struct *user_task_create_image(const char *name,
 						  int argc,
 						  const char *const *argv)
 {
+	struct zone *zone = get_zone();
 	int pid = pid_alloc();
 
 	if (pid < 0)			/* PID space gone — pid_alloc already said so */
@@ -419,10 +500,8 @@ static struct task_struct *user_task_create_image(const char *name,
 	 * creator.
 	 */
 	p->files = files_alloc();
-	if (!p->files) {
-		kfree(p);
-		return NULL;
-	}
+	if (!p->files)
+		goto err_task;
 
 	/*
 	 * Kernel (SVC) stack: 16 KB. 4 KB was risky — a user task takes a
@@ -433,147 +512,71 @@ static struct task_struct *user_task_create_image(const char *name,
 	 */
 #define KSTACK_SIZE  (4u * PAGE_SIZE)
 	unsigned long *ksp = (unsigned long *)kmalloc(KSTACK_SIZE, GFP_KERNEL);
-	if (!ksp) {
-		files_free(p->files);
-		kfree(p);
-		return NULL;
-	}
+	if (!ksp)
+		goto err_files;
 
 	struct mm_struct *mm = (struct mm_struct *)kmalloc(sizeof(*mm), GFP_KERNEL);
-	if (!mm) {
-		kfree(ksp);
-		files_free(p->files);
-		kfree(p);
-		return NULL;
-	}
+	if (!mm)
+		goto err_ksp;
+
+	/* Both regions start empty so the unwind path can free them at any
+	 * point below without asking how far we got. */
+	mm->nr_code_chunks = 0;
+	mm->nr_bss_chunks  = 0;
 
 	unsigned long blob_size = src->size;
 
 	/* Too small to even hold a header — nothing to validate against. */
 	if (blob_size < sizeof(struct user_bin_header)) {
 		printk("[SPAWN] %s: image too small (%lu B)\n", name, blob_size);
-		kfree(mm);
-		kfree(ksp);
-		files_free(p->files);
-		kfree(p);
-		return NULL;
+		goto err_mm;
 	}
 
 	unsigned int code_pages = (blob_size + PAGE_SIZE - 1) / PAGE_SIZE;
-	unsigned int order = 0;
-	while ((1u << order) < code_pages)
-		order++;
 
-	struct page *code_pg = alloc_pages(GFP_USER, order);
-	if (!code_pg) {
-		printk("[SPAWN] %s: alloc_pages(code, order=%u) failed\n", name, order);
-		kfree(mm);
-		kfree(ksp);
-		files_free(p->files);
-		kfree(p);
-		return NULL;
+	if (alloc_region(mm->code_chunks, &mm->nr_code_chunks, code_pages, 0, zone)) {
+		printk("[SPAWN] %s: no memory for %u code pages\n", name, code_pages);
+		goto err_regions;
 	}
-
-	struct zone *zone = get_zone();
-	unsigned long code_pa = page_to_phys(zone, code_pg);
 	mm->code_pages = code_pages;
 
-	u8 *code_kva = (u8 *)phys_to_kva(code_pa);
-
-	if (bin_source_load(src, code_kva, name)) {
-		__free_pages(code_pg, order);
-		kfree(mm);
-		kfree(ksp);
-		files_free(p->files);
-		kfree(p);
-		return NULL;
-	}
+	if (bin_source_load(src, mm->code_chunks, mm->nr_code_chunks, name))
+		goto err_regions;
 
 	/*
 	 * Validate the header now that the image is in memory. Same check for
 	 * both sources: a corrupt file on the SD card and a mislinked blob fail
 	 * identically, and say so before anything runs.
+	 *
+	 * The header is in the first chunk: every chunk is at least one page and
+	 * the header is 16 bytes, so it cannot straddle a chunk boundary.
 	 */
-	struct user_bin_header *hdr = (struct user_bin_header *)code_kva;
+	struct user_bin_header *hdr =
+		(struct user_bin_header *)phys_to_kva(mm->code_chunks[0].pa);
 
 	if (hdr->magic != USER_BIN_MAGIC) {
 		printk("[SPAWN] %s: bad magic 0x%x (expected 0x%x)\n",
 		       name, (unsigned)hdr->magic, (unsigned)USER_BIN_MAGIC);
-		__free_pages(code_pg, order);
-		kfree(mm);
-		kfree(ksp);
-		files_free(p->files);
-		kfree(p);
-		return NULL;
+		goto err_regions;
 	}
 	unsigned long bss_size = hdr->bss_size;
 
-	printk("[SPAWN] %s: image=%lu B, bss=%lu B\n", name, blob_size, bss_size);
+	printk("[SPAWN] %s: image=%lu B (%u chunks), bss=%lu B\n",
+	       name, blob_size, mm->nr_code_chunks, bss_size);
 
 	/*
-	 * Allocate and zero BSS pages. Linker pads .data to a 4 KB boundary
-	 * so BSS starts on a fresh page right after the code pages.
+	 * BSS, zeroed. The linker pads .data to a 4 KB boundary so bss starts on
+	 * a fresh page right after the code pages.
 	 */
 	unsigned int bss_pages = 0;
-
-	mm->nr_bss_chunks = 0;
 
 	if (bss_size > 0) {
 		bss_pages = (bss_size + PAGE_SIZE - 1) / PAGE_SIZE;
 
-		/*
-		 * Scatter-allocate bss as a few contiguous chunks: take the
-		 * largest buddy block that fits the remainder, backing off the
-		 * order if the buddy can't satisfy it. This lifts the old single
-		 * 4 MB block ceiling (MAX_ORDER) and tolerates fragmentation; the
-		 * chunks need not be contiguous with each other — mmu_map_user()
-		 * maps them into consecutive user VAs.
-		 */
-		unsigned int remaining = bss_pages;
-		while (remaining > 0) {
-			if (mm->nr_bss_chunks >= MM_MAX_BSS_CHUNKS) {
-				printk("[SPAWN] %s: bss too large (%u pages)\n",
-				       name, bss_pages);
-				mm_free_bss_chunks(mm, zone);
-				__free_pages(code_pg, order);
-				kfree(mm);
-				kfree(ksp);
-				files_free(p->files);
-		kfree(p);
-				return NULL;
-			}
-
-			unsigned int ord = 0;
-			while ((1u << (ord + 1)) <= remaining && ord < MAX_ORDER)
-				ord++;
-
-			struct page *pg = alloc_pages(GFP_USER, ord);
-			while (!pg && ord > 0) {
-				ord--;
-				pg = alloc_pages(GFP_USER, ord);
-			}
-			if (!pg) {
-				printk("[SPAWN] %s: alloc_pages(bss) failed\n", name);
-				mm_free_bss_chunks(mm, zone);
-				__free_pages(code_pg, order);
-				kfree(mm);
-				kfree(ksp);
-				files_free(p->files);
-		kfree(p);
-				return NULL;
-			}
-
-			unsigned long cpa = page_to_phys(zone, pg);
-			mm->bss_chunks[mm->nr_bss_chunks].pa    = cpa;
-			mm->bss_chunks[mm->nr_bss_chunks].order = ord;
-			mm->nr_bss_chunks++;
-
-			u8 *kva = (u8 *)phys_to_kva(cpa);
-			unsigned long nbytes = (unsigned long)(1u << ord) << PAGE_SHIFT;
-			for (unsigned long i = 0; i < nbytes; i++)
-				kva[i] = 0;
-
-			remaining -= (1u << ord);
+		if (alloc_region(mm->bss_chunks, &mm->nr_bss_chunks, bss_pages, 1, zone)) {
+			printk("[SPAWN] %s: no memory for %u bss pages\n",
+			       name, bss_pages);
+			goto err_regions;
 		}
 	}
 	mm->bss_pages = bss_pages;
@@ -583,19 +586,16 @@ static struct task_struct *user_task_create_image(const char *name,
 	 * 32 KB held LVGL 9.2 but 9.5's deeper draw/render call chains overflow
 	 * it (Data Abort writing just below the stack bottom at ~0xBEFF8000).
 	 * The high stack VA leaves room to grow without nearing bss.
+	 *
+	 * One contiguous block, unlike code and bss: it is a single fixed modest
+	 * size the allocator can nearly always satisfy, and nothing grows it.
 	 */
 #define USER_STACK_ORDER  5
 #define USER_STACK_PAGES  (1u << USER_STACK_ORDER)
 	struct page *stack_pg = alloc_pages(GFP_USER, USER_STACK_ORDER);
 	if (!stack_pg) {
 		printk("[SPAWN] %s: alloc_pages(stack) failed\n", name);
-		mm_free_bss_chunks(mm, zone);
-		__free_pages(code_pg, order);
-		kfree(mm);
-		kfree(ksp);
-		files_free(p->files);
-		kfree(p);
-		return NULL;
+		goto err_regions;
 	}
 	unsigned long stack_pa = page_to_phys(zone, stack_pg);
 
@@ -612,17 +612,20 @@ static struct task_struct *user_task_create_image(const char *name,
 	if (!sp_top) {
 		printk("[SPAWN] %s: argv too large (max %u B)\n",
 		       name, (unsigned)ARGV_MAX_BYTES);
-		__free_pages(stack_pg, USER_STACK_ORDER);
-		mm_free_bss_chunks(mm, zone);
-		__free_pages(code_pg, order);
-		kfree(mm);
-		kfree(ksp);
-		files_free(p->files);
-		kfree(p);
-		return NULL;
+		goto err_stack;
 	}
 
-	mm->code_pa     = code_pa;
+	/*
+	 * sp must land INSIDE the region that mmu_map_user() is about to map.
+	 * Checked rather than assumed because the two are computed in different
+	 * files from different starting points, and when they drifted apart once
+	 * before the symptom was a Data Abort on the first user instruction -
+	 * with a fault address that says nothing about which of the two was
+	 * wrong. Failing here names the task instead.
+	 */
+	BUG_ON(sp_top > USER_STACK_TOP ||
+	       sp_top < USER_STACK_TOP - (unsigned long)USER_STACK_PAGES * PAGE_SIZE);
+
 	mm->stack_pa    = stack_pa;
 	mm->stack_pages = USER_STACK_PAGES;
 	mm->entry_va    = USER_BIN_ENTRY;	/* _start, after 16-byte binary header */
@@ -635,14 +638,7 @@ static struct task_struct *user_task_create_image(const char *name,
 	 */
 	if (pgd_alloc(mm) || mmu_map_user(mm)) {
 		pgd_free(mm);
-		__free_pages(stack_pg, USER_STACK_ORDER);
-		mm_free_bss_chunks(mm, zone);
-		__free_pages(code_pg, order);
-		kfree(mm);
-		kfree(ksp);
-		files_free(p->files);
-		kfree(p);
-		return NULL;
+		goto err_stack;
 	}
 
 	/*
@@ -696,29 +692,53 @@ static struct task_struct *user_task_create_image(const char *name,
 
 	task_register(p);	/* memory-bound registry — cannot fail */
 
-	printk("[SPAWN] user task \"%s\" pid=%d, code_pa=0x%lx, stack_pa=0x%lx\n",
-	       p->comm, p->pid, code_pa, stack_pa);
+	printk("[SPAWN] user task \"%s\" pid=%d, code=%u chunk(s), stack_pa=0x%lx\n",
+	       p->comm, p->pid, mm->nr_code_chunks, stack_pa);
 	printk("[SPAWN]   pgd_pa=0x%lx nr_l2=%u sp_top=0x%lx (stack high VA)\n",
 	       mm->pgd_pa, mm->nr_l2, mm->sp_top);
 
 	/* User VA memory map — the only mapped regions; everything else in the
-	 * 0..0xBF000000 range is UNMAPPED (touching it = translation fault). */
+	 * 0..0xBF000000 range is UNMAPPED (touching it = translation fault).
+	 *
+	 * Virtually contiguous even though the pages behind code and bss are not:
+	 * that is the whole point of laying the chunks into consecutive VAs. */
 	{
-		unsigned long code_va  = 0x00010000UL;
+		unsigned long code_va  = USER_CODE_VA;
 		unsigned long code_end = code_va + (unsigned long)code_pages * PAGE_SIZE;
 		unsigned long bss_va   = code_end;
 		unsigned long bss_end  = bss_va + (unsigned long)bss_pages * PAGE_SIZE;
 		unsigned long stk_top  = USER_STACK_TOP;
 		unsigned long stk_bot  = stk_top - (unsigned long)USER_STACK_PAGES * PAGE_SIZE;
-		printk("[SPAWN]   MAP code [%08lx-%08lx) %luK | data+bss [%08lx-%08lx) %luK | stack [%08lx-%08lx) %luK\n",
-		       code_va, code_end, (code_end - code_va) / 1024,
-		       bss_va, bss_end, (bss_end - bss_va) / 1024,
+		printk("[SPAWN]   MAP code [%08lx-%08lx) %luK %uchk | data+bss [%08lx-%08lx) %luK %uchk | stack [%08lx-%08lx) %luK\n",
+		       code_va, code_end, (code_end - code_va) / 1024, mm->nr_code_chunks,
+		       bss_va, bss_end, (bss_end - bss_va) / 1024, mm->nr_bss_chunks,
 		       stk_bot, stk_top, (stk_top - stk_bot) / 1024);
 		printk("[SPAWN]   first UNMAPPED above bss = 0x%08lx  (a fault at/just past here = ran off the bss/pool top)\n",
 		       bss_end);
 	}
 
 	return p;
+
+	/*
+	 * Unwind ladder. Each label undoes exactly one step and falls into the
+	 * one below, so a new allocation means one label and one goto - not a
+	 * new hand-copied release sequence. There were thirteen of those, and
+	 * two had already drifted out of alignment with the rest.
+	 */
+err_stack:
+	__free_pages(stack_pg, USER_STACK_ORDER);
+err_regions:
+	mm_free_chunks(mm->bss_chunks, &mm->nr_bss_chunks, zone);
+	mm_free_chunks(mm->code_chunks, &mm->nr_code_chunks, zone);
+err_mm:
+	kfree(mm);
+err_ksp:
+	kfree(ksp);
+err_files:
+	files_free(p->files);
+err_task:
+	kfree(p);
+	return NULL;
 }
 
 /**
