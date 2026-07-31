@@ -9,21 +9,21 @@
  * rather than included so the host test harness does not drag in the VFS. */
 struct files_struct;
 
-/* Task state constants (Linux v6.17 compatible, bitmask-style) */
+/*
+ * Task states. Every one of these is ASSIGNED somewhere - that is the entry
+ * requirement for being here.
+ *
+ * Numbering follows Linux (bitmask-style) because numbering is pure convention
+ * and pure cost to change later; the set does not, because a state constant
+ * nothing ever stores is a claim the kernel does not deliver. TASK_NEW,
+ * TASK_STOPPED, TASK_TRACED, TASK_WAKEKILL and TASK_KILLABLE were all declared
+ * here and never once written, so ps could not show them and no code path
+ * produced them - they described a kernel with job control and a debugger,
+ * which this is not. Add each back with the code that sets it.
+ */
 #define TASK_RUNNING		0x00000000	/* running or on runqueue */
-#define TASK_INTERRUPTIBLE	0x00000001	/* sleep, wakeable by signal */
-#define TASK_UNINTERRUPTIBLE	0x00000002	/* sleep, no signal wakeup */
-#define __TASK_STOPPED		0x00000004	/* paused (SIGSTOP) */
-#define __TASK_TRACED		0x00000008	/* ptrace (gdb/strace) */
-
-#define TASK_STOPPED		__TASK_STOPPED
-#define TASK_TRACED		__TASK_TRACED
-
-/* Flag-like modifiers (ORed with basic states): */
-#define TASK_WAKEKILL		0x00000100	/* allow SIGKILL while unkillable */
-#define TASK_KILLABLE		(TASK_UNINTERRUPTIBLE | TASK_WAKEKILL)
-
-#define TASK_NEW		0x00000800	/* just spawned, not yet seen by scheduler */
+#define TASK_INTERRUPTIBLE	0x00000001	/* sleep; wake_up_task can force it awake */
+#define TASK_UNINTERRUPTIBLE	0x00000002	/* sleep; nothing can force it awake */
 
 #define TASK_DEAD		0x00000010	/* released; nothing left to collect (EXIT_DEAD) */
 #define EXIT_ZOMBIE		0x00000020	/* dead, but exit status not collected yet */
@@ -285,6 +285,6 @@ struct task_struct *user_task_create_file(const char *name, const char *path);
 void reparent_to_init(struct task_struct *dying);
 void release_task(struct task_struct *p);	/* wait() collected it; delete for good */
 struct exit_status;
-int do_wait(struct exit_status *st);	/* PID collected, or -1 */
+int do_wait(int want, struct exit_status *st);	/* PID collected, or -1 */
 
 #endif /* _NOTHAN_SCHED_H */

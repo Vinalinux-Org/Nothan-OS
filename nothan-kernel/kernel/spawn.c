@@ -70,7 +70,7 @@ static void task_exit(void)
 /**
  * parent_for_new_task() - who owns a task about to be created
  *
- * The creator, normally. Two exceptions, both about PID 0:
+ * The creator, normally. The exception is PID 0.
  *
  * PID 0 is not a process. It is the scheduler's fallback - the thing that runs
  * when nothing else can - and it is also whatever kernel_main() happens to be
@@ -78,8 +78,14 @@ static void task_exit(void)
  * the root of the process tree and make "the tree" mean two different things.
  * Tasks created during boot are therefore children of init.
  *
- * And init itself has no parent: it IS the root. That is the one legitimate
- * NULL, and reparent_to_init() refuses to touch it.
+ * That fallback is only sound because init exists by the time anything else is
+ * created: kernel_main() builds it before do_initcalls(), so even the kernel
+ * threads a driver probe starts have a real parent. Create init any later and
+ * every one of those would be born with a NULL parent - not crashing, because
+ * reap_dead() checks, but unreapable, holding a PID for the rest of the boot.
+ *
+ * init itself is the sole NULL: it IS the root, and reparent_to_init() refuses
+ * to touch it.
  */
 static struct task_struct *parent_for_new_task(void)
 {

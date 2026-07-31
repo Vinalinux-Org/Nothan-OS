@@ -143,6 +143,37 @@ void kernel_main(void)
 
 	msgq_sys_init();	/* system message queues for the msgq_send/recv syscalls */
 
+	/*
+	 * init, and ONLY init. Created HERE - before do_initcalls() - and that
+	 * position is the point.
+	 *
+	 * PIDs are handed out in creation order and init is defined by its
+	 * number, so it has to be first. But "first" has to mean first overall,
+	 * not first user process: driver probes create kernel threads (the MUSB
+	 * enumerator), and anything created while init_task is still NULL ends up
+	 * parentless. Creating init before any of them is what makes "every task
+	 * except init has a parent" true by construction rather than by luck.
+	 *
+	 * It needs nothing that is not already up: the page allocator, slab and
+	 * scheduler are initialised above, and its image is embedded in the kernel
+	 * rather than read from a disk that is not mounted yet. It only runs once
+	 * schedule() is called at the end of this function, by which time the
+	 * drivers and the filesystem it actually uses are ready.
+	 *
+	 * No IRQ masking needed: the timer is not started until further down, so
+	 * nothing can preempt kernel_main here.
+	 *
+	 * What init DOES - which services to start, and reaping forever - lives in
+	 * userspace/init/main.c. The kernel neither knows nor decides.
+	 */
+	struct task_struct *init = init_task_create();
+	if (init) {
+		printk("[KERN] Spawning init (PID 1)\n");
+		enqueue_task(&runqueue, init);
+	} else {
+		panic("cannot create init");
+	}
+
 #if PANIC_SELFTEST
 	BUG_ON(1);		/* verify panic() + kernel backtrace, then set back to 0 */
 #endif
@@ -180,34 +211,11 @@ void kernel_main(void)
 	timer_start();
 
 	/*
-	 * Mask IRQs while creating init. The timer IRQ is already running (10ms
-	 * tick) and would otherwise preempt kernel_main into init before it is
-	 * enqueued.
+	 * Mask IRQs for the rest of boot. The timer is running now (10ms tick)
+	 * and would otherwise preempt kernel_main mid-setup; the gate reopens
+	 * just before schedule() hands the CPU to the first real task.
 	 */
 	__asm__ __volatile__ ("cpsid i" : : : "memory");
-
-	/*
-	 * init, and ONLY init.
-	 *
-	 * The kernel creates exactly one process and then stops choosing what
-	 * runs: init is a user process (userspace/init/main.c) that spawns the
-	 * GUI, the shell and the daemons itself, through the same sys_spawn any
-	 * process uses. Adding a service is a change to init, not to the kernel.
-	 *
-	 * It is created FIRST because PIDs are handed out in creation order and
-	 * init is defined by its number - anything created before it would take
-	 * PID 1, and sys_kill's "protect pid <= 1" guard would shield that task
-	 * instead. Being first is also what makes init the parent of everything:
-	 * every later process is spawned BY it, and every orphan is reparented
-	 * to it.
-	 */
-	struct task_struct *init = init_task_create();
-	if (init) {
-		printk("[KERN] Spawning init (PID 1)\n");
-		enqueue_task(&runqueue, init);
-	} else {
-		panic("cannot create init");
-	}
 
 #if MSGQ_SELFTEST
 	msgq_init(&test_q, test_q_buf, sizeof(unsigned int), 4);

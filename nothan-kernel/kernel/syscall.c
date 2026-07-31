@@ -330,25 +330,27 @@ static long sys_kill(unsigned long a0, unsigned long a1, unsigned long a2)
 
 /**
  * sys_wait - collect a dead child's exit status
- * @a0: user pointer to struct exit_status, or NULL to discard the status
+ * @a0: PID to wait for, or WAIT_ANY for whichever child dies first
+ * @a1: user pointer to struct exit_status, or NULL to discard the status
  *
- * Thin wrapper: the logic lives in do_wait() so init - a kernel thread, which
- * cannot issue syscalls - can reap with exactly the same code path.
+ * Thin wrapper: the logic lives in do_wait(), which is also reachable from
+ * kernel context.
  *
- * Return: PID of the collected child, or -1 if this task has no children.
+ * Return: PID of the collected child, or -1 if there is nothing to wait for.
  */
 static long sys_wait(unsigned long a0, unsigned long a1, unsigned long a2)
 {
-	(void)a1; (void)a2;
+	(void)a2;
 
-	struct exit_status *out = (struct exit_status *)a0;
+	int want = (int)a0;
+	struct exit_status *out = (struct exit_status *)a1;
 	struct exit_status st;
 	int pid;
 
 	if (out && !access_ok(out, sizeof(*out)))
 		return -1;
 
-	pid = do_wait(&st);
+	pid = do_wait(want, &st);
 	if (pid >= 0 && out)
 		*out = st;
 

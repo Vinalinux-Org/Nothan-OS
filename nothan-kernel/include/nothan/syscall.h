@@ -75,6 +75,12 @@ struct exit_status {
 	int value;
 };
 
+/*
+ * wait() with no particular child in mind. Negative so it cannot collide with
+ * a real PID, which pid_alloc() only ever hands out positive.
+ */
+#define WAIT_ANY	(-1)
+
 /**
  * do_syscall() - central syscall dispatcher
  * @nr:   syscall number (from r7)

@@ -218,21 +218,24 @@ static void __do_exit(unsigned int how, int value)
 
 /**
  * find_zombie_child() - one collected corpse belonging to @parent, if any
+ * @want: PID to wait for, or WAIT_ANY for whichever child dies first
  *
  * Walks all_tasks rather than a per-parent children list, for the same reason
  * reparent_to_init() does: nothing else traverses downward, so an index would
  * be state to maintain and get wrong for one reader. Iterative, never
  * recursive - tree depth is deliberately unbounded.
  *
- * @any_child tells the caller whether this parent has ANY children left, which
- * is how wait() distinguishes "nothing dead yet, go to sleep" from "nothing
- * will ever arrive, return an error". Computed in the same masked walk so the
- * two answers cannot disagree.
+ * @any_child tells the caller whether the parent still has anything worth
+ * waiting FOR - which, when @want names a PID, means that specific child and
+ * not merely some child. That is what lets wait() tell "not dead yet, go to
+ * sleep" apart from "nothing will ever arrive, return an error": waiting on a
+ * PID that is not ours must fail immediately rather than sleep forever.
+ * Computed in the same masked walk so the two answers cannot disagree.
  *
  * Caller must hold IRQs masked: this walks the registry.
  */
 static struct task_struct *find_zombie_child(struct task_struct *parent,
-					     int *any_child)
+					     int want, int *any_child)
 {
 	struct task_struct *p;
 
@@ -240,6 +243,8 @@ static struct task_struct *find_zombie_child(struct task_struct *parent,
 	list_for_each_entry(p, &all_tasks, struct task_struct, tasks) {
 		if (p->parent != parent)
 			continue;
+		if (want != WAIT_ANY && p->pid != want)
+			continue;	/* someone else's corpse; not what we asked for */
 		*any_child = 1;
 		/*
 		 * kstack_base == NULL means the reaper has finished with this
@@ -256,6 +261,7 @@ static struct task_struct *find_zombie_child(struct task_struct *parent,
 
 /**
  * do_wait() - collect one dead child's exit status
+ * @want: PID to wait for, or WAIT_ANY for whichever child dies first
  * @st: filled in with how the child died; may be NULL to discard it
  *
  * "Come and collect", not "stand guard": if a corpse is already waiting this
@@ -263,11 +269,21 @@ static struct task_struct *find_zombie_child(struct task_struct *parent,
  * the zombie state buys - a parent need not be present at the moment its child
  * dies.
  *
- * Callable from kernel context (init reaps with it) as well as from sys_wait().
+ * @want exists because "collect whichever died" is the wrong answer as soon as
+ * a process has two children: a shell that starts a job and a helper cannot
+ * wait for the job without risking collecting the helper, and a status
+ * delivered to the wrong waiter is unrecoverable - the corpse is gone. Naming
+ * the PID makes the caller say which death it is actually waiting for.
  *
- * Return: PID of the collected child, or -1 if the caller has no children.
+ * Waiting on a PID that is not this task's child returns -1 at once. It cannot
+ * sleep: nothing will ever wake it, because the wakeup comes from a child dying
+ * and that PID is not a child.
+ *
+ * Callable from kernel context as well as from sys_wait().
+ *
+ * Return: PID of the collected child, or -1 if there is nothing to wait for.
  */
-int do_wait(struct exit_status *st)
+int do_wait(int want, struct exit_status *st)
 {
 	struct task_struct *me = runqueue.curr;
 	unsigned long flags;
@@ -278,12 +294,12 @@ int do_wait(struct exit_status *st)
 	 * - the same shape msgq_send/recv use, and for the same reason: the
 	 * test ("is there a zombie?") and the decision to sleep must not be
 	 * separable, or a child that dies in between wakes nobody and the
-	 * parent sleeps forever. See Documentation/locking-map.md.
+	 * parent sleeps forever.
 	 */
 	local_irq_save(flags);
 	for (;;) {
 		int any_child;
-		struct task_struct *z = find_zombie_child(me, &any_child);
+		struct task_struct *z = find_zombie_child(me, want, &any_child);
 
 		if (z) {
 			int pid = z->pid;

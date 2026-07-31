@@ -185,13 +185,32 @@ struct exit_status {
 	int value;
 };
 
+/* wait() with no particular child in mind. Negative, so it cannot collide
+ * with a real PID. Must match include/nothan/syscall.h. */
+#define WAIT_ANY	(-1)
+
 /*
- * wait - collect one dead child; blocks only if none has died yet.
- * Returns the child's PID, or -1 if the caller has no children.
+ * waitpid - collect child @pid; blocks until it dies.
+ *
+ * Returns its PID, or -1 if @pid is not one of this task's children (which
+ * fails immediately rather than blocking - nothing would ever wake it).
+ *
+ * Name the PID whenever you have more than one child: wait() would happily
+ * hand back whichever died first, and a status collected by the wrong waiter
+ * is gone for good.
+ */
+static inline long waitpid(int pid, struct exit_status *st)
+{
+	return __syscall2(__NR_wait, (long)pid, (long)st);
+}
+
+/*
+ * wait - collect whichever child dies first; blocks only if none has died yet.
+ * Returns that child's PID, or -1 if the caller has no children.
  */
 static inline long wait(struct exit_status *st)
 {
-	return __syscall1(__NR_wait, (long)st);
+	return waitpid(WAIT_ANY, st);
 }
 
 static inline long reboot(int cmd)
