@@ -68,7 +68,6 @@ static unsigned int uart_current_baud = 115200;	/* console (UART0) */
  * publishing head, and smp_rmb() after reading it - NOT a lock; the SPSC
  * structure is already correct, only the ordering is missing.  `volatile` is
  * also the wrong tool then: it orders nothing, it only defeats caching.
- * See Documentation/locking-map.md.
  */
 
 static void uart_irq_handler(unsigned int irq)

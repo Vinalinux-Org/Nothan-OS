@@ -27,7 +27,7 @@
 #define __NR_sleep      20  /* block the task for N milliseconds  */
 #define __NR_msgq_send  21  /* send a message to system queue qid */
 #define __NR_msgq_recv  22  /* recv a message from system queue qid */
-#define __NR_spawn      23  /* start a program from the embedded set */
+#define __NR_spawn      23  /* start a program, by path            */
 #define __NR_wait       24  /* collect a dead child's exit status */
 
 #define NR_SYSCALLS     25

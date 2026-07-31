@@ -187,9 +187,6 @@ struct task_struct {
  * surrounds __schedule().  schedule() masks for ordinary callers; blocking
  * primitives that already hold the mask (msgq, completion) call __schedule()
  * directly and keep it held across the switch.
- *
- * Which region protects which data across the whole kernel is written down in
- * one place - Documentation/locking-map.md.  Change the code, change the map.
  */
 struct rq {
 	unsigned int			nr_running;

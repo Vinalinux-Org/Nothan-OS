@@ -5,11 +5,11 @@
  *
  * Every task carries a vruntime (virtual runtime). The rule is simple: always
  * run the task with the SMALLEST vruntime. Fairness and interactivity both fall
- * out of that one invariant (see Documentation/scheduler-design.md).
+ * out of that one invariant.
  *
- * The algorithm here was validated on the host by tools/test/fair_sim.c before
- * being wired in. These functions are the *_fair() variants; they are not yet
- * driving schedule() — the switch from rt.c happens once everything is in place.
+ * This IS the scheduler: __schedule() calls pick_next_task() below on every
+ * switch. The algorithm was validated on the host by tools/test/fair_sim.c
+ * before being wired in, and that simulation still runs as part of `make test`.
  *
  * No load weights: a task's vruntime advances by real run-time directly, so a
  * multi-app desktop shares the CPU evenly with no priority classes to juggle.
