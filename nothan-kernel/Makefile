@@ -45,6 +45,7 @@ OBJS += $(BUILD_DIR)/kernel/time/delay.o
 OBJS += $(BUILD_DIR)/kernel/time/timer.o
 OBJS += $(BUILD_DIR)/mm/page_alloc.o
 OBJS += $(BUILD_DIR)/mm/slab.o
+OBJS += $(BUILD_DIR)/mm/dma.o
 OBJS += $(BUILD_DIR)/lib/rbtree.o
 OBJS += $(BUILD_DIR)/kernel/spawn.o
 OBJS += $(BUILD_DIR)/kernel/sched/core.o

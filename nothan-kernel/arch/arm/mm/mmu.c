@@ -41,11 +41,26 @@ void mmu_init(void)
 	for (unsigned int i = 0; i < 4096; i++)
 		pgd[i] = 0;
 
-	/* Kernel direct: VA 0xC0000000 -> PA 0x80000000. */
-	for (unsigned int i = 0; i < 512; i++)
+	/*
+	 * Kernel direct: VA 0xC0000000 -> PA 0x80000000, minus the last section.
+	 *
+	 * That last megabyte is the coherent DMA pool and is mapped
+	 * non-cacheable just below. Excluding it HERE rather than remapping it
+	 * afterwards is the point: a page must never be reachable through both a
+	 * cached and an uncached mapping at once, which ARMv7 leaves
+	 * UNPREDICTABLE. Doing it at section granularity is what makes "exactly
+	 * one mapping" a property of the layout instead of a rule to remember.
+	 * See DMA_POOL_PA in <nothan/mm.h>.
+	 */
+	for (unsigned int i = 0; i < 511; i++)
 		map_section(pgd, 0xC0000000 + (i << 20), 0x80000000 + (i << 20),
 			    MT_NORMAL | PMD_SECT_DOMAIN(DOMAIN_KERNEL) |
 			    PMD_SECT_AP_RW);
+
+	/* Coherent DMA pool: Normal Non-cacheable, never executable. */
+	map_section(pgd, DMA_POOL_VA, DMA_POOL_PA,
+		    MT_NONCACHE | PMD_SECT_DOMAIN(DOMAIN_KERNEL) |
+		    PMD_SECT_AP_RW | PMD_SECT_XN);
 
 	/* MMIO: L4_PER (32 MB: 0x48000000-0x49FFFFFF) */
 	for (unsigned int i = 0; i < 32; i++)

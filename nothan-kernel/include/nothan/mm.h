@@ -22,6 +22,34 @@ typedef unsigned int gfp_t;
 #define PHYS_OFFSET		0x80000000UL
 #define phys_to_kva(pa)		((void *)((unsigned long)(pa) + (PAGE_OFFSET - PHYS_OFFSET)))
 
+/*
+ * Coherent DMA pool — the last megabyte of DDR, and the ONLY memory in the
+ * system mapped non-cacheable.
+ *
+ * Descriptor rings have to be uncached: the device reads them without going
+ * through the CPU's cache, and maintaining a ring by hand on every descriptor
+ * touch is both slow and the kind of thing that is eventually forgotten once.
+ *
+ * The awkward part is not making a mapping uncached, it is making sure there
+ * is no OTHER mapping of the same memory that is cached. Two mappings of one
+ * physical page with different cacheability is architecturally UNPREDICTABLE on
+ * ARMv7 - the sort of defect that appears to work and then does not, which is
+ * the whole category this kernel is built to avoid. The kernel direct map
+ * covers all of DDR in 1 MB sections, so a page taken from the buddy allocator
+ * ALWAYS has a cached alias and no amount of care at the driver removes it.
+ *
+ * So the region is carved out at the section level instead. One whole 1 MB
+ * section, aligned, mapped non-cacheable in mmu_init(), and excluded from the
+ * buddy pool by end_pa. There is exactly one mapping of these pages, and it is
+ * uncached - nothing to keep in step, nothing to maintain, nothing to forget.
+ *
+ * The cost is a fixed megabyte whether it is used or not, which suits a system
+ * that wants a known ceiling on every allocation more than it wants elasticity.
+ */
+#define DMA_POOL_PA		0x9FF00000UL
+#define DMA_POOL_SIZE		0x00100000UL
+#define DMA_POOL_VA		(DMA_POOL_PA + (PAGE_OFFSET - PHYS_OFFSET))
+
 /* User image base — must match userspace/lib/user.lds and mmu_map_user(). */
 #define USER_CODE_VA		0x00010000UL
 

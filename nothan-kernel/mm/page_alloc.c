@@ -46,10 +46,15 @@
 
 /*
  * DDR pool end address.
- * The BeagleBone Black has 512 MB DDR3 at 0x80000000–0x9FFFFFFF.
- * Pool ends at 0xA0000000.
+ *
+ * The BeagleBone Black has 512 MB DDR3 at 0x80000000–0x9FFFFFFF, but the buddy
+ * allocator stops one megabyte short of the top: that last section is the
+ * coherent DMA pool, and it is mapped non-cacheable. Handing those pages out
+ * here would give them a second, cached identity through the direct map, and a
+ * page reachable through two mappings with different cacheability is
+ * UNPREDICTABLE on ARMv7. See DMA_POOL_PA in <nothan/mm.h>.
  */
-#define DDR_END			0xA0000000UL
+#define DDR_END			DMA_POOL_PA
 #define PAGE_ARRAY_GAP		(4UL << 20)
 
 extern u32 _end;
