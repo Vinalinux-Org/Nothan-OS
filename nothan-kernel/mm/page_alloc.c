@@ -246,3 +246,33 @@ void __free_pages(struct page *page, unsigned int order)
 
 	local_irq_restore(flags);
 }
+
+/**
+ * mm_free_chunks() - return every chunk of a user region to the buddy allocator
+ * @chunks: the recorded chunks
+ * @nr:     how many; zeroed through the pointer so a second call is a no-op
+ * @zone:   the zone they came from
+ *
+ * A chunk whose pa is outside the zone cannot be freed and must not be
+ * guessed at: phys_to_page() would have to invent a struct page, and
+ * __free_pages() would then thread a free-list node through memory that is not
+ * page metadata. Refusing costs the region's pages (a leak, bounded and
+ * visible in the free count); proceeding corrupts the allocator for everyone
+ * and surfaces later somewhere unrelated. On a machine with only a UART, the
+ * leak is the recoverable failure and the corruption is not.
+ */
+void mm_free_chunks(struct mm_chunk *chunks, unsigned int *nr,
+		    struct zone *zone)
+{
+	for (unsigned int i = 0; i < *nr; i++) {
+		struct page *pg = phys_to_page(zone, chunks[i].pa);
+
+		if (!pg) {
+			pr_err("[PAGE] mm_free_chunks: chunk %u pa=0x%lx outside zone [0x%lx,0x%lx) - LEAKED\n",
+			       i, chunks[i].pa, zone->base_pa, zone->end_pa);
+			continue;
+		}
+		__free_pages(pg, chunks[i].order);
+	}
+	*nr = 0;
+}

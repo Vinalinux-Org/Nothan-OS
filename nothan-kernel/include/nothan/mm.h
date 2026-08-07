@@ -109,8 +109,27 @@ struct mm_struct {
 	unsigned long sp_top;    /* user stack top VA (initial sp) */
 	unsigned int  code_pages;  /* total 4KB code pages (across chunks)  */
 	unsigned int  bss_pages;   /* total 4KB BSS pages (across chunks) */
-	unsigned int  stack_pages; /* number of 4KB stack pages */
+
+	/*
+	 * The stack is ONE buddy block, so what is recorded is the ORDER it was
+	 * allocated with - not a page count that the free path then has to work
+	 * backwards from.
+	 *
+	 * do_exit() used to re-derive the order by rounding the page count up to
+	 * the next power of two. That happens to be right while the count is 32,
+	 * and silently frees a block twice the size it allocated the moment it is
+	 * not: __free_pages() would hand the buddy allocator pages it never owned
+	 * and merge them into a free list. Storing what was actually asked for
+	 * removes the derivation, and with it the chance of deriving it wrong.
+	 */
+	unsigned int  stack_order;
 };
+
+/* Pages behind the user stack — derived from the order, never stored twice. */
+static inline unsigned int mm_stack_pages(const struct mm_struct *mm)
+{
+	return 1u << mm->stack_order;
+}
 
 /**
  * struct list_head - Circular doubly linked list node
@@ -191,9 +210,42 @@ static inline unsigned long page_to_pfn(struct zone *zone, struct page *page)
 	return (page - zone->page_array);
 }
 
+/*
+ * pfn_to_page() / phys_to_page() - metadata for a page, or NULL if there is
+ * none.
+ *
+ * These return NULL on an out-of-range argument, and that is a recent change
+ * with a point to it. pfn_to_page() used to be a bare &page_array[pfn], so
+ * every caller's "if (pg)" test could never fire - the address of an array
+ * element is never NULL. Four call sites read as bounds-checked and none of
+ * them were.
+ *
+ * phys_to_page() exists because the conversion those callers open-coded is
+ * where the damage starts:
+ *
+ *	pfn = (pa - zone->base_pa) >> PAGE_SHIFT;
+ *
+ * That subtraction is UNSIGNED. A pa below base_pa - a stack pointer from the
+ * wrong mm, a chunk recorded before the zone was set up, an uninitialised
+ * field - wraps to a pfn near 2^32 instead of going negative. &page_array[that]
+ * is a wild pointer, and __free_pages() writes a list_head through it, so the
+ * buddy free lists are corrupted somewhere entirely unrelated to the caller.
+ * The kernel then dies later, elsewhere, for no visible reason.
+ *
+ * One conversion, one bounds check, in one place that is allowed to say no.
+ */
 static inline struct page *pfn_to_page(struct zone *zone, unsigned long pfn)
 {
+	if (pfn >= zone->managed_pages)
+		return NULL;
 	return &zone->page_array[pfn];
+}
+
+static inline struct page *phys_to_page(struct zone *zone, unsigned long pa)
+{
+	if (pa < zone->base_pa || pa >= zone->end_pa)
+		return NULL;
+	return &zone->page_array[(pa - zone->base_pa) >> PAGE_SHIFT];
 }
 
 static inline unsigned long page_to_phys(struct zone *zone, struct page *page)
@@ -306,6 +358,7 @@ void mmu_switch_mm(struct mm_struct *mm);
 void __free_pages(struct page *page, unsigned int order);
 
 /* Per-process page tables (arch/arm/mm/mmu.c) */
+u32 *swapper_pgd(void);		/* master L1; kernel half of every process table */
 int  pgd_alloc(struct mm_struct *mm);
 void pgd_free(struct mm_struct *mm);
 int  mmu_map_user(struct mm_struct *mm);
@@ -316,17 +369,12 @@ int  mmu_map_user(struct mm_struct *mm);
  * Takes the array rather than the mm so code and bss share one implementation;
  * @nr is zeroed through the pointer so a second call is a no-op, which is what
  * lets the spawn unwind path free a region it may or may not have built yet.
+ *
+ * Out of line (mm/page_alloc.c) rather than inline here: a chunk whose pa is
+ * not in the zone is a kernel bug, and saying so needs printk - which a header
+ * this widely included has no business dragging in.
  */
-static inline void mm_free_chunks(struct mm_chunk *chunks, unsigned int *nr,
-				  struct zone *zone)
-{
-	for (unsigned int i = 0; i < *nr; i++) {
-		struct page *pg = pfn_to_page(zone,
-			(chunks[i].pa - zone->base_pa) >> PAGE_SHIFT);
-		if (pg)
-			__free_pages(pg, chunks[i].order);
-	}
-	*nr = 0;
-}
+void mm_free_chunks(struct mm_chunk *chunks, unsigned int *nr,
+		    struct zone *zone);
 
 #endif /* _MM_H */

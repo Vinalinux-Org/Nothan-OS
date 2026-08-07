@@ -173,14 +173,15 @@ static void __do_exit(unsigned int how, int value)
 		mm_free_chunks(tsk->mm->code_chunks, &tsk->mm->nr_code_chunks, zone);
 		mm_free_chunks(tsk->mm->bss_chunks, &tsk->mm->nr_bss_chunks, zone);
 
-		/* The stack IS a single block, so its order is derived. */
-		unsigned int stack_order = 0;
-		while ((1u << stack_order) < tsk->mm->stack_pages)
-			stack_order++;
-		struct page *sp = pfn_to_page(zone,
-			(tsk->mm->stack_pa - zone->base_pa) >> PAGE_SHIFT);
+		/* The stack IS a single block, freed with the order it was
+		 * allocated with — recorded, not reconstructed. */
+		struct page *sp = phys_to_page(zone, tsk->mm->stack_pa);
+
 		if (sp)
-			__free_pages(sp, stack_order);
+			__free_pages(sp, tsk->mm->stack_order);
+		else
+			pr_err("[EXIT] pid=%d stack_pa=0x%lx outside zone - LEAKED\n",
+			       tsk->pid, tsk->mm->stack_pa);
 
 		kfree(tsk->mm);
 		tsk->mm = NULL;

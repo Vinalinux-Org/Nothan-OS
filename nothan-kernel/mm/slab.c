@@ -193,13 +193,25 @@ void kfree(void *ptr)
 
 	struct zone *zone = get_zone();
 
-	/* Convert VA to PA, then to page. */
+	/*
+	 * Convert VA to PA, then to page. A pointer that is not in the pool was
+	 * never handed out by kmalloc, so freeing it is a caller bug - a stack
+	 * address, a static buffer, or a pointer already freed and reused.
+	 *
+	 * This used to return silently, which made the bug invisible: the caller
+	 * carried on believing it had released memory, and whatever really owned
+	 * that address stayed live. Saying so costs one line and is the only way
+	 * such a call is ever noticed on a machine with no allocator debugger.
+	 */
 	unsigned long pa = __virt_to_phys((unsigned long)ptr);
-	if (pa < zone->base_pa || pa >= zone->end_pa)
-		return;
+	struct page *page = phys_to_page(zone, pa);
 
-	unsigned long pfn = (pa - zone->base_pa) >> PAGE_SHIFT;
-	struct page *page = pfn_to_page(zone, pfn);
+	if (!page) {
+		pr_err("[SLAB] kfree(%p): pa=0x%lx not in pool [0x%lx,0x%lx) - IGNORED\n",
+		       ptr, pa, zone->base_pa, zone->end_pa);
+		return;
+	}
+
 	struct slab_cache *cache = page->slab;
 
 	if (!cache) {

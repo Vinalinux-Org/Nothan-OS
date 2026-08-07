@@ -105,13 +105,19 @@ void mmu_log_config(void)
 }
 
 /*
- * pgd_kva() - return kernel VA of the global L1 page table (swapper)
+ * swapper_pgd() - kernel VA of the global L1 page table
  *
  * After MMU is on, the PGD physical address is biased by MMU_OFFSET.
  * We access it through the kernel direct-map. This master table holds
  * the kernel-half entries every process page table shares.
+ *
+ * Exported (it used to be static) because the kernel-stack window has to
+ * install its L1 entries here before any process table is copied from it —
+ * see arch/arm/mm/kstack.c. Anything else writing to this table is almost
+ * certainly a mistake: entries added after a process exists are invisible to
+ * that process.
  */
-static inline u32 *pgd_kva(void)
+u32 *swapper_pgd(void)
 {
 	u32 pgd_phys = (u32)&__pgd_start - MMU_OFFSET;
 	return (u32 *)((unsigned long)pgd_phys + (PAGE_OFFSET - PHYS_OFFSET));
@@ -171,7 +177,7 @@ int pgd_alloc(struct mm_struct *mm)
 
 	unsigned long pa = page_to_phys(zone, pg);
 	u32 *pgd = (u32 *)phys_to_kva(pa);
-	u32 *swapper = pgd_kva();
+	u32 *swapper = swapper_pgd();
 
 	if (pa & 0x3FFF)
 		printk("[MMU] WARNING pgd_pa 0x%lx not 16KB-aligned\n", pa);
@@ -273,7 +279,7 @@ int mmu_map_user(struct mm_struct *mm)
 	 * block, so deriving the mapping from it would slide the stack down by
 	 * that block's size and off a page boundary. */
 	unsigned long stack_va = USER_STACK_TOP -
-				 (unsigned long)mm->stack_pages * PAGE_SIZE;
+				 (unsigned long)mm_stack_pages(mm) * PAGE_SIZE;
 
 	/* Code at USER_CODE_VA, then bss picking up exactly where code ended -
 	 * computed from the walk, not from a page count, so the two can never
@@ -288,7 +294,8 @@ int mmu_map_user(struct mm_struct *mm)
 			PTE_USER_DATA))
 		return -1;
 
-	if (map_user_range(mm, stack_va, mm->stack_pa, mm->stack_pages, PTE_USER_DATA))
+	if (map_user_range(mm, stack_va, mm->stack_pa, mm_stack_pages(mm),
+			   PTE_USER_DATA))
 		return -1;
 
 	/* Clean every L2 table to PoC for the walker. */
@@ -341,10 +348,13 @@ void pgd_free(struct mm_struct *mm)
 	mm->nr_l2 = 0;
 
 	if (mm->pgd_pa) {
-		struct page *pg = pfn_to_page(zone,
-			(mm->pgd_pa - zone->base_pa) >> PAGE_SHIFT);
+		struct page *pg = phys_to_page(zone, mm->pgd_pa);
+
 		if (pg)
 			__free_pages(pg, 2);
+		else
+			printk("[MMU] pgd_free: pgd_pa 0x%lx outside zone - LEAKED\n",
+			       mm->pgd_pa);
 		mm->pgd_pa = 0;
 		mm->pgd = NULL;
 	}

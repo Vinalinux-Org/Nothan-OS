@@ -7,6 +7,7 @@
 #include <nothan/types.h>
 #include <nothan/sched.h>
 #include <nothan/mm.h>
+#include <nothan/kstack.h>
 #include <nothan/slab.h>
 #include <nothan/printk.h>
 #include <nothan/fs.h>
@@ -106,7 +107,7 @@ static void reap_dead(void)
 		 */
 		pr_debug("[REAP] kstack pid=%d kstack=%p\n", z->pid, z->kstack_base);
 		if (z->kstack_base) {
-			kfree(z->kstack_base);
+			kstack_free(z->kstack_base);
 			z->kstack_base = NULL;	/* also marks the corpse collectible */
 		}
 
@@ -242,8 +243,12 @@ void put_task_struct(struct task_struct *p)
 	 * context can reach p — this is the exclusive last reference.
 	 */
 	if (dead) {
+		/* Normally the reaper already released the stack and NULLed
+		 * this; the branch covers a task that dies before ever being
+		 * reaped (a failed creation unwind still holding the last
+		 * reference). */
 		if (p->kstack_base)
-			kfree(p->kstack_base);
+			kstack_free(p->kstack_base);
 		kfree(p);
 	}
 }
@@ -282,7 +287,24 @@ void reparent_to_init(struct task_struct *dying)
 	local_irq_restore(flags);
 }
 
-/* Idle task — always runnable, lowest priority, no kmalloc needed. */
+/*
+ * Idle task — always runnable, lowest priority, no allocator needed.
+ *
+ * WHERE IDLE ACTUALLY RUNS, which is not where this array suggests.
+ *
+ * The frame built below makes idle_tsk a complete, switchable task from the
+ * moment sched_init() returns - that invariant is worth keeping. But it is
+ * never the frame idle resumes from. sched_init() sets runqueue.curr =
+ * &idle_tsk while kernel_main is still executing on the BOOT SVC STACK, so at
+ * the first context switch __switch_to() stores that boot SP into
+ * idle_tsk.stack (str sp, [r0, #0]) and overwrites this one. From then on the
+ * idle task lives on the linker's svc_stack for good.
+ *
+ * That matters because idle is not idle: it runs reap_dead(), which printks
+ * and frees, and it absorbs full IRQ nesting like any other task. The boot
+ * stack is sized and canary-guarded on that basis - see kernel.ld and
+ * stack_guard_check(). This array is only ever the bootstrap frame.
+ */
 #define IDLE_STACK_WORDS 256
 static unsigned long idle_stack[IDLE_STACK_WORDS];
 static struct task_struct idle_tsk;
@@ -497,6 +519,14 @@ void schedule(void)
 void scheduler_tick(void)
 {
 	struct task_struct *curr = runqueue.curr;
+
+	/*
+	 * BEFORE the idle early-out, deliberately. The static stacks this checks
+	 * include the boot/SVC stack, and the idle task is precisely who runs on
+	 * it — skipping the check while idle is current would leave the one
+	 * stack that has no guard page unwatched exactly when it is in use.
+	 */
+	stack_guard_check();
 
 	if (!curr || curr == &idle_tsk)
 		return;

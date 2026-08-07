@@ -43,13 +43,13 @@ bool access_ok(const void *ptr, size_t size)
 	 * block lives up there, and a program passing its own argv[0] to a syscall
 	 * is passing a pointer into it. Measuring from sp_top would reject that
 	 * and accept an equal-sized unmapped range below the stack instead. */
-	stack_start = USER_STACK_TOP - (unsigned long)mm->stack_pages * PAGE_SIZE;
+	stack_start = USER_STACK_TOP - (unsigned long)mm_stack_pages(mm) * PAGE_SIZE;
 
 	if (range_in(a, size, code_start, mm->code_pages))
 		return true;
 	if (range_in(a, size, bss_start, mm->bss_pages))
 		return true;
-	if (range_in(a, size, stack_start, mm->stack_pages))
+	if (range_in(a, size, stack_start, mm_stack_pages(mm)))
 		return true;
 	return false;
 }

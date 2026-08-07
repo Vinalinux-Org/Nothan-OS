@@ -8,6 +8,7 @@
 #include <nothan/printk.h>
 #include <nothan/mm.h>
 #include <nothan/slab.h>
+#include <nothan/kstack.h>
 #include <nothan/sched.h>
 #include <nothan/timer.h>
 #include <nothan/init.h>
@@ -131,6 +132,21 @@ void kernel_main(void)
 
 	printk("[BOOT] slab_init\n");
 	slab_init();
+
+	/*
+	 * Kernel-stack window, BEFORE the first task and before any process page
+	 * table exists.
+	 *
+	 * The ordering is load-bearing, not stylistic. kstack_init() installs L1
+	 * entries into the master table, and pgd_alloc() copies that table's
+	 * kernel half into each new process. Entries added after a process is
+	 * born never reach it — and a kernel thread, which keeps whatever TTBR0
+	 * the previous task left installed, would then fault on its own stack.
+	 * Installing the window while there is nothing to copy it makes the
+	 * mapping global by construction.
+	 */
+	printk("[BOOT] kstack_init\n");
+	kstack_init();
 
 	/*
 	 * sched_init() before do_initcalls() — mirrors Linux start_kernel().

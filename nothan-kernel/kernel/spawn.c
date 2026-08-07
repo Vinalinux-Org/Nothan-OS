@@ -5,6 +5,7 @@
  */
 #include <nothan/types.h>
 #include <nothan/sched.h>
+#include <nothan/kstack.h>
 #include <nothan/slab.h>
 #include <nothan/printk.h>
 #include <nothan/fs.h>
@@ -159,12 +160,24 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 	if (!p)
 		return NULL;
 
-	unsigned long *sp = (unsigned long *)kmalloc(PAGE_SIZE, GFP_KERNEL);
+	/*
+	 * Same guarded 16 KB stack a user task gets, from the same allocator.
+	 *
+	 * This was one 4 KB kmalloc page, and the reasoning behind that was that
+	 * a kernel thread takes no syscalls so it needs no syscall frame. True,
+	 * and beside the point: a kernel thread is still PREEMPTED, and the timer
+	 * IRQ lands vector_irq's frame, irq_handler, the device ISR, schedule()
+	 * and __switch_to on this same stack - plus printk's 256-byte line buffer
+	 * anywhere along the way. The user-task path had already been raised to
+	 * 16 KB for exactly that nesting; kernel threads were left behind, and
+	 * drivers create them (see musb-hcd).
+	 */
+	unsigned long *sp = (unsigned long *)kstack_alloc();
 	if (!sp) {
 		kfree(p);
 		return NULL;
 	}
-	void *kstack_base = sp;	/* keep the allocation base for kfree on exit */
+	void *kstack_base = sp;	/* keep the base for kstack_free on exit */
 
 	/*
 	 * Fill the stack from the top, matching __switch_to layout:
@@ -173,7 +186,7 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 	 *
 	 * r4=fn, r5=task_exit (return address), r6-r11=0, lr=task_entry
 	 */
-	sp = (unsigned long *)((char *)sp + PAGE_SIZE);
+	sp = (unsigned long *)((char *)sp + KSTACK_SIZE);
 
 	*--sp = (unsigned long)task_entry;	/* lr → pc on context restore */
 	*--sp = 0;
@@ -504,14 +517,20 @@ static struct task_struct *user_task_create_image(const char *name,
 		goto err_task;
 
 	/*
-	 * Kernel (SVC) stack: 16 KB. 4 KB was risky — a user task takes a
-	 * syscall (vector_svc re-enables IRQs), and a timer IRQ can then nest
+	 * Kernel (SVC) stack: 16 KB, with an unmapped guard page below it.
+	 *
+	 * The size is set by nesting depth, not by taste: a user task takes a
+	 * syscall (vector_svc re-enables IRQs), and a timer IRQ can then land
 	 * vector_irq → irq_handler → schedule → __switch_to on top of the
-	 * syscall frame on this same stack. An overflow corrupts the adjacent
-	 * kmalloc allocation (an L2 table, task_struct…) → random faults.
+	 * syscall frame on this same stack.
+	 *
+	 * The guard is what changed. Overflowing used to corrupt the adjacent
+	 * kmalloc allocation — an L2 table, a task_struct — silently, and the
+	 * consequence surfaced later somewhere unrelated. Now it takes a
+	 * translation fault at the instruction that overflowed, with DFAR and PC
+	 * both pointing at the truth. See <nothan/kstack.h>.
 	 */
-#define KSTACK_SIZE  (4u * PAGE_SIZE)
-	unsigned long *ksp = (unsigned long *)kmalloc(KSTACK_SIZE, GFP_KERNEL);
+	unsigned long *ksp = (unsigned long *)kstack_alloc();
 	if (!ksp)
 		goto err_files;
 
@@ -627,7 +646,7 @@ static struct task_struct *user_task_create_image(const char *name,
 	       sp_top < USER_STACK_TOP - (unsigned long)USER_STACK_PAGES * PAGE_SIZE);
 
 	mm->stack_pa    = stack_pa;
-	mm->stack_pages = USER_STACK_PAGES;
+	mm->stack_order = USER_STACK_ORDER;	/* what do_exit() frees it with */
 	mm->entry_va    = USER_BIN_ENTRY;	/* _start, after 16-byte binary header */
 	mm->sp_top      = sp_top;		/* just below argc/argv; grows down */
 
@@ -661,7 +680,7 @@ static struct task_struct *user_task_create_image(const char *name,
 	*--sp = mm->sp_top;	/* r4: user stack top, becomes sp_usr */
 
 	p->stack      = sp;
-	p->kstack_base = ksp;	/* kmalloc base of the kernel stack, for kfree on exit */
+	p->kstack_base = ksp;	/* base of the guarded stack, for kstack_free on exit */
 	p->user_sp    = mm->sp_top;
 	p->user_lr    = 0;
 	p->__state    = TASK_RUNNING;
@@ -733,7 +752,7 @@ err_regions:
 err_mm:
 	kfree(mm);
 err_ksp:
-	kfree(ksp);
+	kstack_free(ksp);
 err_files:
 	files_free(p->files);
 err_task:
