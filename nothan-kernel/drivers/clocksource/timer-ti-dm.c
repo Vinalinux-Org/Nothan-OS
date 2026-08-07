@@ -13,6 +13,7 @@
 #include <nothan/platform.h>
 #include <nothan/init.h>
 #include <nothan/time.h>
+#include <nothan/panic.h>
 #include <asm/irqflags.h>
 
 /*
@@ -252,9 +253,17 @@ static int timer_probe(struct platform_device *pdev)
 	while ((mmio_read32(DMTIMER2_BASE + TWPS) & TWPS_W_PEND_TCRR) && timeout--)
 		;
 
-	/* Step 7: Enable IRQ and register handler. */
+	/* Step 7: Enable IRQ and register handler.
+	 *
+	 * Failing here is not survivable and must not be papered over: with no
+	 * tick there is no preemption, no jiffies and no msleep, so the kernel
+	 * would boot, run the first task, and hang the instant anything waited
+	 * for time to pass — a silent stop with no clue as to why. panic() names
+	 * the cause while the UART still works. */
 	mmio_write32(DMTIMER2_BASE + IRQENABLE_SET, IRQ_OVF_IT_FLAG);
-	request_irq(DMTIMER2_IRQ, timer_irq_handler);
+	if (request_irq(DMTIMER2_IRQ, timer_irq_handler, "dmtimer2-tick"))
+		panic("timer: cannot claim IRQ %d - no scheduler tick",
+		      DMTIMER2_IRQ);
 	intc_enable_irq(DMTIMER2_IRQ);
 
 	/* Step 8: Start the timer with auto-reload. */

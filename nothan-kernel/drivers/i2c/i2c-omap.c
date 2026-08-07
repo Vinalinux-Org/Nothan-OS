@@ -310,8 +310,21 @@ static void hw_init(struct omap_i2c_dev *dev)
 	 */
 	init_completion(&dev->done);
 
-	request_irq(dev->irq, omap_i2c_isr);
-	intc_enable_irq(dev->irq);
+	/*
+	 * Only unmask a line we actually own — see the level-triggered storm
+	 * note in kernel/irq/irq_core.c.
+	 *
+	 * Honest consequence: transfers on this adapter complete via the ISR, so
+	 * without it every xfer blocks. That is still strictly better than the
+	 * alternative, because the failure is announced HERE, by name, at probe
+	 * time - rather than appearing later as an unexplained hang in whatever
+	 * driver happens to be first to touch the bus.
+	 */
+	if (request_irq(dev->irq, omap_i2c_isr, "omap-i2c") == 0)
+		intc_enable_irq(dev->irq);
+	else
+		printk("[I2C] adapter %d has no IRQ - transfers will block\n",
+		       dev->nr);
 }
 
 static struct i2c_adapter i2c0_adapter = { .name = "omap-i2c.0", .nr = 0, .xfer = omap_i2c_xfer };

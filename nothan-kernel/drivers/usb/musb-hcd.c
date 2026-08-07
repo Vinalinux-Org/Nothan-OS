@@ -708,8 +708,14 @@ static int musb_hcd_probe(struct platform_device *pdev)
 		printk("[MUSB] WARNING could not start enum thread\n");
 
 	if (musb_irq > 0) {
-		request_irq(musb_irq, musb_irq_handler);
-		intc_enable_irq(musb_irq);
+		/* Connect detection is IRQ-driven, so no IRQ means no
+		 * enumeration — the enum thread would sleep forever on a
+		 * completion nothing ever signals. Say so here, where the
+		 * cause is known, instead of leaving a thread parked in ps. */
+		if (request_irq(musb_irq, musb_irq_handler, "musb-hcd") == 0)
+			intc_enable_irq(musb_irq);
+		else
+			printk("[MUSB] no IRQ - device enumeration disabled\n");
 	}
 
 	/* Host mode + session: drives VBUS and arms connect detection. */

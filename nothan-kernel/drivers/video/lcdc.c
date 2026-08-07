@@ -376,8 +376,15 @@ static int __init lcdc_init(void)
 	 * interrupts so the handler can sample and report them. */
 	mmio_write32(LCDC_BASE + LCDC_IRQENABLE_SET,
 		     IRQBIT_FRAME_DONE | IRQBIT_FUF | IRQBIT_SYNC_LOST);
-	request_irq(LCDC_IRQ, lcdc_eof_handler);
-	intc_enable_irq(LCDC_IRQ);
+	/* Unmask the line at the controller ONLY if a handler owns it. Enabling
+	 * an unowned level-triggered line is how a machine locks up producing no
+	 * output at all: nothing clears the source, so the dispatcher re-enters
+	 * forever. Without the IRQ, wait_eof() falls back to its timeout — the
+	 * display is slower, but the system lives and says why. */
+	if (request_irq(LCDC_IRQ, lcdc_eof_handler, "lcdc") == 0)
+		intc_enable_irq(LCDC_IRQ);
+	else
+		printk("[LCDC] no frame-done IRQ - falling back to timed waits\n");
 
 	fb_register_ops(&lcdc_fb_ops);
 

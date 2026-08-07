@@ -24,6 +24,7 @@
 #define RX_BUF_MASK	(RX_BUF_SIZE - 1u)
 
 struct uart_inst {
+	const char  *name;	/* IRQ owner label; see request_irq() */
 	u32          base;	/* register VA */
 	u32          pa;	/* register PA (matches platform_device.base) */
 	unsigned int irq;
@@ -34,8 +35,10 @@ struct uart_inst {
 };
 
 static struct uart_inst uarts[] = {
-	{ .base = UART_BASE,  .pa = UART0_PA, .irq = UART_IRQ,  .clkctrl = 0 },
-	{ .base = UART1_VA,   .pa = UART1_PA, .irq = UART1_IRQ, .clkctrl = CM_PER_UART1_CLKCTRL },
+	{ .name = "uart0-console", .base = UART_BASE, .pa = UART0_PA,
+	  .irq = UART_IRQ,  .clkctrl = 0 },
+	{ .name = "uart1-modem",   .base = UART1_VA,  .pa = UART1_PA,
+	  .irq = UART1_IRQ, .clkctrl = CM_PER_UART1_CLKCTRL },
 };
 #define NR_UART		(sizeof(uarts) / sizeof(uarts[0]))
 
@@ -232,8 +235,15 @@ static void uart_hw_init(struct uart_inst *u)
 	/* Enable UART 16x mode (must come after the config registers). */
 	mmio_write32(u->base + UART_MDR1, 0x00);
 
-	request_irq(u->irq, uart_irq_handler);
-	intc_enable_irq(u->irq);
+	/*
+	 * RX is interrupt-driven; TX is polled. So losing this IRQ costs input,
+	 * not output — the console still prints, which is exactly why the
+	 * failure has to be printed rather than assumed impossible.
+	 */
+	if (request_irq(u->irq, uart_irq_handler, u->name) == 0)
+		intc_enable_irq(u->irq);
+	else
+		printk("[UART] %s has no IRQ - receive disabled\n", u->name);
 }
 
 static int uart_probe(struct platform_device *pdev)
