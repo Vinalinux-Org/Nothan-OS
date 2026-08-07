@@ -9,19 +9,22 @@ int printk(const char *fmt, ...)
 int vsnprintf(char *buf, unsigned long size, const char *fmt, va_list args);
 
 /*
- * printk() appends to a RAM ring and returns; a kernel thread feeds the UART
- * with interrupts enabled. See the long note in kernel/printk.c for why - in
- * short, the old synchronous printk held interrupts off for milliseconds per
- * line, which nothing minded until audio and networking arrived.
+ * printk() appends to a RAM ring and returns; the UART is fed later, from a
+ * context that can afford to wait with interrupts enabled. See the long note
+ * in kernel/printk.c - in short, the old synchronous printk held interrupts off
+ * for milliseconds per line, which nothing minded until audio and networking
+ * arrived, and there is no kernel thread to hand the waiting to.
  *
- * printk_flush()      push everything queued out to the UART, here and now,
- *                     in the caller's context. Costs a full transmit wait.
- * printk_panic_mode() stop deferring for good. panic() only.
- * klog_init()         start the thread; until it runs, printk is synchronous.
+ * printk_flush()       push everything queued out to the UART, here and now, in
+ *                      the caller's context. Costs a full transmit wait. Used by
+ *                      the idle loop, pr_err(), the fault handlers and panic().
+ * printk_drain_some()  push at most @max characters. Used on the syscall return
+ *                      path, so a busy system that never idles still drains.
+ * printk_panic_mode()  stop deferring for good. panic() only.
  */
 void printk_flush(void);
+void printk_drain_some(unsigned int max);
 void printk_panic_mode(void);
-void klog_init(void);
 
 /*
  * Log levels. printk() itself is unchanged and always prints (treat as INFO)

@@ -312,6 +312,19 @@ static struct task_struct idle_tsk;
 static void idle_main(void)
 {
 	while (1) {
+		/*
+		 * Feed the log BEFORE sleeping, and without a limit.
+		 *
+		 * "Nothing is runnable" is precisely when the CPU can afford to
+		 * sit on a UART transmit register, and this runs with interrupts
+		 * enabled, so the waiting costs nobody any latency. Doing it
+		 * after the wfi would be worse than useless: wfi waits for an
+		 * interrupt, so a machine that has gone quiet with lines still
+		 * queued would hold them until something unrelated happened to
+		 * fire.
+		 */
+		printk_flush();
+
 		__asm__ __volatile__ ("cpsie i\nwfi" : : : "memory");
 		schedule();
 	}

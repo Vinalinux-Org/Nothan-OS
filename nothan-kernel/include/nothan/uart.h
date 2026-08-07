@@ -46,8 +46,33 @@
 #define UART1_IRQ		73
 #define CM_PER_UART1_CLKCTRL	0xF0E0006C
 
+/*
+ * Console TX, in the two shapes the log drain needs.
+ *
+ * Both exist because LSR_THRE on this UART means the transmit FIFO is EMPTY,
+ * not "has room". uart_putchar() waits for that and then writes a single byte,
+ * so the 64-byte FIFO the driver enables buys nothing at all: the hardware
+ * drains completely between every character, and a character costs a full
+ * 86.8 us at 115200 no matter how many are queued behind it.
+ *
+ * uart_console_tx() writes up to a whole FIFO after one wait instead of one
+ * byte after each, which is the difference between the CPU pacing the UART and
+ * the UART pacing itself.
+ *
+ * @wait chooses who is allowed to block:
+ *   1  wait for the FIFO to empty, then fill it. For the idle loop, pr_err()
+ *      and panic() — callers that must get the bytes out.
+ *   0  write only if the FIFO is already empty, otherwise return 0 at once.
+ *      For the syscall return path, which is willing to help drain the log but
+ *      must never make a process wait on a serial line to do it.
+ *
+ * Return: characters accepted (0 .. n).
+ */
+#define UART_TX_FIFO_DEPTH	64u
+
 void uart_init(void);
 void uart_putchar(int c);
+unsigned int uart_console_tx(const char *s, unsigned int n, int wait);
 int uart_getchar(void);
 
 #endif /* _UART_H */

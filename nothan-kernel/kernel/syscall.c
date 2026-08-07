@@ -729,5 +729,14 @@ long do_syscall(unsigned int nr, unsigned long arg0,
 	if (runqueue.curr && (runqueue.curr->flags & TASK_SHOULD_EXIT))
 		do_exit_killed(SIGKILL);
 
+	/*
+	 * Help move the log along on the way out — one FIFO burst at most, and
+	 * only if the UART is already idle. printk() only queues; the idle loop
+	 * does the unbounded draining, and a process that keeps the CPU busy
+	 * never reaches idle. This never blocks, so a syscall costs a register
+	 * read when there is nothing to do.
+	 */
+	printk_drain_some(1);
+
 	return ret;
 }

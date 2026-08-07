@@ -295,6 +295,34 @@ void uart_putchar(int c)
 	uart_tx_char(UART_BASE, c);
 }
 
+/*
+ * Console TX in FIFO-sized bursts. See <nothan/uart.h> for why this exists
+ * alongside uart_putchar().
+ *
+ * The whole trick is what LSR_THRE means here: the transmit FIFO is EMPTY, not
+ * merely not-full. So once it is set, a full FIFO's worth may be written with
+ * no further checking — and writing MORE than that in one burst would silently
+ * overrun the hardware and drop characters, which is why the count is clamped
+ * rather than looped.
+ */
+unsigned int uart_console_tx(const char *s, unsigned int n, int wait)
+{
+	if (n > UART_TX_FIFO_DEPTH)
+		n = UART_TX_FIFO_DEPTH;
+
+	if (!(mmio_read32(UART_BASE + UART_LSR) & LSR_THRE)) {
+		if (!wait)
+			return 0;
+		while (!(mmio_read32(UART_BASE + UART_LSR) & LSR_THRE))
+			;
+	}
+
+	for (unsigned int i = 0; i < n; i++)
+		mmio_write32(UART_BASE + UART_THR, (u32)(unsigned char)s[i]);
+
+	return n;
+}
+
 int uart_getchar(void)
 {
 	struct uart_inst *u = &uarts[0];
