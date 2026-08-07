@@ -71,7 +71,15 @@ void msgq_recv(struct msgq *q, void *out)
 		if (task_should_exit(runqueue.curr)) {	/* killed while blocked */
 			__finish_wait();
 			local_irq_restore(flags);
-			return;				/* bail — do NOT touch the ring */
+			/*
+			 * Bail — do NOT touch the ring, and note what this
+			 * cannot do: @out is left exactly as the caller passed
+			 * it, and returning void there is no way to say so. The
+			 * caller has to assume the worst, which sys_msgq_recv()
+			 * does by zeroing its buffer first. A return value is
+			 * the real answer and arrives with try_recv/timeout.
+			 */
+			return;
 		}
 		__prepare_to_wait(&q->not_empty, TASK_INTERRUPTIBLE);
 		__schedule();

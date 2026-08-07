@@ -647,7 +647,26 @@ static long sys_msgq_send(unsigned long a0, unsigned long a1, unsigned long a2)
 static long sys_msgq_recv(unsigned long a0, unsigned long a1, unsigned long a2)
 {
 	struct msgq *q = msgq_get((unsigned int)a0);
-	char kbuf[MSGQ_MSG_SIZE];
+	/*
+	 * Zeroed, because msgq_recv() has a path that returns without writing
+	 * anything: a task killed while blocked bails out rather than touching
+	 * the ring (see kernel/ipc/msgq.c). It returns void, so nothing here can
+	 * tell that apart from a real message — and the copy_to_user() below
+	 * would then hand user space 64 bytes of whatever this kernel stack
+	 * happened to hold.
+	 *
+	 * The task is about to die at the syscall boundary, so nothing can read
+	 * those bytes today. That is a reason it has not bitten, not a reason to
+	 * leave it: it is an information leak out of the kernel that depends on
+	 * a timing coincidence to stay harmless.
+	 *
+	 * Zeroing is the containment, not the cure. The cure is msgq_recv()
+	 * being able to say "I got nothing", which means a return value, which
+	 * means changing the signature — and that signature is changing anyway
+	 * when try_recv/timeout arrives for the network daemon. Doing both at
+	 * once, then, rather than churning the API twice.
+	 */
+	char kbuf[MSGQ_MSG_SIZE] = { 0 };
 
 	if (!q || a2 < MSGQ_MSG_SIZE)
 		return -1;
