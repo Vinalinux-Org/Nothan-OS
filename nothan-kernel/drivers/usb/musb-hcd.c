@@ -599,7 +599,7 @@ static void musb_touch_loop(unsigned int gen)
 	touch_seq++;
 }
 
-static void musb_enum_thread(void)
+static void musb_enum_thread(void *arg)
 {
 	for (;;) {
 		wait_for_completion(&musb_connect_event);
@@ -700,7 +700,7 @@ static int musb_hcd_probe(struct platform_device *pdev)
 
 	/* Enumeration runs in its own thread, woken by the connect IRQ. */
 	init_completion(&musb_connect_event);
-	struct task_struct *t = task_create(musb_enum_thread, DEFAULT_PRIO,
+	struct task_struct *t = task_create(musb_enum_thread, NULL, DEFAULT_PRIO,
 					    "musb-enum");
 	if (t)
 		enqueue_task(&runqueue, t);

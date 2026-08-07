@@ -30,14 +30,21 @@ __switch_to:
  * void task_entry(void)
  *
  * Trampoline for newly created tasks.
- * Initial stack frame: r4 = fn, r5 = task_exit.
- * Sets LR so fn returns to task_exit.
+ * Initial stack frame: r4 = fn, r5 = task_exit, r6 = fn's argument.
+ * Sets LR so fn returns to task_exit, and r0 so fn receives its argument.
+ *
+ * The argument rides in r6 because __switch_to already restores r4-r11 from
+ * the pre-built frame, so passing one costs a slot that was being zeroed
+ * anyway — no new mechanism, and nothing to keep in step. It exists for the
+ * per-IRQ threads, which are all the same function and differ only by which
+ * line they serve; without it each would need its own generated wrapper.
  */
 	.globl	task_entry
 	.type	task_entry, %function
 task_entry:
 	cpsie	i			@ Ensure IRQs enabled (may start from IRQ context)
 	mov	lr, r5
+	mov	r0, r6			@ AAPCS: first argument to fn
 	bx	r4
 	.size	task_entry, . - task_entry
 

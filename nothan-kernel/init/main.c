@@ -9,6 +9,7 @@
 #include <nothan/mm.h>
 #include <nothan/slab.h>
 #include <nothan/kstack.h>
+#include <nothan/dma.h>
 #include <nothan/sched.h>
 #include <nothan/timer.h>
 #include <nothan/init.h>
@@ -105,7 +106,7 @@ static void fat_write_selftest(void)
 static struct msgq test_q;
 static unsigned int test_q_buf[4];		/* 4 slots × sizeof(unsigned int) */
 
-static void msgq_producer(void)
+static void msgq_producer(void *arg)
 {
 	for (unsigned int i = 0; i < 10; i++) {
 		msgq_send(&test_q, &i);		/* no delay → fills then blocks on full */
@@ -113,7 +114,7 @@ static void msgq_producer(void)
 	}
 }
 
-static void msgq_consumer(void)
+static void msgq_consumer(void *arg)
 {
 	for (unsigned int i = 0; i < 10; i++) {
 		unsigned int v;
@@ -147,6 +148,11 @@ void kernel_main(void)
 	 */
 	printk("[BOOT] kstack_init\n");
 	kstack_init();
+
+	/* Coherent DMA pool. Independent of the buddy allocator by construction
+	 * (page_alloc_init() stops one section short of it), so the order
+	 * between them does not matter — but both must precede any driver. */
+	dma_init();
 
 	/*
 	 * sched_init() before do_initcalls() — mirrors Linux start_kernel().
@@ -189,6 +195,16 @@ void kernel_main(void)
 	} else {
 		panic("cannot create init");
 	}
+
+	/*
+	 * The log thread, right after init so it has a parent. It does not take
+	 * over yet: printk stays synchronous until this thread actually runs,
+	 * which is after the first schedule() at the bottom of this function.
+	 * Everything printed by the driver probes below therefore still goes
+	 * straight to the wire, which is where it is wanted — a probe that hangs
+	 * should leave its last line visible, not queued.
+	 */
+	klog_init();
 
 #if PANIC_SELFTEST
 	BUG_ON(1);		/* verify panic() + kernel backtrace, then set back to 0 */
@@ -235,10 +251,10 @@ void kernel_main(void)
 
 #if MSGQ_SELFTEST
 	msgq_init(&test_q, test_q_buf, sizeof(unsigned int), 4);
-	struct task_struct *tp = task_create(msgq_producer, DEFAULT_PRIO, "msgq-prod");
+	struct task_struct *tp = task_create(msgq_producer, NULL, DEFAULT_PRIO, "msgq-prod");
 	if (tp)
 		enqueue_task(&runqueue, tp);
-	struct task_struct *tc = task_create(msgq_consumer, DEFAULT_PRIO, "msgq-cons");
+	struct task_struct *tc = task_create(msgq_consumer, NULL, DEFAULT_PRIO, "msgq-cons");
 	if (tc)
 		enqueue_task(&runqueue, tc);
 #endif

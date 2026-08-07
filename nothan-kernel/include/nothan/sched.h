@@ -212,7 +212,14 @@ static inline int task_should_exit(struct task_struct *t)
 }
 
 void sched_init(void);
-struct task_struct *task_create(void (*fn)(void), int prio, const char *name);
+
+/*
+ * Create a kernel thread. @arg reaches @fn as its first parameter — see
+ * task_entry in arch/arm/kernel/switch_to.S, which carries it in r6 through
+ * the pre-built switch frame. Threads that need no argument pass NULL.
+ */
+struct task_struct *task_create(void (*fn)(void *), void *arg, int prio,
+				const char *name);
 void enqueue_task(struct rq *rq, struct task_struct *p);
 void dequeue_task(struct rq *rq, struct task_struct *p);
 struct task_struct *pick_next_task(struct rq *rq);

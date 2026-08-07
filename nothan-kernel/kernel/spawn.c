@@ -64,6 +64,7 @@ static int pid_alloc(void)
 	return pid;
 }
 
+/* Where a kernel thread lands if its function returns. */
 static void task_exit(void)
 {
 	do_exit(0);
@@ -149,7 +150,8 @@ extern void task_entry(void);
  *
  * Return: Pointer to the newly created task_struct, or NULL on failure.
  */
-struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
+struct task_struct *task_create(void (*fn)(void *), void *arg, int prio,
+				const char *name)
 {
 	int pid = pid_alloc();
 
@@ -184,19 +186,19 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 	 *   stmfd sp!, {r4-r11, lr}  →  [sp+0]=r4 … [sp+32]=lr
 	 *   ldmfd sp!, {r4-r11, pc}  →  r4=[sp+0], pc=[sp+32]
 	 *
-	 * r4=fn, r5=task_exit (return address), r6-r11=0, lr=task_entry
+	 * r4=fn, r5=task_exit (return address), r6=arg, r7-r11=0, lr=task_entry
 	 */
 	sp = (unsigned long *)((char *)sp + KSTACK_SIZE);
 
 	*--sp = (unsigned long)task_entry;	/* lr → pc on context restore */
-	*--sp = 0;
-	*--sp = 0;
-	*--sp = 0;
-	*--sp = 0;
-	*--sp = 0;
-	*--sp = 0;
+	*--sp = 0;				/* r11 */
+	*--sp = 0;				/* r10 */
+	*--sp = 0;				/* r9  */
+	*--sp = 0;				/* r8  */
+	*--sp = 0;				/* r7  */
+	*--sp = (unsigned long)arg;		/* r6: task_entry moves it to r0 */
 	*--sp = (unsigned long)task_exit;	/* r5: return address for fn */
-	*--sp = (unsigned long)fn;		/* r4: first argument to task_entry */
+	*--sp = (unsigned long)fn;		/* r4: the function to run */
 
 	p->stack       = sp;
 	p->kstack_base = kstack_base;

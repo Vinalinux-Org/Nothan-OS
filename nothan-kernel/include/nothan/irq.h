@@ -34,8 +34,49 @@
 
 #define NR_IRQS			128
 
-/* Interrupt handler type. */
+/* Hard-IRQ handler: runs in interrupt context, with interrupts masked. */
 typedef void (*irq_handler_t)(unsigned int irq);
+
+/*
+ * THREADED INTERRUPTS
+ *
+ * Everything used to happen in hard-IRQ context, with interrupts masked for
+ * the whole handler. That is fine for what exists today - the tick increments
+ * a counter, the UART pushes a byte into a ring - and wrong for what comes
+ * next. Handling a received packet means a checksum, a table lookup, a queue
+ * insertion and possibly a wakeup; doing that with interrupts off means the
+ * next packet's interrupt is late or lost, and the deafness lasts as long as
+ * the slowest path through the handler.
+ *
+ * The split: a small hard handler silences the device and says whether there
+ * is more to do; a per-line kernel thread does the rest with interrupts ON.
+ *
+ *   hard handler  -> IRQ_HANDLED      nothing further; done in interrupt ctx
+ *                 -> IRQ_WAKE_THREAD  core masks the line and wakes the thread
+ *   thread        runs thread_fn(irq), then the core re-arms the line
+ *
+ * Masking the line before waking is not optional. AM335x peripheral
+ * interrupts are level-triggered, so a source the hard handler did not fully
+ * clear is still asserted when the ISR returns; without the mask the CPU would
+ * re-enter the dispatcher immediately and keep re-entering it, and the thread
+ * that was supposed to clear the source would never get to run.
+ *
+ * WHY THREADS RATHER THAN SOFTIRQS. A softirq would be faster - no context
+ * switch - but it runs in a context that has no name, no PID, and no line in
+ * ps, so when it hangs the log can only report that the machine is busy. Every
+ * deferred handler here is a task: it can be seen, timed, and blamed. On a
+ * board whose only instrument is a UART, being able to name the thing that
+ * stopped is worth more than the switch it costs.
+ *
+ * request_irq() remains, and is still right for handlers that genuinely finish
+ * in a few instructions - the tick and the UART receive path. Deferring those
+ * would cost a context switch to do less work than the switch.
+ */
+#define IRQ_HANDLED		0
+#define IRQ_WAKE_THREAD		1
+
+typedef int  (*irq_hard_t)(unsigned int irq);	/* interrupt context */
+typedef void (*irq_thread_t)(unsigned int irq);	/* task context, IRQs on */
 
 /*
  * request_irq() failures. There are exactly two, and both used to be silent.
@@ -63,6 +104,8 @@ void intc_disable_irq(unsigned int irq);
 void intc_handle_irq(void);
 
 int  request_irq(unsigned int irq, irq_handler_t handler, const char *name);
+int  request_threaded_irq(unsigned int irq, irq_hard_t hard,
+			  irq_thread_t thread_fn, const char *name);
 void free_irq(unsigned int irq);
 void irq_show_stats(void);	/* per-line counts + spurious/unhandled totals */
 
