@@ -24,6 +24,19 @@ void panic(const char *fmt, ...)
 
 	__asm__ __volatile__("cpsid i" : : : "memory");
 
+	/*
+	 * Print synchronously from here on. Deferred printing hands the line to
+	 * a thread, and this function's whole contract is that the scheduler
+	 * never runs again - so anything merely queued would be queued forever.
+	 *
+	 * This also flushes what is already in the ring, in order, before the
+	 * panic message: the lines leading UP to the failure are usually what
+	 * explains it, and they were written under the old assumption that
+	 * somebody would come along later to print them.
+	 */
+	printk_panic_mode();
+	printk_flush();
+
 	va_start(ap, fmt);
 	vsnprintf(buf, sizeof(buf), fmt, ap);
 	va_end(ap);

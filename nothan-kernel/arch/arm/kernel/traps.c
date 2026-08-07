@@ -90,6 +90,16 @@ static void handle_user_or_panic(unsigned int spsr, const char *tag, int sig)
 	if ((spsr & SPSR_MODE_MASK) == MODE_USER) {
 		printk("  [%s] killing user task \"%s\" pid=%d\n",
 		       tag, runqueue.curr->comm, runqueue.curr->pid);
+		/*
+		 * Get the whole fault report onto the wire before unwinding the
+		 * task. printk defers to a thread now, and do_exit_killed()
+		 * ends in schedule() - so without this the registers, the fault
+		 * address and the backtrace would all still be sitting in RAM
+		 * while the kernel walks away from the task that produced them.
+		 * A second fault during that teardown would then take the first
+		 * fault's explanation down with it.
+		 */
+		printk_flush();
 		do_exit_killed(sig);
 		/* NOTREACHED */
 	}

@@ -9,6 +9,8 @@
 #include <stddef.h>
 #include <nothan/printk.h>
 #include <nothan/uart.h>
+#include <nothan/sched.h>
+#include <nothan/wait.h>
 #include <asm/irqflags.h>
 
 /*
@@ -170,6 +172,145 @@ int vsnprintf(char *buf, unsigned long size, const char *fmt, va_list args)
  *
  * Return: The number of characters written
  */
+/* ===================================================================
+ * The log ring, and why printk no longer writes to the UART itself
+ *
+ * printk() used to mask IRQs and busy-wait on the UART transmit register, one
+ * character at a time, for the whole line. At 115200 8N1 a character is 86.8 us
+ * of waiting, so an ordinary 80-character line held interrupts off for about
+ * SEVEN MILLISECONDS.
+ *
+ * Nothing in the kernel as it stood minded very much. Everything about to be
+ * added does:
+ *
+ *   - audio at 48 kHz with a 512-frame period has 10.7 ms between refills, so
+ *     one log line eats two thirds of the margin and the buffer underruns;
+ *   - a 1500-byte frame arrives on 100 Mbit Ethernet every 120 us, so 7 ms
+ *     with interrupts off is about 58 frames the controller had nowhere to put.
+ *
+ * It was also self-inflicted in the worst place: schedule() calls reap_dead(),
+ * which pr_debug()s, and the IRQ preemption path calls schedule() - so a task
+ * exiting at the wrong moment put a multi-millisecond UART wait INSIDE an
+ * interrupt.
+ *
+ * So printk() now only formats and appends to a ring in RAM, which is bounded
+ * pointer work, and a kernel thread does the waiting with interrupts ENABLED.
+ * The CPU still spends the same time feeding the UART; it just no longer spends
+ * it deaf.
+ *
+ * WHAT IS GIVEN UP, said plainly: a line sits in RAM for a moment before it
+ * reaches the wire, so a machine that stops dead can lose the last few lines -
+ * and on a machine whose only instrument is the UART that is not a small thing
+ * to trade. It is bought back at the three points where it actually matters:
+ * pr_err() flushes, the fault handlers flush, and panic() switches the whole
+ * mechanism back to synchronous before printing a word. Routine chatter is
+ * deferred; anything that might be somebody's last words is not.
+ * =================================================================== */
+
+#define LOG_BUF_SHIFT	14
+#define LOG_BUF_SIZE	(1u << LOG_BUF_SHIFT)
+#define LOG_BUF_MASK	(LOG_BUF_SIZE - 1u)
+
+static char log_buf[LOG_BUF_SIZE];
+
+/*
+ * Free-running counters, masked only when indexing. Their DIFFERENCE is the
+ * occupancy and stays correct across unsigned wraparound, which a pair of
+ * wrapped indices would not - those cannot tell full from empty without a
+ * spare slot or a flag.
+ */
+static unsigned int  log_head;		/* producer: printk */
+static unsigned int  log_tail;		/* consumer: klogd or a flush */
+static unsigned long log_dropped;	/* characters overwritten when full */
+
+/*
+ * Synchronous until the log thread is actually running, and again from the
+ * moment panic() starts. Both are cases where there may be no later.
+ */
+static bool log_sync = true;
+
+/*
+ * Initialised statically, not in klog_init().
+ *
+ * wake_up() reads task_list before it does anything else, and an all-zero
+ * list head is not an empty list - list_empty() compares next against the head
+ * address, so a NULL next reads as NON-empty and the waker walks into it. The
+ * ordering that keeps that from happening (nothing wakes until klogd has run)
+ * is real but invisible, and printk is called from everywhere including places
+ * that will exist later. A self-referential initialiser makes the queue valid
+ * from the first instruction of the kernel and removes the question.
+ */
+static struct wait_queue_head log_wq = {
+	.task_list = { &log_wq.task_list, &log_wq.task_list },
+};
+
+/* Append to the ring, dropping the OLDEST when full.
+ *
+ * Dropping old rather than new because a full ring means the reader is behind,
+ * and what a reader that is behind most needs is the newest lines - the ones
+ * describing whatever is currently going wrong. Discarding the incoming line
+ * instead would go quiet exactly during the storm worth reading.
+ */
+static void log_write(const char *s)
+{
+	unsigned long flags;
+
+	local_irq_save(flags);
+	for (; *s; s++) {
+		if (log_head - log_tail >= LOG_BUF_SIZE) {
+			log_tail++;
+			log_dropped++;
+		}
+		log_buf[log_head & LOG_BUF_MASK] = *s;
+		log_head++;
+	}
+	local_irq_restore(flags);
+}
+
+/*
+ * Drain the ring to the UART in the caller's context.
+ *
+ * The mask is taken and dropped PER CHARACTER, around the ring surgery only,
+ * and never across the transmit wait. That is the whole point of the rewrite:
+ * the interrupts-off window goes from the length of a line to a few
+ * instructions. Two drainers running at once interleave characters rather than
+ * corrupting the ring, which is untidy and survivable; holding the mask across
+ * the wait to keep it tidy would put the old bug back.
+ */
+void printk_flush(void)
+{
+	for (;;) {
+		unsigned long flags;
+		char c;
+
+		local_irq_save(flags);
+		if (log_tail == log_head) {
+			local_irq_restore(flags);
+			return;
+		}
+		c = log_buf[log_tail & LOG_BUF_MASK];
+		log_tail++;
+		local_irq_restore(flags);
+
+		if (c == '\n')
+			uart_putchar('\r');
+		uart_putchar(c);
+	}
+}
+
+/**
+ * printk_panic_mode() - stop deferring; print everything from here on inline
+ *
+ * panic() calls this before its first printk. Waking a thread to do the
+ * printing assumes the scheduler will run again, which is not a safe
+ * assumption at the point where the kernel has decided to stop - and the panic
+ * message is the one message that must never be the one that got left in RAM.
+ */
+void printk_panic_mode(void)
+{
+	log_sync = true;
+}
+
 int printk(const char *fmt, ...)
 {
 	char buf[256];
@@ -180,24 +321,71 @@ int printk(const char *fmt, ...)
 	ret = vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
 
-	/*
-	 * IRQ-off ensures the UART output is not interleaved by preemption.
-	 * local_irq_save/restore preserves the prior I-bit so callers that
-	 * masked IRQs (e.g. kernel_main before schedule(), task spawn loop,
-	 * abort handlers) stay masked across printk.
-	 */
-	unsigned long flags;
-	local_irq_save(flags);
+	log_write(buf);
 
-	for (char *p = buf; *p; p++) {
-		if (*p == '\n')
-			uart_putchar('\r');
-		uart_putchar(*p);
-	}
-
-	local_irq_restore(flags);
+	if (log_sync)
+		printk_flush();
+	else
+		wake_up(&log_wq);
 
 	return ret;
+}
+
+/*
+ * The log thread. Sleeps until there is something to print, then prints it
+ * with interrupts enabled - which is the entire reason it exists.
+ *
+ * It reports dropped characters straight to the UART rather than through
+ * printk(), because printk() would append to the ring it is currently draining
+ * and the notice about losing data could itself be lost.
+ */
+static void klog_thread(void *arg)
+{
+	unsigned long reported = 0;
+
+	/*
+	 * Deferral starts HERE, not when the thread was created. Between
+	 * creation and first run nothing drains, so switching earlier would
+	 * silently bank the rest of boot into a 16 KB ring and overwrite the
+	 * beginning of it. The first thing this thread does is prove it is
+	 * running by draining what boot left behind.
+	 */
+	printk_flush();
+	log_sync = false;
+
+	for (;;) {
+		wait_event(&log_wq, log_head != log_tail);
+		printk_flush();
+
+		if (log_dropped != reported) {
+			const char *m = "[LOG] ring overflowed, characters lost\r\n";
+
+			reported = log_dropped;
+			while (*m)
+				uart_putchar(*m++);
+		}
+	}
+}
+
+/**
+ * klog_init() - start the log thread
+ *
+ * Must run after init exists (so the thread has a parent) and before the first
+ * schedule(). Until the thread first runs, printk stays synchronous, so a
+ * failure here costs latency and nothing else.
+ */
+void klog_init(void)
+{
+	struct task_struct *t;
+
+	init_waitqueue_head(&log_wq);
+
+	t = task_create(klog_thread, NULL, DEFAULT_PRIO, "klogd");
+	if (!t) {
+		printk("[LOG] cannot start klogd - console stays synchronous\n");
+		return;
+	}
+	enqueue_task(&runqueue, t);
 }
 
 /*
