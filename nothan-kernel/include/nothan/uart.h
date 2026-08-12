@@ -71,4 +71,8 @@ void uart_putchar(int c);
 int  console_write(const char *buf, size_t count);
 void console_puts(const char *s);
 
+/* Empty the console ring synchronously.  For panic() only — see the comment
+ * on the definition. */
+void console_flush_panic(void);
+
 #endif /* _UART_H */

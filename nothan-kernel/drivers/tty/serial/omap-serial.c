@@ -98,19 +98,9 @@ static int uart_inst_read(struct uart_inst *u, char *buf, size_t count)
 }
 
 /*
- * The single point where a multi-byte run reaches a UART.
- *
- * Masking lives here rather than at each caller because "a write() call's
- * bytes are not interleaved with another's" is a property of the device, not
- * something three separate call sites should each remember to arrange.  Before
- * this, printk masked, /dev/ttyS0 did not, and the fd=1 path in sys_writefile
- * did not either — so a userspace line could be cut in half by a kernel log
- * line, which is how "opene[sd] starting / d" ended up in a boot log.
- *
- * XXX Same latency caveat as printk: uart_tx_char() spins on the TX register,
- * so at 115200 baud this masks for ~87 us per character.  Correct output is
- * worth that for now; roadmap Phase 2 moves the draining somewhere preemptible
- * and this mask shrinks to just the buffer copy.
+ * Multi-byte write to a non-console UART.  Masked so one write's bytes are not
+ * interleaved with another's.  The console does not use this — see the ring
+ * below, which gets the same atomicity without the latency.
  */
 static int uart_inst_write(struct uart_inst *u, const char *buf, size_t count)
 {
@@ -123,39 +113,155 @@ static int uart_inst_write(struct uart_inst *u, const char *buf, size_t count)
 	return (int)count;
 }
 
-/**
- * console_write() - emit a raw byte run to the console UART, atomically
- * @buf: bytes to send
- * @count: how many
+/* ------------------------------------------------------------------
+ * Console ring
  *
- * For callers that already hold a complete message, such as the fd=1 path in
- * sys_writefile().
- */
-int console_write(const char *buf, size_t count)
-{
-	return uart_inst_write(&uarts[0], buf, count);
-}
+ * Transmitting a character means spinning on the TX-holding register, about
+ * 87 us at 115200 baud.  Doing that with interrupts masked — which is what
+ * "one line at a time, atomically" used to require — put a 5 ms hole in
+ * interrupt latency for every 60-character log line.  That is half the audio
+ * period this system is eventually meant to hold, and it would sit inside
+ * every microsecond-scale measurement Phase 3 wants to make.
+ *
+ * So separate the two things that were tangled together.  Ordering is decided
+ * when the bytes enter the ring, under a mask that lasts a few instructions.
+ * Transmission happens afterwards with interrupts enabled, and a single-drainer
+ * flag keeps exactly one caller pulling from the ring at a time, so the bytes
+ * still leave in the order they arrived.
+ *
+ * The caller still waits for the UART — this is not asynchronous output yet,
+ * that needs the TX interrupt — but it waits interruptibly, which is the part
+ * that mattered.
+ *
+ * KNOWN LIMITATION, and the reason the TX interrupt is the next step: the
+ * drainer now holds its flag across a preemption point, because interrupts are
+ * on while it waits on the UART.  If it is descheduled mid-drain, everything
+ * appended after that sits in the ring until it is scheduled again.  Output is
+ * delayed, never lost or reordered — log_drain() cannot block, so the drainer
+ * always comes back.  The one case that does not recover is a task killed
+ * while draining, which strands the flag and silences the console.  Moving the
+ * draining into the TX interrupt removes the flag and the hazard with it.
+ * ------------------------------------------------------------------ */
 
-/**
- * console_puts() - emit a NUL-terminated string to the console, atomically
- * @s: string to send; bare newlines are expanded to CR LF
- *
- * printk()'s output path.  The expansion happens inside the same masked
- * region as the transmission, so a line and its line ending cannot be
- * separated by anything else reaching the console.
+#define LOG_BUF_SIZE	4096u			/* power of two */
+#define LOG_BUF_MASK	(LOG_BUF_SIZE - 1u)
+
+static char log_buf[LOG_BUF_SIZE];
+static volatile unsigned int log_head;		/* producers append here */
+static volatile unsigned int log_tail;		/* the drainer consumes here */
+static volatile int log_draining;		/* exactly one drainer at a time */
+static volatile unsigned int log_dropped;	/* bytes lost to a full ring */
+
+/*
+ * Append under the mask.  On overflow the *new* text is dropped rather than
+ * the old: a drainer may be part-way through the buffer with interrupts on,
+ * and moving the tail out from under it would corrupt the output it is in the
+ * middle of producing.  Losing the newest bytes is also the lesser evil for a
+ * log that fills because something is spewing.
  */
-void console_puts(const char *s)
+static void log_put(const char *buf, size_t count, int expand_nl)
 {
-	struct uart_inst *u = &uarts[0];
 	unsigned long flags = local_irq_save();
+	size_t i;
 
-	for (const char *p = s; *p; p++) {
-		if (*p == '\n')
-			uart_tx_char(u->base, '\r');
-		uart_tx_char(u->base, (unsigned char)*p);
+	for (i = 0; i < count; i++) {
+		char c = buf[i];
+		unsigned int need = (expand_nl && c == '\n') ? 2u : 1u;
+
+		if (LOG_BUF_SIZE - (log_head - log_tail) < need) {
+			log_dropped += (unsigned int)(count - i);
+			break;
+		}
+
+		if (need == 2u)
+			log_buf[log_head++ & LOG_BUF_MASK] = '\r';
+		log_buf[log_head++ & LOG_BUF_MASK] = c;
 	}
 
 	local_irq_restore(flags);
+}
+
+/*
+ * Push the ring out to the wire.  The mask covers only the index update; the
+ * ~87 us spent waiting on the UART for each character runs with interrupts
+ * enabled, which is the whole point.
+ */
+static void log_drain(void)
+{
+	unsigned long flags;
+
+	flags = local_irq_save();
+	if (log_draining) {
+		/* Someone else is already emptying it, and will pick up what we
+		 * just appended.  Ordering is preserved either way. */
+		local_irq_restore(flags);
+		return;
+	}
+	log_draining = 1;
+	local_irq_restore(flags);
+
+	for (;;) {
+		unsigned int dropped;
+		char c;
+
+		flags = local_irq_save();
+		if (log_head == log_tail) {
+			dropped = log_dropped;
+			log_dropped = 0;
+			log_draining = 0;
+			local_irq_restore(flags);
+
+			if (dropped)
+				printk("[log] %u bytes dropped (ring full)\n",
+				       dropped);
+			return;
+		}
+		c = log_buf[log_tail++ & LOG_BUF_MASK];
+		local_irq_restore(flags);
+
+		uart_tx_char(uarts[0].base, (unsigned char)c);
+	}
+}
+
+/**
+ * console_write() - queue a raw byte run for the console
+ * @buf: bytes to send
+ * @count: how many
+ */
+int console_write(const char *buf, size_t count)
+{
+	log_put(buf, count, 0);
+	log_drain();
+	return (int)count;
+}
+
+/**
+ * console_puts() - queue a NUL-terminated string, expanding newlines to CR LF
+ * @s: string to send
+ */
+void console_puts(const char *s)
+{
+	size_t len = 0;
+
+	while (s[len])
+		len++;
+
+	log_put(s, len, 1);
+	log_drain();
+}
+
+/**
+ * console_flush_panic() - empty the ring when the system is dying
+ *
+ * panic() runs with interrupts masked and nothing else will ever run again, so
+ * a drainer flag left set by whoever was interrupted would strand the tail of
+ * the log — the part nearest the failure, which is the part worth having.
+ * Clear it and push everything out synchronously.
+ */
+void console_flush_panic(void)
+{
+	log_draining = 0;
+	log_drain();
 }
 
 /* ------------------------------------------------------------------ */
@@ -175,7 +281,9 @@ static int ttyS0_read(struct file *file, char *buf, size_t count)
 static int ttyS0_write(struct file *file, const char *buf, size_t count)
 {
 	(void)file;
-	return uart_inst_write(&uarts[0], buf, count);
+	/* Through the ring, like every other console writer — bypassing it
+	 * would put these bytes on the wire out of order with the rest. */
+	return console_write(buf, count);
 }
 
 static int ttyS0_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
@@ -320,6 +428,12 @@ device_initcall(omap_uart_init);
 /* Console helpers (UART0) — used by printk() and sys_read(fd 0)        */
 /* ------------------------------------------------------------------ */
 
+/*
+ * Direct, unbuffered, bypasses the ring.  Only for paths that must not depend
+ * on the ring being in a sane state; anything ordinary belongs in
+ * console_write()/console_puts() or its bytes will appear out of order with
+ * everything else on the console.
+ */
 void uart_putchar(int c)
 {
 	uart_tx_char(UART_BASE, c);

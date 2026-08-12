@@ -17,6 +17,7 @@
 #include <nothan/printk.h>
 #include <nothan/sched.h>
 #include <nothan/mm.h>
+#include <nothan/uart.h>
 
 /*
  * The virtual memory map, in the order mmu_init() installs it — later entries
@@ -160,6 +161,9 @@ void panic(const char *fmt, ...)
 	printk("  %s\n", buf);
 	panic_dump_tasks();
 	printk("=== halted ===\n");
+
+	/* Nothing will ever run to drain the ring after this. */
+	console_flush_panic();
 
 	while (1)
 		;
