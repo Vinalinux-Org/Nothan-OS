@@ -16,6 +16,7 @@
 #include <nothan/fs.h>
 
 extern void mmu_log_config(void);
+extern void mmu_drop_idmap(void);
 extern void omap_intc_init(void);
 extern void cache_bench(void);
 extern void stress_start(void);
@@ -94,6 +95,13 @@ static void fat_write_selftest(void)
 
 void kernel_main(void)
 {
+	/*
+	 * First thing: take away the boot-time identity map.  We are running
+	 * from the kernel VA now, nothing needs the physical alias, and leaving
+	 * it turns a whole class of pointer corruption into silent success.
+	 */
+	mmu_drop_idmap();
+
 	printk("[BOOT] page_alloc_init\n");
 	page_alloc_init();
 
@@ -205,6 +213,13 @@ void kernel_main(void)
 		volatile unsigned long *bad =
 			(volatile unsigned long *)((unsigned long)&runqueue &
 						   ~0x40000000UL);
+		/*
+		 * With the identity map gone this address is nowhere.  The
+		 * first attempt at this test read it successfully, because the
+		 * boot identity map still parked physical DDR right here — the
+		 * test failed to fault, which is how that leftover mapping was
+		 * found.
+		 */
 
 		/*
 		 * Interrupts stay masked.  An earlier version enabled them here

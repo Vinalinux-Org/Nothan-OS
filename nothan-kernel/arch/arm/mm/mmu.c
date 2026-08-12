@@ -71,7 +71,14 @@ void mmu_init(void)
 		    MT_DEVICE | PMD_SECT_DOMAIN(DOMAIN_IO) |
 		    PMD_SECT_AP_RW | PMD_SECT_XN);
 
-	/* Identity map for .idmap.text -- use phys addresses. */
+	/*
+	 * Identity map for .idmap.text -- use phys addresses.
+	 *
+	 * Only needed for the few instructions between "MMU on" and the jump to
+	 * the virtual address: without it the code executing at that moment
+	 * would vanish from under itself.  mmu_drop_idmap() takes it away as
+	 * soon as we are running from the kernel VA — see the reasoning there.
+	 */
 	unsigned int i = ((u32)&__idmap_start - MMU_OFFSET) >> 20;
 	while (i <= (((u32)&__idmap_end - MMU_OFFSET) >> 20)) {
 		map_section(pgd, i << 20, i << 20,
@@ -82,6 +89,42 @@ void mmu_init(void)
 	dsb();
 
 	__turn_mmu_on(pgd_phys);
+}
+
+/**
+ * mmu_drop_idmap() - remove the boot-time identity mapping
+ *
+ * Call once, from the virtual address space, after mmu_init() has handed
+ * control to kernel_main.
+ *
+ * Leaving it in place is not free.  It parks the first megabyte of physical
+ * DDR at VA 0x80000000, which is a kernel VA with bit 30 cleared — so a
+ * pointer that loses that one bit reads the correct data through the wrong
+ * mapping and nothing complains.  That is precisely the corruption class
+ * design-philosophy.md §1 wants to fail loudly, quietly succeeding instead.
+ * It was found by a deliberate fault test that refused to fault.
+ *
+ * It is also the same physical memory reachable through two virtual addresses
+ * with independent cache state, which ARM tells you not to do.
+ */
+void mmu_drop_idmap(void)
+{
+	u32 *pgd = &__pgd_start;	/* virtual — we are past the switch */
+	unsigned int i = ((u32)&__idmap_start - MMU_OFFSET) >> 20;
+	unsigned int last = ((u32)&__idmap_end - MMU_OFFSET) >> 20;
+
+	while (i <= last)
+		pgd[i++] = 0;
+
+	dsb();
+	__asm__ __volatile__("mcr p15, 0, %0, c8, c7, 0"	/* TLBIALL */
+			     : : "r" (0) : "memory");
+	dsb();
+	isb();
+
+	printk("[MMU] identity map dropped (VA 0x%08lx..0x%08lx)\n",
+	       (unsigned long)(((u32)&__idmap_start - MMU_OFFSET) & ~0xFFFFFu),
+	       (unsigned long)(((((u32)&__idmap_end - MMU_OFFSET) >> 20) << 20) + 0xFFFFFu));
 }
 
 /**
