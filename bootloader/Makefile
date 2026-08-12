@@ -44,6 +44,8 @@ C_SRCS := $(SRC_DIR)/main.c \
           $(SRC_DIR)/clock.c \
           $(SRC_DIR)/ddr.c \
           $(SRC_DIR)/mmc.c \
+          $(SRC_DIR)/i2c.c \
+          $(SRC_DIR)/pmic.c \
           $(SRC_DIR)/utils.c
 
 # Object files

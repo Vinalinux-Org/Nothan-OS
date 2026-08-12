@@ -104,6 +104,17 @@ void bootloader_main(void)
 
 	uart_puts("[BOOT] NothanOS Bootloader — BeagleBone Black (AM335x)\r\n");
 
+	/*
+	 * Voltage before frequency.  clock_init() left the MPU at 600 MHz, the
+	 * operating point the power-on rail supports.  Going faster is allowed
+	 * only after the PMIC confirms the higher rail — see pmic.c.  If it
+	 * cannot, the board simply stays at 600 MHz and says so, which is slow
+	 * but correct; the alternative is a CPU that quietly computes wrong
+	 * answers.
+	 */
+	if (pmic_set_mpu_1v325() == 0)
+		clock_mpu_set_1ghz();
+
 	/* Read back actual DPLL config and calculate real frequencies */
 	{
 		uint32_t mn, m, n, m2, freq_mhz;

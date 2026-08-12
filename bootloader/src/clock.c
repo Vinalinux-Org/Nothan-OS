@@ -54,12 +54,49 @@ static void dpll_lock(uint32_t clkmode, uint32_t idlest)
 		;
 }
 
-static void config_mpu_pll(void)
+/*
+ * MPU frequency is capped at OPP100 (600 MHz) until the PMIC is programmed.
+ *
+ * VDD_MPU has to match the operating point, and nothing here talks to the
+ * TPS65217 yet, so the rail stays at its power-on default of 1.100 V.  That
+ * is the voltage for OPP100; 1 GHz (OPP NitroTurbo) needs 1.325 V and a
+ * higher USB input current limit.  Running the PLL at 1 GHz on 1.100 V is
+ * roughly 17% under the required rail: the part still boots, but it
+ * miscomputes under load — single-bit errors, data aborts at unrelated PCs,
+ * the same image booting one time and dying the next.
+ *
+ *   MPU = M / (N+1) * 24 MHz / M2
+ *   OPP100:  M=25,  N=0, M2=1  ->  600 MHz  (needs 1.100 V)  <- here
+ *   OPP NT:  M=125, N=2, M2=1  -> 1000 MHz  (needs 1.325 V)
+ *
+ * Raise this only together with the PMIC work, and in that order: voltage
+ * first, then frequency.
+ */
+static void set_mpu_pll(uint32_t m, uint32_t n)
 {
 	dpll_bypass(CM_CLKMODE_DPLL_MPU, CM_IDLEST_DPLL_MPU);
-	dpll_set_mn(CM_CLKSEL_DPLL_MPU, 125, 2);
+	dpll_set_mn(CM_CLKSEL_DPLL_MPU, m, n);
 	dpll_set_div(CM_DIV_M2_DPLL_MPU, 1);
 	dpll_lock(CM_CLKMODE_DPLL_MPU, CM_IDLEST_DPLL_MPU);
+}
+
+/* Boot at the operating point the power-on rail already supports. */
+static void config_mpu_pll(void)
+{
+	set_mpu_pll(25, 0);		/* 24 * 25 / 1 / 1 = 600 MHz */
+}
+
+/**
+ * clock_mpu_set_1ghz() - move the MPU to OPP NitroTurbo
+ *
+ * Only legal once VDD_MPU actually reads back as 1.325 V — see pmic.c for why
+ * running here on the default 1.100 V rail produces a CPU that miscomputes
+ * instead of one that fails cleanly.  Call pmic_set_mpu_1v325() first and
+ * honour its return value.
+ */
+void clock_mpu_set_1ghz(void)
+{
+	set_mpu_pll(125, 2);		/* 24 * 125 / 3 / 1 = 1000 MHz */
 }
 
 static void config_core_pll(void)

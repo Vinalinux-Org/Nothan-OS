@@ -8,6 +8,10 @@ void panic(const char *msg);
 
 void clock_domains_early_init(void);
 void clock_init(void);
+void clock_mpu_set_1ghz(void);
+
+/* Returns 0 only if the PMIC read back 1.325 V on VDD_MPU. */
+int pmic_set_mpu_1v325(void);
 
 void uart_init(void);
 void uart_putc(char c);
