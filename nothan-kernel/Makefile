@@ -30,6 +30,7 @@ OBJS += $(BUILD_DIR)/kernel/irq/irq_core.o
 OBJS += $(BUILD_DIR)/drivers/tty/serial/omap-serial.o
 OBJS += $(BUILD_DIR)/drivers/clocksource/timer-ti-dm.o
 OBJS += $(BUILD_DIR)/kernel/printk.o
+OBJS += $(BUILD_DIR)/kernel/panic.o
 OBJS += $(BUILD_DIR)/kernel/cachebench.o
 OBJS += $(BUILD_DIR)/kernel/stress.o
 OBJS += $(BUILD_DIR)/kernel/time/delay.o

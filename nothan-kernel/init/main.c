@@ -193,6 +193,25 @@ void kernel_main(void)
 	/* Interrupts are still masked here, same as the spawns above. */
 	stress_start();
 
+#if CONFIG_PANIC_TEST
+	/*
+	 * Read a kernel pointer with bit 30 knocked out: 0xC00xxxxx becomes
+	 * 0x800xxxxx, which is a physical address the kernel never maps.  This
+	 * is the historical failure from Documentation/kernel-roadmap.md
+	 * §1.1.1, reproduced on purpose so the dump can be checked against a
+	 * known answer.
+	 */
+	{
+		volatile unsigned long *bad =
+			(volatile unsigned long *)((unsigned long)&runqueue &
+						   ~0x40000000UL);
+		local_irq_enable();
+		printk("[PANIC-TEST] reading 0x%08lx (kernel VA minus bit 30)\n",
+		       (unsigned long)bad);
+		printk("[PANIC-TEST] value=%lu\n", *bad);
+	}
+#endif
+
 	printk("[KERN] NothanOS started\n");
 
 	/*

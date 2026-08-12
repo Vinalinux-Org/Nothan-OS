@@ -82,6 +82,17 @@
  */
 #define CONFIG_STRESS_TEST	0
 
+/*
+ * Deliberately crash at the end of boot to exercise the panic path.
+ *
+ * A crash handler that has never crashed is not a handler, it is a guess.  The
+ * fault it triggers is not arbitrary either: it reads a kernel address with
+ * bit 30 cleared, which is exactly the corruption an undervolted CPU produced
+ * for a whole day of this project before anything could say so.  If the dump
+ * names that bit, the machine can now explain in one line what took hours.
+ */
+#define CONFIG_PANIC_TEST	1
+
 #if CONFIG_GUI && !CONFIG_VIDEO
 #error "CONFIG_GUI requires CONFIG_VIDEO"
 #endif
