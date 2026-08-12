@@ -52,6 +52,39 @@ static struct uart_inst uarts[] = {
 
 static unsigned int uart_current_baud = 115200;	/* console (UART0) */
 
+#define LOG_BUF_SIZE	4096u			/* power of two */
+#define LOG_BUF_MASK	(LOG_BUF_SIZE - 1u)
+
+static char log_buf[LOG_BUF_SIZE];
+static volatile unsigned int log_head;		/* producers append here */
+static volatile unsigned int log_tail;		/* the drainer consumes here */
+static volatile int log_draining;		/* polled path: one drainer at a time */
+static volatile unsigned int log_dropped;	/* bytes lost to a full ring */
+
+/*
+ * Once the console UART's interrupt is live, the ring empties itself from the
+ * TX handler and no caller ever waits on the wire.  Before that — and there is
+ * a lot of boot before that — there is nobody to do it, so writers fall back
+ * to draining by polling.
+ */
+static volatile int log_irq_ready;	/* TX interrupt usable */
+static volatile int log_tx_armed;	/* THR_IT enabled; the ISR owns the ring */
+
+#define TX_BURST	32u		/* chars pushed per TX interrupt */
+
+/* Arm the TX interrupt if there is work and it is not already running.
+ * Caller must hold the interrupt mask. */
+static void log_tx_arm_locked(void)
+{
+	if (!log_irq_ready || log_tx_armed || log_head == log_tail)
+		return;
+
+	log_tx_armed = 1;
+	mmio_write32(uarts[0].base + UART_IER,
+		     mmio_read32(uarts[0].base + UART_IER) | IER_THR_IT);
+}
+
+
 /* ------------------------------------------------------------------ */
 /* RX ring (single-producer ISR / single-consumer read) + polled TX    */
 /* ------------------------------------------------------------------ */
@@ -72,6 +105,33 @@ static void uart_irq_handler(unsigned int irq)
 		if (next != u->rx_tail) {
 			u->rx_buf[u->rx_head] = c;
 			u->rx_head = next;
+		}
+	}
+
+	/*
+	 * Console TX: the transmitter has room, so hand it more of the log
+	 * ring.  This is the whole point of the exercise — the bytes leave
+	 * while everything else runs, and no writer ever waits on the wire.
+	 *
+	 * Up to TX_BURST at a time because the writes themselves are cheap
+	 * register stores into a 64-byte FIFO; it is the waiting that used to
+	 * cost, and there is none here.  Fewer per interrupt would just mean
+	 * more interrupts for the same bytes.
+	 */
+	if (u == &uarts[0] && log_tx_armed &&
+	    (mmio_read32(u->base + UART_LSR) & LSR_THRE)) {
+		unsigned int n;
+
+		for (n = 0; n < TX_BURST && log_head != log_tail; n++)
+			mmio_write32(u->base + UART_THR,
+				     log_buf[log_tail++ & LOG_BUF_MASK]);
+
+		if (log_head == log_tail) {
+			/* Nothing left — stop the interrupt, or it re-fires
+			 * forever on an empty transmitter. */
+			log_tx_armed = 0;
+			mmio_write32(u->base + UART_IER,
+				     mmio_read32(u->base + UART_IER) & ~IER_THR_IT);
 		}
 	}
 }
@@ -129,28 +189,17 @@ static int uart_inst_write(struct uart_inst *u, const char *buf, size_t count)
  * flag keeps exactly one caller pulling from the ring at a time, so the bytes
  * still leave in the order they arrived.
  *
- * The caller still waits for the UART — this is not asynchronous output yet,
- * that needs the TX interrupt — but it waits interruptibly, which is the part
- * that mattered.
+ * Draining happens in the TX interrupt.  A writer appends and returns; the
+ * transmitter asks for more when it has room, and the handler feeds it up to
+ * TX_BURST characters at a time.  Nobody waits on the wire.
  *
- * KNOWN LIMITATION, and the reason the TX interrupt is the next step: the
- * drainer now holds its flag across a preemption point, because interrupts are
- * on while it waits on the UART.  If it is descheduled mid-drain, everything
- * appended after that sits in the ring until it is scheduled again.  Output is
- * delayed, never lost or reordered — log_drain() cannot block, so the drainer
- * always comes back.  The one case that does not recover is a task killed
- * while draining, which strands the flag and silences the console.  Moving the
- * draining into the TX interrupt removes the flag and the hazard with it.
+ * Before the console interrupt is live there is nobody to do that, and a great
+ * deal of boot happens before then, so writers fall back to draining by
+ * polling — the same loop, with a flag keeping it to one drainer.  panic()
+ * takes the ring back the same way, since the handler will never run again and
+ * the tail of the log is the part worth having.
+ *
  * ------------------------------------------------------------------ */
-
-#define LOG_BUF_SIZE	4096u			/* power of two */
-#define LOG_BUF_MASK	(LOG_BUF_SIZE - 1u)
-
-static char log_buf[LOG_BUF_SIZE];
-static volatile unsigned int log_head;		/* producers append here */
-static volatile unsigned int log_tail;		/* the drainer consumes here */
-static volatile int log_draining;		/* exactly one drainer at a time */
-static volatile unsigned int log_dropped;	/* bytes lost to a full ring */
 
 /*
  * Append under the mask.  On overflow the *new* text is dropped rather than
@@ -177,6 +226,10 @@ static void log_put(const char *buf, size_t count, int expand_nl)
 			log_buf[log_head++ & LOG_BUF_MASK] = '\r';
 		log_buf[log_head++ & LOG_BUF_MASK] = c;
 	}
+
+	/* Same masked region as the append, so the ISR cannot finish and
+	 * disarm itself between us adding bytes and noticing we must arm. */
+	log_tx_arm_locked();
 
 	local_irq_restore(flags);
 }
@@ -231,7 +284,8 @@ static void log_drain(void)
 int console_write(const char *buf, size_t count)
 {
 	log_put(buf, count, 0);
-	log_drain();
+	if (!log_irq_ready)
+		log_drain();
 	return (int)count;
 }
 
@@ -247,7 +301,8 @@ void console_puts(const char *s)
 		len++;
 
 	log_put(s, len, 1);
-	log_drain();
+	if (!log_irq_ready)
+		log_drain();
 }
 
 /**
@@ -260,7 +315,13 @@ void console_puts(const char *s)
  */
 void console_flush_panic(void)
 {
+	/* Interrupts are masked and the TX handler will never run again, so
+	 * take the ring back and push it out by hand. */
+	log_irq_ready = 0;
+	log_tx_armed = 0;
 	log_draining = 0;
+	mmio_write32(uarts[0].base + UART_IER,
+		     mmio_read32(uarts[0].base + UART_IER) & ~IER_THR_IT);
 	log_drain();
 }
 
@@ -382,6 +443,20 @@ static void uart_hw_init(struct uart_inst *u)
 
 	request_irq(u->irq, uart_irq_handler);
 	intc_enable_irq(u->irq);
+
+	/*
+	 * From here the console can empty its own ring.  Set this only for the
+	 * console port, and only after the interrupt is actually live — every
+	 * printk before this point still drains by polling, and there are a lot
+	 * of them.
+	 */
+	if (u == &uarts[0]) {
+		unsigned long flags = local_irq_save();
+
+		log_irq_ready = 1;
+		log_tx_arm_locked();
+		local_irq_restore(flags);
+	}
 }
 
 static int uart_probe(struct platform_device *pdev)

@@ -19,6 +19,7 @@
 #define UART_MDR1		0x20	/* mode: 0x07=disabled (reset), 0x00=UART 16x */
 
 #define IER_RHR_IT		(1 << 0)
+#define IER_THR_IT		(1 << 1)	/* THR empty — TRM Ch19, IER[1] */
 
 #define IIR_IT_PENDING		(1 << 0)
 
