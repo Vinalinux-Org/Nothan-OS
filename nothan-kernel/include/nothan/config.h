@@ -91,7 +91,7 @@
  * for a whole day of this project before anything could say so.  If the dump
  * names that bit, the machine can now explain in one line what took hours.
  */
-#define CONFIG_PANIC_TEST	1
+#define CONFIG_PANIC_TEST	0
 
 #if CONFIG_GUI && !CONFIG_VIDEO
 #error "CONFIG_GUI requires CONFIG_VIDEO"
