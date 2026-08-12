@@ -80,7 +80,7 @@
  * around a shared structure changes — booting and typing ls proves very
  * little about mutual exclusion.
  */
-#define CONFIG_STRESS_TEST	0
+#define CONFIG_STRESS_TEST	1
 
 /*
  * Deliberately crash at the end of boot to exercise the panic path.
