@@ -205,7 +205,15 @@ void kernel_main(void)
 		volatile unsigned long *bad =
 			(volatile unsigned long *)((unsigned long)&runqueue &
 						   ~0x40000000UL);
-		local_irq_enable();
+
+		/*
+		 * Interrupts stay masked.  An earlier version enabled them here
+		 * and the test silently never ran: kernel_main executes in the
+		 * idle task's context, so letting the tick through hands the CPU
+		 * to the shell — which busy-polls the UART at a higher priority
+		 * and never yields it back.  A data abort needs no interrupts
+		 * anyway.
+		 */
 		printk("[PANIC-TEST] reading 0x%08lx (kernel VA minus bit 30)\n",
 		       (unsigned long)bad);
 		printk("[PANIC-TEST] value=%lu\n", *bad);
