@@ -81,7 +81,10 @@ static volatile unsigned long jiffies;
 #define CM_PER_TIMER3_CLKCTRL	0xF0E00084
 #define CM_DPLL_CLKSEL_TIMER3	0xF0E0050C
 
-#define TSC_CYCLES_PER_US	24u	/* 24 MHz M_OSC */
+/* TSC_CYCLES_PER_US lives in nothan/timer.h — udelay() needs it too. */
+
+/* False until tsc_probe() has the counter running; see clocksource_ready(). */
+static volatile int tsc_running;
 
 /*
  * The hardware counter is 32-bit and wraps every 2^32 / 24 MHz ~= 179 s.
@@ -159,6 +162,12 @@ u32 cycles_to_us(u32 cycles)
 	return cycles / TSC_CYCLES_PER_US;
 }
 
+/** clocksource_ready() - true once DMTimer3 is actually counting */
+int clocksource_ready(void)
+{
+	return tsc_running;
+}
+
 /*
  * tsc_probe - bring up DMTimer3 as a free-running counter
  *
@@ -226,17 +235,24 @@ static void tsc_probe(void)
 	timeout = 10000;
 	while ((mmio_read32(DMTIMER3_BASE + TWPS) & TWPS_W_PEND_TCLR) && timeout--)
 		;
+
+	/* Last: from here on udelay() may busy-wait on this counter. */
+	tsc_running = 1;
 }
 
 /*
- * tsc_selftest - prove the counter advances, and check udelay's calibration
+ * tsc_selftest - prove the counter advances and the delay path terminates
  *
- * udelay() is an uncalibrated busy loop assuming a 1 GHz core and ~2 cycles
- * per iteration (see kernel/time/delay.c).  Nobody has ever verified that
- * assumption on real silicon.  Timing udelay(1000) against real hardware
- * cycles tests both the new clocksource and that assumption at once:
- * a result near 1000 us means the core really is at 1 GHz, while roughly
- * double would mean it is running at half that.
+ * This used to double as a check on udelay()'s calibration, back when udelay
+ * counted instructions: a result near 1000 us meant the core really was at
+ * 1 GHz, and roughly double meant it was not.  That is how the undervolt and,
+ * later, a cache-line alignment effect were both spotted.
+ *
+ * udelay() now waits on this very counter, so timing it here is circular and
+ * the number will always come out near 1000.  What it still proves is worth
+ * the two lines: the counter advances monotonically, the seqlock read returns,
+ * and udelay()'s 64-bit arithmetic reaches its target instead of overflowing
+ * or spinning forever.  A wrong TSC_CYCLES_PER_US would show up here too.
  */
 static void tsc_selftest(void)
 {
@@ -251,7 +267,7 @@ static void tsc_selftest(void)
 
 	printk("[TSC] DMTimer3 @ 24 MHz free-running, 1 us = %u cycles\n",
 	       TSC_CYCLES_PER_US);
-	printk("[TSC] self-test: udelay(1000) took %lu cycles = %lu us (expect ~1000)\n",
+	printk("[TSC] delay path: udelay(1000) measured %lu cycles = %lu us\n",
 	       elapsed, cycles_to_us(elapsed));
 }
 

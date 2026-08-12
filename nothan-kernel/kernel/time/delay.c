@@ -10,11 +10,32 @@
 #include <nothan/timer.h>
 #include <asm/irqflags.h>
 
-/**
- * udelay() - busy-wait loop using ARM subs/bne
- * @usec: number of microseconds to delay
+/*
+ * Counting instructions is not a way to measure time.
  *
- * Cortex-A8 @ 1 GHz: subs + bne ~ 2 cycles -> ~500 loops per us.
+ * This used to be a calibrated loop: 500 iterations of subs/bne per
+ * microsecond, on the assumption of a 1 GHz core and two cycles per
+ * iteration.  Both halves of that were wrong in ways that only showed up once
+ * there was a real clock to check against.
+ *
+ * The core is not always at 1 GHz — the bootloader stays at 600 MHz when the
+ * PMIC does not confirm the higher rail — which alone makes every delay 1.67x
+ * too long or, worse in a future configuration, too short.
+ *
+ * And the loop is two instructions, so whether it straddles an instruction
+ * cache line depends on where the linker happens to place it.  Measured on
+ * hardware, the same source came out at 24019 cycles with the loop inside one
+ * line and 36026 with it across two — a 50% swing caused by editing an
+ * unrelated file.  Every driver that waits on hardware with udelay() had its
+ * timing quietly change with each rebuild, and a layout that ran *faster*
+ * than the calibration assumed would have waited less than the datasheet
+ * requires, which is the kind of fault that shows up as an occasional bad
+ * register read rather than as an error.
+ *
+ * So wait on the clocksource instead: 24 MHz regardless of what the CPU is
+ * doing, unaffected by code placement.  Granularity is one MMIO read of
+ * DMTimer3, on the order of 0.1-0.2 us, so udelay(1) overshoots.  That is the
+ * right direction to be wrong in — callers need "at least this long".
  */
 #define LOOPS_PER_US	500
 
@@ -29,9 +50,30 @@ static void __delay(unsigned long loops)
 	);
 }
 
+/**
+ * udelay() - busy-wait for at least @usec microseconds
+ * @usec: minimum delay in microseconds
+ */
 void udelay(unsigned long usec)
 {
-	__delay(usec * LOOPS_PER_US);
+	u64 start, want;
+
+	/*
+	 * Before the clocksource is running, timer_cycles() keeps returning the
+	 * same value and a wait on it would never finish.  Early boot gets the
+	 * old calibrated loop — inaccurate, but the init sequences that run
+	 * this early use generous margins, and there is nothing better to use.
+	 */
+	if (!clocksource_ready()) {
+		__delay(usec * LOOPS_PER_US);
+		return;
+	}
+
+	start = timer_cycles();
+	want = (u64)usec * TSC_CYCLES_PER_US;
+
+	while (timer_cycles() - start < want)
+		;
 }
 
 /**
