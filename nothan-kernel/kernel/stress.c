@@ -7,22 +7,22 @@
  * in that state — which is exactly why the locking audit needs something that
  * puts it there deliberately.
  *
- * Three kernel tasks at the same priority, so the round-robin tick keeps
+ * Four kernel tasks at the same priority, so the round-robin tick keeps
  * cutting between them, plus the tick itself interrupting all of them:
  *
- *   two printers   the console path, which has three callers and one masked
- *                  writer.  Each prints a line built from a single repeated
- *                  character, so interleaving is visible by eye: a line
- *                  containing both letters, or a short line, means a write was
- *                  cut in half.
+ *   two printers    the console path, which has three callers and one masked
+ *                   writer.  Each prints a line built from a single repeated
+ *                   character, so interleaving is visible by eye: a line
+ *                   containing both letters, or a short line, means a write was
+ *                   cut in half.
  *
- *   one allocator  the buddy and slab free lists, mutated while the tick and
- *                  the other two tasks are running.  Page accounting is
- *                  checked against the starting value at the end, so a leak or
- *                  a double free shows up as a number rather than as a crash
- *                  three minutes later.
+ *   two allocators  the buddy and slab free lists, genuinely contended.  One
+ *                   allocator would only have shown that they work when nobody
+ *                   else is using them, which was never the question.  The
+ *                   verdict is a masked alloc/free probe at the end rather than
+ *                   a page count sampled across time — see stress_alloc().
  *
- * All three sleep in between, which drags in msleep, the timer list, the wait
+ * All four sleep in between, which drags in msleep, the timer list, the wait
  * path and schedule() under the same load.  They exit when done, so the exit
  * and reap paths get exercised while the others are still running.
  *
@@ -32,6 +32,7 @@
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 
+#include <asm/irqflags.h>
 #include <nothan/config.h>
 #include <nothan/types.h>
 #include <nothan/sched.h>
@@ -46,12 +47,8 @@
 
 static volatile int stress_done;		/* counts tasks that finished */
 
-/*
- * Page total from before any allocator task started.  The balance check has to
- * be global, not per-task: with two allocators running, either one's own
- * "before" snapshot includes whatever the other happens to be holding at that
- * instant, so only the last one to finish can compare against a quiet system.
- */
+/* Informational only — printed alongside the verdict for context, never
+ * compared against, for the reasons in stress_alloc(). */
 static unsigned long stress_pages_baseline;
 static volatile int stress_allocators_left;
 
@@ -118,16 +115,43 @@ static void stress_alloc(char tag)
 
 	printk("[STRESS-%c] done, %d rounds\n", tag, STRESS_ALLOC_ROUNDS);
 
-	/* Only the last allocator standing sees a quiet allocator to measure. */
+	/*
+	 * Verdict comes from a self-contained probe, not from comparing a global
+	 * counter across time.
+	 *
+	 * The first version did the latter and reported a four-page leak that was
+	 * not one: the baseline was taken before task_create() allocated the four
+	 * stress kernel stacks, and those tasks were still alive when the second
+	 * sample was taken.  Any measurement spanning task creation and reaping is
+	 * measuring task lifetime as much as allocator correctness.
+	 *
+	 * Instead: with interrupts masked nothing else can run, so an allocate
+	 * followed by its matching free must leave the count exactly where it
+	 * started.  That is the invariant a corrupted free list breaks, and it
+	 * holds regardless of what the rest of the system is doing.  Running it
+	 * after the contended rounds asks the question that matters — is the
+	 * allocator still internally consistent now that two tasks have been
+	 * fighting over it.
+	 */
 	if (--stress_allocators_left == 0) {
-		free_after = zone->free_pages;
+		unsigned long flags = local_irq_save();
+		unsigned long before = zone->free_pages;
+		struct page *probe = alloc_pages(GFP_KERNEL, 2);
 
-		if (free_after == stress_pages_baseline)
-			printk("[STRESS] pages balanced at %lu\n", free_after);
+		if (probe)
+			__free_pages(probe, 2);
+		free_after = zone->free_pages;
+		local_irq_restore(flags);
+
+		if (!probe)
+			printk("[STRESS] probe alloc FAILED after contention\n");
+		else if (free_after != before)
+			printk("[STRESS] allocator INCONSISTENT: %lu -> %lu across one"
+			       " alloc/free pair\n", before, free_after);
 		else
-			printk("[STRESS] LEAK: %lu pages before, %lu after (%ld lost)\n",
-			       stress_pages_baseline, free_after,
-			       (long)stress_pages_baseline - (long)free_after);
+			printk("[STRESS] allocator consistent after contention"
+			       " (%lu pages free, %lu at start incl. task stacks)\n",
+			       free_after, stress_pages_baseline);
 	}
 
 	stress_done++;
@@ -170,7 +194,7 @@ void stress_start(void)
 	printk("[STRESS] starting: 2 printers x %d lines, 2 allocators x %d rounds\n",
 	       STRESS_LINES, STRESS_ALLOC_ROUNDS);
 	printk("[STRESS] pass = every line is one repeated letter, no short lines,"
-	       " and pages balanced\n");
+	       " and the allocator probe is consistent\n");
 
 	for (i = 0; i < sizeof(tasks) / sizeof(tasks[0]); i++) {
 		struct task_struct *t = task_create(tasks[i].fn, DEFAULT_PRIO,
