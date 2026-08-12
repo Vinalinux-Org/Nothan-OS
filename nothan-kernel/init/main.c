@@ -4,7 +4,9 @@
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 
+#include <asm/irqflags.h>
 #include <nothan/types.h>
+#include <nothan/config.h>
 #include <nothan/printk.h>
 #include <nothan/mm.h>
 #include <nothan/slab.h>
@@ -15,6 +17,7 @@
 
 extern void mmu_log_config(void);
 extern void omap_intc_init(void);
+extern void cache_bench(void);
 extern struct task_struct *user_task_create(const char *name);
 extern struct task_struct *user_task_create_gui(void);
 extern struct task_struct *user_task_create_phone_daemon(void);
@@ -113,8 +116,8 @@ void kernel_main(void)
 	omap_intc_init();
 
 	/* Open CPU IRQ gate. INTC masks all lines so no spurious IRQs fire. */
-	printk("[BOOT] cpsie i\n");
-	__asm__ __volatile__ ("cpsie i" : : : "memory");
+	printk("[BOOT] enabling interrupts\n");
+	local_irq_enable();
 
 	printk("[BOOT] do_initcalls\n");
 	do_initcalls();        /* tda19988_init runs here as device_initcall */
@@ -134,6 +137,10 @@ void kernel_main(void)
 
 	mmu_log_config();
 
+	/* Before timer_start(): the 10 ms tick would land inside the timed
+	 * regions and inflate whichever working set happened to be running. */
+	cache_bench();
+
 	printk("[BOOT] timer_start\n");
 	timer_start();
 
@@ -142,46 +149,54 @@ void kernel_main(void)
 	 * running (10ms tick), and would otherwise preempt kernel_main into
 	 * the first enqueued task before later tasks (GUI) get created.
 	 */
-	__asm__ __volatile__ ("cpsid i" : : : "memory");
+	local_irq_disable();
 
-	/* BOOT_GUI: 1 spawns the LVGL GUI (+ shell). 0 skips it (blank screen),
-	 * useful when bringing up lower layers without the GUI on top. */
-#define BOOT_GUI 1
-#if BOOT_GUI
+	/* Which tasks exist is decided at build time — see nothan/config.h. */
+#if CONFIG_GUI
 	struct task_struct *gui = user_task_create_gui();
 	if (gui) {
 		printk("[KERN] Spawning GUI\n");
 		enqueue_task(&runqueue, gui);
 	}
+#else
+	printk("[KERN] CONFIG_GUI=0: GUI not spawned\n");
+#endif
 
+#if CONFIG_SHELL
 	struct task_struct *sh = user_task_create("shell");
 	if (sh) {
 		printk("[KERN] Spawning shell\n");
 		enqueue_task(&runqueue, sh);
 	}
-#else
-	printk("[KERN] BOOT_GUI=0: GUI not spawned\n");
 #endif
 
-	/* Modem backend — runs regardless of BOOT_GUI (talks to /dev/uart1). */
+	/* Modem backend — talks to /dev/uart1, independent of the GUI. */
+#if CONFIG_MODEM
 	struct task_struct *pd = user_task_create_phone_daemon();
 	if (pd) {
 		printk("[KERN] Spawning phone_daemon\n");
 		enqueue_task(&runqueue, pd);
 	}
+#endif
 
-	/* FAT-write backend — takes storage_write() requests off the GUI task
-	 * so a slow SD card write never blocks touch input. */
+	/* FAT-write backend — takes storage_write() requests off the foreground
+	 * task so a slow SD card write never blocks it. */
+#if CONFIG_STORAGE_DAEMON
 	struct task_struct *sd = user_task_create_storage_daemon();
 	if (sd) {
 		printk("[KERN] Spawning storage_daemon\n");
 		enqueue_task(&runqueue, sd);
 	}
+#endif
 
 	printk("[KERN] NothanOS started\n");
 
-	__asm__ __volatile__ ("cpsie i" : : : "memory");
-
+	/*
+	 * Still masked from the spawn section above, which is exactly what
+	 * schedule() wants.  kernel_main never runs again — the first task
+	 * scheduled in enables interrupts on its own entry path — so there is
+	 * nothing to restore afterwards.
+	 */
 	schedule();
 
 	/* NOTREACHED */

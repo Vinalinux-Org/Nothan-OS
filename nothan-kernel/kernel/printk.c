@@ -5,6 +5,7 @@
  */
 
 #include <stdarg.h>
+#include <asm/irqflags.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <nothan/printk.h>
@@ -180,14 +181,19 @@ int printk(const char *fmt, ...)
 	va_end(args);
 
 	/*
-	 * IRQ-off ensures the UART output is not interleaved by preemption.
-	 * Save the prior I-bit so callers that masked IRQs (e.g. kernel_main
-	 * before schedule(), task spawn loop) stay masked across printk.
+	 * Masked so one printk's characters are not interleaved with another's.
+	 *
+	 * XXX This is the worst interrupt-latency offender in the kernel and it
+	 * knowingly breaks the "keep critical sections short" rule in
+	 * asm/irqflags.h.  uart_tx_char() spins on the TX-holding register, so
+	 * at 115200 baud each character costs ~87 us and a 60-character line
+	 * masks interrupts for over 5 ms — half the audio period this system is
+	 * eventually meant to hold.  The fix is the printk ring buffer in
+	 * roadmap Phase 2: format into memory here, drain to the UART from a
+	 * context that can be preempted.  Until then, be aware that any log line
+	 * on a hot path is also a 5 ms latency spike.
 	 */
-	unsigned long cpsr_save;
-	__asm__ __volatile__ ("mrs %0, cpsr\n"
-			      "cpsid i"
-			      : "=r" (cpsr_save) : : "memory");
+	unsigned long flags = local_irq_save();
 
 	for (char *p = buf; *p; p++) {
 		if (*p == '\n')
@@ -195,9 +201,7 @@ int printk(const char *fmt, ...)
 		uart_putchar(*p);
 	}
 
-	/* Restore only if IRQs were enabled before. */
-	if (!(cpsr_save & (1u << 7)))
-		__asm__ __volatile__ ("cpsie i" : : : "memory");
+	local_irq_restore(flags);
 
 	return ret;
 }

@@ -8,6 +8,7 @@
 #include <nothan/time.h>
 #include <nothan/sched.h>
 #include <nothan/timer.h>
+#include <asm/irqflags.h>
 
 /**
  * udelay() - busy-wait loop using ARM subs/bne
@@ -77,17 +78,21 @@ void msleep(unsigned long msecs)
 	timer.data = (unsigned long)runqueue.curr;
 
 	/*
-	 * Critical section: arm timer and transition to sleep
-	 * must be atomic vs. the timer IRQ.
+	 * Arming the timer, marking ourselves asleep and giving up the CPU is
+	 * one masked region.  Previously the mask was dropped just before
+	 * schedule(), leaving exactly the window this section exists to close:
+	 * the timer could expire and msleep_callback() could re-enqueue the
+	 * task before it had actually stopped running.  schedule() returns
+	 * still masked, so nothing here needs to re-enable in between.
 	 */
-	__asm__ __volatile__ ("cpsid i" : : : "memory");
+	unsigned long flags = local_irq_save();
 
 	add_timer(&timer);
 	set_current_state(TASK_UNINTERRUPTIBLE);
 
-	__asm__ __volatile__ ("cpsie i" : : : "memory");
-
 	schedule();		/* block until timer callback wakes us */
 
 	del_timer(&timer);
+
+	local_irq_restore(flags);
 }

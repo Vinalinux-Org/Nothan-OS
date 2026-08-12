@@ -4,6 +4,7 @@
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 
+#include <asm/irqflags.h>
 #include <nothan/platform.h>
 #include <nothan/pinctrl.h>
 #include <nothan/printk.h>
@@ -186,17 +187,8 @@ static int mmc_send_cmd(uint32_t cmd, uint32_t arg, uint32_t flags)
  * masking IRQs cannot deadlock, and a healthy transfer is only ~tens of
  * microseconds.
  */
-static inline unsigned long mmc_irq_save(void)
-{
-	unsigned long flags;
-	__asm__ __volatile__("mrs %0, cpsr\n\tcpsid i" : "=r"(flags) : : "memory");
-	return flags;
-}
-
-static inline void mmc_irq_restore(unsigned long flags)
-{
-	__asm__ __volatile__("msr cpsr_c, %0" : : "r"(flags) : "memory");
-}
+#define mmc_irq_save()		local_irq_save()
+#define mmc_irq_restore(flags)	local_irq_restore(flags)
 
 static int omap_hsmmc_read_block_inner(struct gendisk *disk, u64 block, void *buf)
 {

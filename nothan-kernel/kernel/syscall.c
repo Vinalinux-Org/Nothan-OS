@@ -4,6 +4,7 @@
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 
+#include <asm/irqflags.h>
 #include <nothan/types.h>
 #include <nothan/syscall.h>
 #include <nothan/sched.h>
@@ -33,8 +34,14 @@ extern struct task_struct *user_task_create_bin(const char *name,
  */
 static long sys_yield(unsigned long a0, unsigned long a1, unsigned long a2)
 {
+	unsigned long flags;
+
 	(void)a0; (void)a1; (void)a2;
+
+	flags = local_irq_save();
 	schedule();
+	local_irq_restore(flags);
+
 	return 0;
 }
 
@@ -356,7 +363,7 @@ static long sys_reboot(unsigned long a0, unsigned long a1, unsigned long a2)
 
 	if ((int)a0 == REBOOT_HALT) {
 		printk("[SYS] Halting...\n");
-		__asm__ __volatile__("cpsid i" : : : "memory");
+		local_irq_disable();	/* halting: nobody will restore anything */
 		while (1)
 			;
 	}

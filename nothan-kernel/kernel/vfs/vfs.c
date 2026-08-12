@@ -3,6 +3,7 @@
  *
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
+#include <asm/irqflags.h>
 #include <nothan/fs.h>
 #include <nothan/devfs.h>
 #include <nothan/genhd.h>
@@ -231,9 +232,10 @@ int vfs_open(const char *pathname, int flags)
 	 * (walk_path, kmalloc, fops->open) so a preempting vfs_open in
 	 * another task cannot pick the same fd.
 	 */
-	unsigned long cpsr;
+	unsigned long irq_flags;	/* @flags is already the open() mode */
 	int fd = -1;
-	__asm__ __volatile__ ("mrs %0, cpsr\n\tcpsid i" : "=r"(cpsr) : : "memory");
+
+	irq_flags = local_irq_save();
 	for (int i = FD_FIRST; i < MAX_FDS; i++) {
 		if (!fd_table[i]) {
 			fd_table[i] = FD_RESERVED;
@@ -241,8 +243,7 @@ int vfs_open(const char *pathname, int flags)
 			break;
 		}
 	}
-	if (!(cpsr & (1u << 7)))
-		__asm__ __volatile__ ("cpsie i" : : : "memory");
+	local_irq_restore(irq_flags);
 
 	if (fd < 0) {
 		printk("[VFS] Out of file descriptors\n");

@@ -8,6 +8,7 @@
 #include <nothan/sched.h>
 #include <nothan/wait.h>
 #include <nothan/completion.h>
+#include <asm/irqflags.h>
 
 /**
  * wait_for_completion() - block until a completion is signalled
@@ -15,6 +16,8 @@
  */
 void wait_for_completion(struct completion *c)
 {
+	unsigned long flags;
+
 	/*
 	 * Boot context: scheduler initialized (sched_init done) but no real
 	 * context switch has happened yet (sched_running=false).  We cannot
@@ -27,30 +30,29 @@ void wait_for_completion(struct completion *c)
 		return;
 	}
 
-	/* Normal task context — yield while waiting. */
 	for (;;) {
-		set_current_state(TASK_UNINTERRUPTIBLE);
-
 		/*
-		 * IRQ-off closes the race between checking c->done and
-		 * adding ourselves to the wait list.  complete() may fire
-		 * from timer / IRQ context.
+		 * One masked region covers checking the count, marking
+		 * ourselves asleep, joining the wait list, and giving up the
+		 * CPU.  schedule() returns still masked (see its contract), so
+		 * there is no window anywhere in the middle for complete() to
+		 * run from an ISR against a half-linked list node.
 		 */
-		__asm__ __volatile__ ("cpsid i" : : : "memory");
+		flags = local_irq_save();
 
 		if (c->done) {
 			c->done--;
-			__asm__ __volatile__ ("cpsie i" : : : "memory");
+			local_irq_restore(flags);
 			set_current_state(TASK_RUNNING);
 			return;
 		}
 
+		set_current_state(TASK_UNINTERRUPTIBLE);
 		list_add_tail(&runqueue.curr->rt.run_list, &c->wait.task_list);
-
-		__asm__ __volatile__ ("cpsie i" : : : "memory");
 
 		schedule();
 
+		local_irq_restore(flags);
 		set_current_state(TASK_RUNNING);
 	}
 }
@@ -58,10 +60,15 @@ void wait_for_completion(struct completion *c)
 /**
  * complete() - signal a completion
  * @c: pointer to the completion structure
+ *
+ * Callable from interrupt context, which is why this uses save/restore: the
+ * previous version ended with an unconditional enable, so calling it from an
+ * ISR turned interrupts back on in the middle of that handler — nested
+ * interrupts in a kernel that is not built for them.
  */
 void complete(struct completion *c)
 {
-	__asm__ __volatile__ ("cpsid i" : : : "memory");
+	unsigned long flags = local_irq_save();
 
 	c->done++;
 
@@ -73,5 +80,5 @@ void complete(struct completion *c)
 		enqueue_task(&runqueue, p);
 	}
 
-	__asm__ __volatile__ ("cpsie i" : : : "memory");
+	local_irq_restore(flags);
 }

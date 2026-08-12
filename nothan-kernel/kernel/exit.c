@@ -4,6 +4,7 @@
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 
+#include <asm/irqflags.h>
 #include <nothan/types.h>
 #include <nothan/sched.h>
 #include <nothan/mm.h>
@@ -85,6 +86,12 @@ void do_exit(int code)
 	 * the next task's context. */
 	sched_defer_free(tsk);
 
+	/*
+	 * Mask and never restore: this task is dying, so it will not come back
+	 * from schedule() to unmask anything.  Whichever task runs next
+	 * restores its own flags, exactly as if this one had blocked.
+	 */
+	local_irq_disable();
 	schedule();
 
 	/* NOTREACHED */

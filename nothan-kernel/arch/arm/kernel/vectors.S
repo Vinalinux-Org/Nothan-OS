@@ -125,8 +125,10 @@ vector_irq:
 	cmp	r0, #0
 	beq	.Lirq_restore
 
+	@ schedule() is entered and left with interrupts masked (see its
+	@ contract in core.c), so the restore sequence below is already
+	@ protected — no re-disable needed here any more.
 	bl	schedule
-	cpsid	i			@ Re-disable interrupts for the restore sequence
 
 .Lirq_restore:
 	pop	{r0-r12, lr}		@ Restore interrupted task's registers and original lr_svc

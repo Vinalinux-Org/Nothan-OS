@@ -4,31 +4,19 @@
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 
+#include <asm/irqflags.h>
 #include <nothan/timer.h>
 #include <nothan/time.h>
 
 static LIST_HEAD(timer_head);		/* sorted by expires (ascending) */
 
 /*
- * Disable / enable IRQ helpers.  On a single core these are the only
- * mutual-exclusion needed between process context and the tick ISR.
+ * timer_head is shared between process context and the tick ISR; the kernel's
+ * one critical-section primitive covers that.  These names are kept as thin
+ * aliases so the call sites below read unchanged.
  */
-static inline unsigned long irq_save(void)
-{
-	unsigned long cpsr;
-	__asm__ __volatile__ (
-		"mrs	%0, cpsr\n"
-		"cpsid	i\n"
-		: "=r" (cpsr)
-	);
-	return cpsr;
-}
-
-static inline void irq_restore(unsigned long cpsr)
-{
-	if (!(cpsr & 0x80))
-		__asm__ __volatile__ ("cpsie i" : : : "memory");
-}
+#define irq_save()		local_irq_save()
+#define irq_restore(flags)	local_irq_restore(flags)
 
 /**
  * add_timer() - arm a one-shot timer

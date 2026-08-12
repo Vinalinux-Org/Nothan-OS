@@ -4,6 +4,7 @@
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 
+#include <asm/irqflags.h>
 #include <nothan/types.h>
 #include <nothan/sched.h>
 #include <nothan/mm.h>
@@ -53,10 +54,17 @@ static void reap_dead(void)
 static unsigned long idle_stack[IDLE_STACK_WORDS];
 static struct task_struct idle_tsk;
 
+/*
+ * The idle task owns the global interrupt state outright — nobody is waiting
+ * on a critical section it holds — so the unconditional forms are the right
+ * ones here.  WFI needs interrupts enabled to be woken by one; schedule()
+ * needs them masked.
+ */
 static void idle_main(void)
 {
 	while (1) {
 		__asm__ __volatile__ ("cpsie i\nwfi" : : : "memory");
+		local_irq_disable();
 		schedule();
 	}
 }
@@ -132,13 +140,34 @@ void sched_init(void)
 /**
  * schedule() - Pick the next task and switch to it
  *
- * The idle task is always on the runqueue, so pick_next_task()
- * never returns NULL.
+ * CONTRACT: enter with interrupts masked, return with interrupts masked.
+ *
+ * schedule() never changes the interrupt mask.  That is what lets a caller
+ * make "decide to sleep, record it, give up the CPU" one atomic step:
+ *
+ *	flags = local_irq_save();
+ *	set_current_state(TASK_UNINTERRUPTIBLE);
+ *	list_add_tail(&curr->rt.run_list, &wq->task_list);
+ *	schedule();
+ *	local_irq_restore(flags);
+ *
+ * The previous version masked on entry and unmasked on every exit, which
+ * meant a caller could not hold a critical section across it: the window
+ * between marking a task as sleeping and actually sleeping was open to the
+ * tick and to any wake_up() from an ISR, and both touch the same rt.run_list
+ * the caller was mid-way through linking.
+ *
+ * A task resumed later by another __switch_to() returns from here with
+ * interrupts still masked, exactly as it left them, and its own caller
+ * restores its own saved flags.  Freshly created tasks do not come back
+ * through here at all — they enter at task_entry, which enables interrupts
+ * itself.
+ *
+ * The idle task is always on the runqueue, so pick_next_task() never returns
+ * NULL.
  */
 void schedule(void)
 {
-	__asm__ __volatile__ ("cpsid i" : : : "memory");
-
 	reap_dead();
 
 	struct task_struct *prev = runqueue.curr;
@@ -150,7 +179,6 @@ void schedule(void)
 	if (!next) {
 		/* Should never happen — idle task is always available. */
 		runqueue.curr = NULL;
-		__asm__ __volatile__ ("cpsie i" : : : "memory");
 		return;
 	}
 
@@ -158,19 +186,14 @@ void schedule(void)
 	need_resched = 0;
 
 	/*
-	 * Keep IRQs disabled across __switch_to to prevent a timer IRQ
-	 * from firing between "ldr sp, [next]" and "ldmfd ... pc" inside
-	 * __switch_to, which would corrupt the task stack mid-switch.
-	 *
-	 * IRQs are re-enabled:
-	 *  - Here, after __switch_to returns (prev resumed after re-schedule)
-	 *  - In task_entry, for newly-created tasks (cpsie i at entry)
-	 *  - In vector_irq path: cpsid after schedule + rfefd restores CPSR
+	 * Interrupts stay masked across __switch_to: a timer IRQ landing
+	 * between "ldr sp, [next]" and "ldmfd ... pc" inside __switch_to would
+	 * corrupt the task stack mid-switch.  Under the contract above the
+	 * caller already masked them, so there is nothing to do here — which
+	 * is the point.  Whoever masked is the one who unmasks.
 	 */
-	if (prev == next) {
-		__asm__ __volatile__ ("cpsie i" : : : "memory");
+	if (prev == next)
 		return;
-	}
 
 	sched_running = true;
 
@@ -194,8 +217,11 @@ void schedule(void)
 			: : "r" (next));
 	}
 
-	/* Reached only when prev is resumed by a later __switch_to. */
-	__asm__ __volatile__ ("cpsie i" : : : "memory");
+	/*
+	 * Reached only when prev is resumed by a later __switch_to, with
+	 * interrupts masked exactly as they were when it gave up the CPU.
+	 * Its own caller restores its own flags.
+	 */
 }
 
 /*
