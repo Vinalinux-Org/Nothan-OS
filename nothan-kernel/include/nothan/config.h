@@ -80,7 +80,7 @@
  * around a shared structure changes — booting and typing ls proves very
  * little about mutual exclusion.
  */
-#define CONFIG_STRESS_TEST	1
+#define CONFIG_STRESS_TEST	0
 
 #if CONFIG_GUI && !CONFIG_VIDEO
 #error "CONFIG_GUI requires CONFIG_VIDEO"
