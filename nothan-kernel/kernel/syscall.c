@@ -159,11 +159,13 @@ static long sys_writefile(unsigned long a0, unsigned long a1, unsigned long a2)
 	if (!access_ok(buf, count))
 		return -1;
 
-	if (fd == 1) {
-		for (size_t i = 0; i < count; i++)
-			uart_putchar((unsigned char)buf[i]);
-		return (long)count;
-	}
+	/*
+	 * stdout goes through the console's own atomic write rather than a
+	 * bare per-character loop, so a userspace line cannot be cut in half by
+	 * a kernel log line arriving between two of its characters.
+	 */
+	if (fd == 1)
+		return console_write(buf, count);
 
 	return vfs_write(fd, buf, count);
 }

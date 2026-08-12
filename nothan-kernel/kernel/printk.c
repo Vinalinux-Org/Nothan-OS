@@ -181,27 +181,17 @@ int printk(const char *fmt, ...)
 	va_end(args);
 
 	/*
-	 * Masked so one printk's characters are not interleaved with another's.
+	 * One call, because the console owns its own atomicity now — see
+	 * console_puts() in drivers/tty/serial/omap-serial.c.  printk is no
+	 * longer a second place that knows how to mask around a UART.
 	 *
-	 * XXX This is the worst interrupt-latency offender in the kernel and it
-	 * knowingly breaks the "keep critical sections short" rule in
-	 * asm/irqflags.h.  uart_tx_char() spins on the TX-holding register, so
-	 * at 115200 baud each character costs ~87 us and a 60-character line
+	 * XXX The latency caveat has moved there with the masking: transmission
+	 * still spins on the TX register, so a 60-character line at 115200 baud
 	 * masks interrupts for over 5 ms — half the audio period this system is
-	 * eventually meant to hold.  The fix is the printk ring buffer in
-	 * roadmap Phase 2: format into memory here, drain to the UART from a
-	 * context that can be preempted.  Until then, be aware that any log line
-	 * on a hot path is also a 5 ms latency spike.
+	 * eventually meant to hold.  Roadmap Phase 2 (log ring) is the fix.
+	 * Until then, a log line on a hot path is also a 5 ms latency spike.
 	 */
-	unsigned long flags = local_irq_save();
-
-	for (char *p = buf; *p; p++) {
-		if (*p == '\n')
-			uart_putchar('\r');
-		uart_putchar(*p);
-	}
-
-	local_irq_restore(flags);
+	console_puts(buf);
 
 	return ret;
 }

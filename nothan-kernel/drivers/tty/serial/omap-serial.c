@@ -8,6 +8,7 @@
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 
+#include <asm/irqflags.h>
 #include <nothan/types.h>
 #include <nothan/uart.h>
 #include <nothan/irq.h>
@@ -86,11 +87,65 @@ static int uart_inst_read(struct uart_inst *u, char *buf, size_t count)
 	return i > 0 ? (int)i : -1;
 }
 
+/*
+ * The single point where a multi-byte run reaches a UART.
+ *
+ * Masking lives here rather than at each caller because "a write() call's
+ * bytes are not interleaved with another's" is a property of the device, not
+ * something three separate call sites should each remember to arrange.  Before
+ * this, printk masked, /dev/ttyS0 did not, and the fd=1 path in sys_writefile
+ * did not either — so a userspace line could be cut in half by a kernel log
+ * line, which is how "opene[sd] starting / d" ended up in a boot log.
+ *
+ * XXX Same latency caveat as printk: uart_tx_char() spins on the TX register,
+ * so at 115200 baud this masks for ~87 us per character.  Correct output is
+ * worth that for now; roadmap Phase 2 moves the draining somewhere preemptible
+ * and this mask shrinks to just the buffer copy.
+ */
 static int uart_inst_write(struct uart_inst *u, const char *buf, size_t count)
 {
+	unsigned long flags = local_irq_save();
+
 	for (size_t i = 0; i < count; i++)
 		uart_tx_char(u->base, (unsigned char)buf[i]);
+
+	local_irq_restore(flags);
 	return (int)count;
+}
+
+/**
+ * console_write() - emit a raw byte run to the console UART, atomically
+ * @buf: bytes to send
+ * @count: how many
+ *
+ * For callers that already hold a complete message, such as the fd=1 path in
+ * sys_writefile().
+ */
+int console_write(const char *buf, size_t count)
+{
+	return uart_inst_write(&uarts[0], buf, count);
+}
+
+/**
+ * console_puts() - emit a NUL-terminated string to the console, atomically
+ * @s: string to send; bare newlines are expanded to CR LF
+ *
+ * printk()'s output path.  The expansion happens inside the same masked
+ * region as the transmission, so a line and its line ending cannot be
+ * separated by anything else reaching the console.
+ */
+void console_puts(const char *s)
+{
+	struct uart_inst *u = &uarts[0];
+	unsigned long flags = local_irq_save();
+
+	for (const char *p = s; *p; p++) {
+		if (*p == '\n')
+			uart_tx_char(u->base, '\r');
+		uart_tx_char(u->base, (unsigned char)*p);
+	}
+
+	local_irq_restore(flags);
 }
 
 /* ------------------------------------------------------------------ */

@@ -47,7 +47,28 @@
 #define CM_PER_UART1_CLKCTRL	0xF0E0006C
 
 void uart_init(void);
-void uart_putchar(int c);
 int uart_getchar(void);
+
+/*
+ * Single character, unsynchronised.  One character cannot be interleaved with
+ * anything, so it needs no masking — but that also means it is NOT a building
+ * block for strings: a loop over it is exactly the unprotected path that used
+ * to cut userspace lines in half.  Use console_write()/console_puts() for
+ * anything longer than one byte.  Kept for paths that must not depend on the
+ * console being in a sane state, such as a future panic dump.
+ */
+void uart_putchar(int c);
+
+/*
+ * Atomic console output.  Every multi-byte write to the console must go
+ * through one of these: they mask around the whole run, so one message cannot
+ * be interleaved with another mid-string.  uart_putchar() is a single
+ * character and needs no such protection.
+ *
+ *   console_write() — raw bytes, for callers holding a complete message
+ *   console_puts()  — NUL-terminated, expands bare newlines to CR LF
+ */
+int  console_write(const char *buf, size_t count);
+void console_puts(const char *s);
 
 #endif /* _UART_H */
