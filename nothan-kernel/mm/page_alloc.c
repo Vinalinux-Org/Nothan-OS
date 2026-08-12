@@ -4,6 +4,7 @@
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 
+#include <asm/irqflags.h>
 #include <nothan/types.h>
 #include <nothan/mm.h>
 #include <nothan/printk.h>
@@ -19,6 +20,17 @@
 
 extern u32 _end;
 
+/*
+ * PROTECTION: the interrupt mask, taken inside alloc_pages() and
+ * __free_pages() themselves rather than by their callers.
+ *
+ * The allocators are called from far too many places to make every caller
+ * responsible, and unlike the runqueue there is no operation that spans
+ * several calls — one allocation is one indivisible thing.  Both are bounded
+ * by MAX_ORDER iterations, so they stay inside the "short and bounded" rule.
+ *
+ * Callers may hold the mask already; save/restore nests correctly.
+ */
 static struct zone mem_zone;
 
 struct zone *get_zone(void)
@@ -125,11 +137,24 @@ static void expand(struct page *page, struct zone *zone, unsigned int low, unsig
 struct page *alloc_pages(gfp_t gfp, unsigned int order)
 {
 	struct zone *zone = &mem_zone;
+	unsigned long flags;
 
 	(void)gfp;
 
 	if (order > MAX_ORDER)
 		return NULL;
+
+	/*
+	 * The free lists, the per-page flags and free_pages move together and
+	 * are briefly inconsistent while they do.  A task preempted between
+	 * taking a block off its list and splitting it leaves a block that
+	 * belongs to nobody; the next task to allocate walks a list that no
+	 * longer describes reality.
+	 *
+	 * Bounded by MAX_ORDER iterations, so it satisfies the "short and
+	 * bounded" rule in asm/irqflags.h.
+	 */
+	flags = local_irq_save();
 
 	for (unsigned int current_order = order; current_order <= MAX_ORDER; current_order++) {
 		struct free_area *area = &zone->free_area[current_order];
@@ -148,9 +173,11 @@ struct page *alloc_pages(gfp_t gfp, unsigned int order)
 		if (current_order > order)
 			expand(page, zone, order, current_order);
 
+		local_irq_restore(flags);
 		return page;
 	}
 
+	local_irq_restore(flags);
 	return NULL;
 }
 
@@ -164,6 +191,15 @@ void __free_pages(struct page *page, unsigned int order)
 	struct zone *zone = &mem_zone;
 	unsigned long pfn = page - zone->page_array;
 	unsigned long nr_freed = 1UL << order;	/* pages actually being freed */
+	unsigned long flags;
+
+	/*
+	 * Coalescing walks up the orders pulling buddies off their lists, so
+	 * for most of this function several blocks are off every list and the
+	 * merged block is on none of them.  An allocation landing in that window
+	 * sees memory that exists but is reachable from nowhere.
+	 */
+	flags = local_irq_save();
 
 	while (order < MAX_ORDER) {
 		unsigned long buddy_pfn = __find_buddy_pfn(pfn, order);
@@ -193,4 +229,6 @@ void __free_pages(struct page *page, unsigned int order)
 	 * freed, so adding the full (1<<order) coalesced size double-counts. */
 	zone->free_pages += nr_freed;
 	page->_refcount = 0;
+
+	local_irq_restore(flags);
 }

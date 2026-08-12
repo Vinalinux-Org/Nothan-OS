@@ -84,14 +84,20 @@ void do_exit(int code)
 	/* We're still executing on this task's kernel stack, so we can't free
 	 * it (or the task_struct) here. Hand both to the reaper, which runs in
 	 * the next task's context. */
-	sched_defer_free(tsk);
-
 	/*
-	 * Mask and never restore: this task is dying, so it will not come back
+	 * Mask before touching dead_list, not after.  reap_dead() walks that
+	 * list from inside schedule(), so a tick landing between the list_add
+	 * and the schedule() call would send the reaper through a node that is
+	 * half linked — and the node is this task's own rt.run_list, which the
+	 * runqueue also links through.
+	 *
+	 * Masked and never restored: this task is dying and will not come back
 	 * from schedule() to unmask anything.  Whichever task runs next
 	 * restores its own flags, exactly as if this one had blocked.
 	 */
 	local_irq_disable();
+
+	sched_defer_free(tsk);
 	schedule();
 
 	/* NOTREACHED */

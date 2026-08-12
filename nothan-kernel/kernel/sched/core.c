@@ -11,6 +11,21 @@
 #include <nothan/slab.h>
 #include <nothan/printk.h>
 
+/*
+ * PROTECTION: the interrupt mask (asm/irqflags.h), held by whoever mutates.
+ *
+ * Every path that adds to or removes from the runqueue already holds it:
+ * schedule() by its contract, wake_up() and complete() by their own
+ * local_irq_save(), msleep_callback() by running in the tick handler,
+ * sys_kill() around its scan, and the boot-time spawns in kernel_main.
+ * enqueue_task()/dequeue_task() in rt.c therefore do NOT mask — they assume
+ * the caller did, which keeps the mask in one place per operation instead of
+ * nested inside every list edit.
+ *
+ * @need_resched is a single word written by the tick and read by the IRQ
+ * return path in vectors.S; a 32-bit load or store is atomic on this core, so
+ * it needs no more than that.
+ */
 struct rq runqueue;
 int need_resched;
 bool sched_running = false;
@@ -21,6 +36,12 @@ extern void __switch_to(struct task_struct *prev, struct task_struct *next);
  * Deferred-free list. A task that calls do_exit() is still running on its own
  * kernel stack, so it cannot free that stack itself. do_exit() queues the
  * dying task here; the next task scheduled in frees it.
+ *
+ * PROTECTION: the interrupt mask, held by both sides.  reap_dead() runs inside
+ * schedule() and is covered by its contract; do_exit() masks before calling
+ * sched_defer_free().  The two must not overlap because they link through
+ * rt.run_list, the same field the runqueue uses — a half-added node here is a
+ * corrupt runqueue as well.
  */
 static struct list_head dead_list;
 

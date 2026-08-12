@@ -34,6 +34,16 @@ struct uart_inst {
 	volatile unsigned int rx_tail;	/* read() consumes */
 };
 
+/*
+ * PROTECTION: the RX ring needs none — one producer (the IRQ handler advances
+ * rx_head) and one consumer (read() advances rx_tail), each owning its own
+ * index, with the volatile qualifiers making the handoff visible.  That is the
+ * one shape in this kernel that is safe without masking, and it only holds
+ * because there is exactly one reader per port.
+ *
+ * TX is the opposite: uart_inst_write() masks, because several unrelated
+ * callers push bytes at the same device.
+ */
 static struct uart_inst uarts[] = {
 	{ .base = UART_BASE,  .pa = UART0_PA, .irq = UART_IRQ,  .clkctrl = 0 },
 	{ .base = UART1_VA,   .pa = UART1_PA, .irq = UART1_IRQ, .clkctrl = CM_PER_UART1_CLKCTRL },

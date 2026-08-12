@@ -4,6 +4,7 @@
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 
+#include <asm/irqflags.h>
 #include <nothan/types.h>
 #include <nothan/slab.h>
 #include <nothan/mm.h>
@@ -26,6 +27,14 @@ struct slab_cache {
 	void *free_list;
 };
 
+/*
+ * PROTECTION: the interrupt mask, taken inside kmalloc() and kfree().
+ *
+ * free_list is a singly-linked stack threaded through the free objects
+ * themselves, so a torn push or pop does not corrupt a separate structure —
+ * it hands the same object to two owners, or loses the tail of the list.
+ * Neither announces itself at the time.
+ */
 static struct slab_cache caches[SLAB_SIZES];
 static const size_t cache_sizes[SLAB_SIZES] = {
 	32, 64, 128, 256, 512, 1024, 2048
@@ -116,18 +125,38 @@ void *kmalloc(size_t size, unsigned int flags)
 			break;
 
 	struct slab_cache *cache = &caches[idx];
+	unsigned long irq_flags;	/* @flags is already the GFP argument */
+	void *obj;
+
+	/*
+	 * Popping the free list is a read, a dereference and a write.  Split
+	 * that across a preemption and two tasks walk away holding the same
+	 * object: the second reads cache->free_list before the first has
+	 * advanced it.  Nothing complains at the time — the damage surfaces
+	 * later as two owners writing over each other, which is the
+	 * cross-owner corruption design-philosophy.md §1 says a log-only
+	 * system cannot afford.
+	 *
+	 * The refill is inside the same region for a smaller reason: two tasks
+	 * both finding the list empty would both allocate a page, and one of
+	 * them would be lost.
+	 */
+	irq_flags = local_irq_save();
 
 	if (!cache->free_list) {
 		struct page *page = alloc_pages(GFP_KERNEL, 0);
-		if (!page)
+		if (!page) {
+			local_irq_restore(irq_flags);
 			return NULL;
+		}
 		slab_fill_page(cache, page);
 	}
 
-	void *obj = cache->free_list;
+	obj = cache->free_list;
 	cache->free_list = *(void **)obj;
 	cache->free_objects--;
 
+	local_irq_restore(irq_flags);
 	return obj;
 }
 
@@ -161,8 +190,15 @@ void kfree(void *ptr)
 		return;
 	}
 
+	/* Same list, same reason as kmalloc(): pushing is two writes that must
+	 * not be split, or the object ends up pointing at the wrong successor
+	 * and a later pop walks off the list entirely. */
+	unsigned long flags = local_irq_save();
 	void **head = (void **)ptr;
+
 	*head = cache->free_list;
 	cache->free_list = ptr;
 	cache->free_objects++;
+
+	local_irq_restore(flags);
 }

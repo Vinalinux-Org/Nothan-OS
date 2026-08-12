@@ -44,7 +44,16 @@
 #define STRESS_ALLOC_ROUNDS	200	/* alloc/free rounds */
 #define STRESS_PAYLOAD		48	/* characters in a printer's line body */
 
-static volatile int stress_done;	/* counts tasks that finished */
+static volatile int stress_done;		/* counts tasks that finished */
+
+/*
+ * Page total from before any allocator task started.  The balance check has to
+ * be global, not per-task: with two allocators running, either one's own
+ * "before" snapshot includes whatever the other happens to be holding at that
+ * instant, so only the last one to finish can compare against a quiet system.
+ */
+static unsigned long stress_pages_baseline;
+static volatile int stress_allocators_left;
 
 /*
  * One repeated character per printer.  A correct console produces lines that
@@ -76,10 +85,9 @@ static void stress_printer_b(void) { stress_printer('B'); }
  * Hammer both allocators while the others run.  Orders 0-3 so the buddy has to
  * split and merge rather than handing back the same block every time.
  */
-static void stress_alloc(void)
+static void stress_alloc(char tag)
 {
 	struct zone *zone = get_zone();
-	unsigned long free_before = zone->free_pages;
 	unsigned long free_after;
 	int round;
 
@@ -108,18 +116,25 @@ static void stress_alloc(void)
 			msleep(5);
 	}
 
-	free_after = zone->free_pages;
+	printk("[STRESS-%c] done, %d rounds\n", tag, STRESS_ALLOC_ROUNDS);
 
-	if (free_after == free_before)
-		printk("[STRESS-M] done, %d rounds, pages balanced at %lu\n",
-		       STRESS_ALLOC_ROUNDS, free_after);
-	else
-		printk("[STRESS-M] LEAK: %lu pages before, %lu after (%ld lost)\n",
-		       free_before, free_after,
-		       (long)free_before - (long)free_after);
+	/* Only the last allocator standing sees a quiet allocator to measure. */
+	if (--stress_allocators_left == 0) {
+		free_after = zone->free_pages;
+
+		if (free_after == stress_pages_baseline)
+			printk("[STRESS] pages balanced at %lu\n", free_after);
+		else
+			printk("[STRESS] LEAK: %lu pages before, %lu after (%ld lost)\n",
+			       stress_pages_baseline, free_after,
+			       (long)stress_pages_baseline - (long)free_after);
+	}
 
 	stress_done++;
 }
+
+static void stress_alloc_m(void) { stress_alloc('M'); }
+static void stress_alloc_n(void) { stress_alloc('N'); }
 
 /**
  * stress_start() - launch the stress tasks
@@ -135,14 +150,24 @@ void stress_start(void)
 	} tasks[] = {
 		{ stress_printer_a, "stress-a" },
 		{ stress_printer_b, "stress-b" },
-		{ stress_alloc,     "stress-m" },
+		{ stress_alloc_m,   "stress-m" },
+		{ stress_alloc_n,   "stress-n" },
 	};
 	unsigned int i;
 
 	if (!CONFIG_STRESS_TEST)
 		return;
 
-	printk("[STRESS] starting: 2 printers x %d lines, %d alloc rounds\n",
+	/*
+	 * Two allocators, not one.  The first version of this test had a single
+	 * allocator task, which meant the buddy and slab free lists were never
+	 * actually contended — it proved they work when nobody else is using
+	 * them, which was not the question.
+	 */
+	stress_pages_baseline = get_zone()->free_pages;
+	stress_allocators_left = 2;
+
+	printk("[STRESS] starting: 2 printers x %d lines, 2 allocators x %d rounds\n",
 	       STRESS_LINES, STRESS_ALLOC_ROUNDS);
 	printk("[STRESS] pass = every line is one repeated letter, no short lines,"
 	       " and pages balanced\n");

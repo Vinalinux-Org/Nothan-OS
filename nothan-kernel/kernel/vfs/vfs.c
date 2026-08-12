@@ -11,6 +11,12 @@
 #include <nothan/slab.h>
 
 #define MAX_FDS 16
+/*
+ * PROTECTION: the interrupt mask, but only around claiming a slot in
+ * vfs_open().  Reserving an fd has to be atomic against another task
+ * reserving one; everything after that point operates on a slot this caller
+ * owns, so read/write/close touch fd_table[] without masking.
+ */
 static struct file *fd_table[MAX_FDS];
 
 extern int fat32_mount(struct super_block *sb);

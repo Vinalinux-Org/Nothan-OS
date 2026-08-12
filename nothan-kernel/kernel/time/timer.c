@@ -8,6 +8,11 @@
 #include <nothan/timer.h>
 #include <nothan/time.h>
 
+/*
+ * PROTECTION: the interrupt mask, via the irq_save()/irq_restore() pair below.
+ * Process context arms and cancels timers while the tick handler walks the
+ * same list looking for expiries, so this is task-vs-ISR, not just task-vs-task.
+ */
 static LIST_HEAD(timer_head);		/* sorted by expires (ascending) */
 
 /*

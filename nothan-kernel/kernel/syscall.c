@@ -298,6 +298,23 @@ static long sys_kill(unsigned long a0, unsigned long a1, unsigned long a2)
 	}
 
 	struct rq *rq = &runqueue;
+	unsigned long irq_flags;
+
+	/*
+	 * Search and removal are one step.  Walking the runqueue with
+	 * interrupts on means a tick can land mid-scan and schedule(), which
+	 * enqueues and dequeues on the very lists being iterated — the
+	 * list_for_each_entry_safe cursor then points into a node that has
+	 * moved.
+	 *
+	 * The mask is dropped again as soon as the target is off the runqueue.
+	 * From that point it is unreachable by the scheduler and belongs to
+	 * this caller alone, so the page and slab frees below run without it —
+	 * they take their own, and holding one across all of them would be a
+	 * long masked region for no gain.
+	 */
+	irq_flags = local_irq_save();
+
 	for (int prio = 0; prio < MAX_PRIO; prio++) {
 		struct sched_rt_entity *rt, *tmp;
 		list_for_each_entry_safe(rt, tmp, &rq->active.queue[prio],
@@ -308,6 +325,7 @@ static long sys_kill(unsigned long a0, unsigned long a1, unsigned long a2)
 
 			dequeue_task(rq, tsk);
 			tsk->__state = TASK_UNINTERRUPTIBLE;
+			local_irq_restore(irq_flags);
 
 			if (tsk->mm) {
 				struct zone *zone = get_zone();
@@ -350,6 +368,8 @@ static long sys_kill(unsigned long a0, unsigned long a1, unsigned long a2)
 			return 0;
 		}
 	}
+
+	local_irq_restore(irq_flags);	/* target not found — still masked */
 	return -1;
 }
 

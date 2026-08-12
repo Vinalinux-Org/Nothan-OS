@@ -61,6 +61,11 @@
 #define TCLR_ST			(1 << 0)
 #define IRQ_OVF_IT_FLAG		(1 << 1)
 
+/*
+ * PROTECTION: none needed.  Written only by the tick handler, read as a single
+ * word elsewhere, and a 32-bit access is atomic on this core.  Readers may see
+ * a value one tick stale, which is what a tick counter means anyway.
+ */
 static volatile unsigned long jiffies;
 
 /* ------------------------------------------------------------------
