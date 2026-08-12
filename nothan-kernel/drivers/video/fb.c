@@ -8,6 +8,7 @@
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 
+#include <nothan/config.h>
 #include <nothan/types.h>
 #include <nothan/cdev.h>
 #include <nothan/fs.h>
@@ -84,6 +85,10 @@ static struct cdev fb0_cdev = {
 
 static int __init fb_init(void)
 {
+	/* See nothan/config.h — CONFIG_VIDEO gates the whole video stack. */
+	if (!CONFIG_VIDEO)
+		return 0;
+
 	cdev_register(&fb0_cdev);
 	printk("[FB] /dev/fb0 registered (800x480 RGB565, native landscape)\n");
 	return 0;

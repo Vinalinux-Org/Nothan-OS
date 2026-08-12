@@ -29,6 +29,7 @@
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 
+#include <nothan/config.h>
 #include <nothan/types.h>
 #include <nothan/cdev.h>
 #include <nothan/fs.h>
@@ -135,6 +136,10 @@ static struct cdev phone_fe_cdev = {
 
 static int __init phonebus_init(void)
 {
+	/* See nothan/config.h — no SIM7600 attached, nothing to carry. */
+	if (!CONFIG_MODEM)
+		return 0;
+
 	cdev_register(&phone_be_cdev);
 	cdev_register(&phone_fe_cdev);
 	printk("[PHONEBUS] /dev/phone_be + /dev/phone_fe registered (ring %u B/dir)\n",

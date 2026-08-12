@@ -17,6 +17,7 @@
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 
+#include <nothan/config.h>
 #include <nothan/types.h>
 #include <nothan/i2c.h>
 #include <nothan/printk.h>
@@ -508,6 +509,10 @@ static struct i2c_driver tda19988_driver = {
 
 static int tda19988_init(void)
 {
+	/* See nothan/config.h — CONFIG_VIDEO gates the whole video stack. */
+	if (!CONFIG_VIDEO)
+		return 0;
+
 	return i2c_add_driver(&tda19988_driver);
 }
 device_initcall(tda19988_init);

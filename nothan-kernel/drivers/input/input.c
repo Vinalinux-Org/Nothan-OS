@@ -8,6 +8,7 @@
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 
+#include <nothan/config.h>
 #include <nothan/types.h>
 #include <nothan/cdev.h>
 #include <nothan/fs.h>
@@ -69,6 +70,10 @@ static struct cdev input0_cdev = {
 
 static int __init input_init(void)
 {
+	/* See nothan/config.h — no USB touchscreen attached. */
+	if (!CONFIG_USB_TOUCH)
+		return 0;
+
 	cdev_register(&input0_cdev);
 	printk("[INPUT] /dev/input0 registered\n");
 	return 0;

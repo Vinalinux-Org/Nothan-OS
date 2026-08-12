@@ -4,6 +4,7 @@
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 
+#include <nothan/config.h>
 #include <nothan/platform.h>
 #include <nothan/pinctrl.h>
 #include <nothan/i2c.h>
@@ -97,24 +98,32 @@ static struct platform_device bbb_devices[] = {
 	{ .name = "omap_intc",  .base = INTC_BASE,    .irq = 0  },
 	{ .name = "omap_timer", .base = DMTIMER2_BASE, .irq = 68 },
 	{ .name = "omap_uart",  .base = UART0_BASE,   .irq = 72 },
+#if CONFIG_MODEM
 	{ .name = "omap_uart",  .base = UART1_BASE,   .irq = 73 },
+#endif
 	{ .name = "omap_mmc",   .base = MMC0_BASE,    .irq = 64 },
 	{ .name = "omap_gpio",  .base = GPIO0_BASE,   .irq = 0  },
 	{ .name = "omap_gpio",  .base = GPIO1_BASE,   .irq = 0  },
 	{ .name = "omap_gpio",  .base = GPIO2_BASE,   .irq = 0  },
 	{ .name = "omap_gpio",  .base = GPIO3_BASE,   .irq = 0  },
+#if CONFIG_USB_TOUCH
 	{ .name = "musb_hcd",   .base = USBSS_BASE,   .irq = USB1_IRQ },
+#endif
 };
 
+#if CONFIG_VIDEO
 static const struct i2c_board_info i2c0_devices[] = {
 	{ "tda19988", 0x70 },   /* NXP TDA19988 HDMI framer */
 };
+#endif
 
 static int __init bbb_board_init(void)
 {
 	pinctrl_register(bbb_pin_groups, ARRAY_SIZE(bbb_pin_groups));
 
+#if CONFIG_VIDEO
 	i2c_register_board_info(0, i2c0_devices, ARRAY_SIZE(i2c0_devices));
+#endif
 
 	for (unsigned int i = 0; i < ARRAY_SIZE(bbb_devices); i++)
 		platform_device_register(&bbb_devices[i]);

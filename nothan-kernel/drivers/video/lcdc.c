@@ -21,6 +21,7 @@
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 
+#include <nothan/config.h>
 #include <nothan/types.h>
 #include <nothan/mmio.h>
 #include <nothan/mm.h>
@@ -317,6 +318,11 @@ static int __init lcdc_init(void)
 	struct zone *zone;
 	struct page *pg0;
 	u8          *p;
+
+	/* Video stack off at build time — nothing below this runs. See
+	 * nothan/config.h; flipping CONFIG_VIDEO back to 1 restores it as-is. */
+	if (!CONFIG_VIDEO)
+		return 0;
 	u32          rctrl;
 
 	pinctrl_select("lcdc");
