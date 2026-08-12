@@ -71,6 +71,17 @@
  */
 #define CONFIG_CACHE_BENCH	0
 
+/*
+ * Concurrency stress tasks (roadmap Phase 1 acceptance).
+ *
+ * Three kernel tasks hammering the console and both allocators while the tick
+ * cuts between them.  This is the only thing in the tree that reliably puts
+ * the kernel in the state a race needs, so turn it on whenever the locking
+ * around a shared structure changes — booting and typing ls proves very
+ * little about mutual exclusion.
+ */
+#define CONFIG_STRESS_TEST	1
+
 #if CONFIG_GUI && !CONFIG_VIDEO
 #error "CONFIG_GUI requires CONFIG_VIDEO"
 #endif
