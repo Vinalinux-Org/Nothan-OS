@@ -6,13 +6,18 @@
 
 #include <stdarg.h>
 #include <asm/irqflags.h>
+#include <nothan/mm.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <nothan/printk.h>
 #include <nothan/uart.h>
 
 /*
- * Minimal vsnprintf — %s %d %i %u %x %X %p %% + width + zero-pad
+ * Minimal vsnprintf — %s %d %i %u %x %X %c %p %% + width + zero-pad
+ *
+ * An unsupported conversion cannot consume its argument, so it desynchronises
+ * every conversion after it.  Adding one is cheaper than debugging what that
+ * does three call sites away.
  */
 
 static const char hex_lower[] = "0123456789abcdef";
@@ -97,7 +102,20 @@ int vsnprintf(char *buf, unsigned long size, const char *fmt, va_list args)
 		switch (*fmt) {
 		case 's': {
 			const char *s = va_arg(args, const char *);
-			if (!s) s = "(null)";
+			if (!s)
+				s = "(null)";
+			/*
+			 * A pointer inside the first page is never a string.
+			 * It is what an unsupported conversion produces: the
+			 * specifier below does not consume its argument, so
+			 * every later one reads the wrong slot and a small
+			 * integer arrives here as a char *.  Walking it faults
+			 * inside vsnprintf, which kills the kernel from the one
+			 * place that is supposed to explain why the kernel
+			 * died.  Print the value instead.
+			 */
+			else if ((unsigned long)s < PAGE_SIZE)
+				s = "(bad ptr)";
 			int slen = 0;
 			while (s[slen]) slen++;
 			int pad = (width > slen) ? width - slen : 0;
@@ -140,13 +158,36 @@ int vsnprintf(char *buf, unsigned long size, const char *fmt, va_list args)
 				      16, width, 0, 1, zero_pad);
 			break;
 
+		case 'c':
+			if (pos + 1 < (int)size)
+				buf[pos] = (char)va_arg(args, int);
+			else
+				(void)va_arg(args, int);
+			pos++;
+			break;
+
 		case 'p':
 			pos += number(buf + pos, (pos < (int)size) ? size - pos : 0,
 				      (unsigned long)va_arg(args, void *),
 				      16, 8, 0, 0, 1);
 			break;
 
+		/*
+		 * Unsupported conversions are the dangerous case, not the ugly
+		 * one: this branch cannot consume the argument (varargs carry
+		 * no type), so every conversion after it reads one slot early.
+		 * The result is not a mangled line, it is the wrong values
+		 * everywhere after that point — and a %s among them dereferences
+		 * whatever integer landed in its place.
+		 *
+		 * Emit '%' along with the character so the line says plainly
+		 * that the format string is wrong, instead of looking like it
+		 * printed a literal letter on purpose.
+		 */
 		default:
+			if (pos + 1 < (int)size)
+				buf[pos] = '%';
+			pos++;
 			if (pos + 1 < (int)size)
 				buf[pos] = *fmt;
 			pos++;
