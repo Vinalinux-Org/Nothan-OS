@@ -12,6 +12,7 @@
 #include <nothan/printk.h>
 #include <nothan/platform.h>
 #include <nothan/init.h>
+#include <nothan/delay.h>
 
 /*
  * DMTimer2 at PA 0x48040000 (L4_PER), VA 0xF0040000.
@@ -62,11 +63,204 @@
 
 static volatile unsigned long jiffies;
 
+/* ------------------------------------------------------------------
+ * DMTimer3 — free-running clocksource, no interrupt
+ *
+ * The 10 ms tick is far too coarse to measure anything this kernel
+ * cares about (wakeup-to-run latency, cache behaviour, IRQ latency all
+ * live well below one tick).  DMTimer3 runs untouched across the full
+ * 32-bit range and is only ever read.
+ *
+ * Ref: DMTimer3 at PA 0x48042000 (TRM Ch02 memory map, Ch20 timers).
+ *      L4_PER maps PA 0x48000000 -> VA 0xF0000000, so VA = 0xF0042000.
+ *      CM_PER_TIMER3_CLKCTRL  = CM_PER  + 0x84   (TRM Ch08)
+ *      CLKSEL_TIMER3_CLK      = CM_DPLL + 0x0C   (TRM Ch08, reset = M_OSC)
+ * ------------------------------------------------------------------ */
+
+#define DMTIMER3_BASE		0xF0042000
+#define CM_PER_TIMER3_CLKCTRL	0xF0E00084
+#define CM_DPLL_CLKSEL_TIMER3	0xF0E0050C
+
+#define TSC_CYCLES_PER_US	24u	/* 24 MHz M_OSC */
+
+/*
+ * The hardware counter is 32-bit and wraps every 2^32 / 24 MHz ~= 179 s.
+ * Rather than reconstruct a 64-bit value from a "high half" (which would
+ * jump backwards by 179 s during the window between a hardware wrap and
+ * the next tick noticing it), accumulate elapsed cycles into @tsc_base on
+ * every tick.  The delta is computed with unsigned 32-bit subtraction, so
+ * it stays correct across a wrap as long as less than 179 s passes between
+ * updates — the tick runs every 10 ms, so that margin is ~18000x.
+ *
+ * Reader/writer consistency uses a seqlock rather than masking interrupts:
+ * timer_cycles() is meant to be callable from IRQ context and from the
+ * latency measurements themselves, and disabling interrupts inside the
+ * instrument would perturb the very thing being measured.
+ */
+static volatile u64 tsc_base;	/* cycles accumulated up to @tsc_last */
+static volatile u32 tsc_last;	/* TCRR sampled at the last accumulate */
+static volatile u32 tsc_seq;	/* even = stable, odd = update in flight */
+
+#define tsc_barrier()	__asm__ __volatile__ ("" : : : "memory")
+
+/* Called from the 10 ms tick.  Only writer of @tsc_base / @tsc_last. */
+static void tsc_update(void)
+{
+	u32 now = mmio_read32(DMTIMER3_BASE + TCRR);
+
+	tsc_seq++;
+	tsc_barrier();
+
+	tsc_base += (u32)(now - tsc_last);
+	tsc_last = now;
+
+	tsc_barrier();
+	tsc_seq++;
+}
+
+/**
+ * timer_cycles() - 24 MHz cycles elapsed since boot
+ *
+ * Returns a monotonic 64-bit cycle count.  Safe from any context.
+ * Deliberately returns raw cycles, not microseconds: the kernel is
+ * linked -nostdlib with no libgcc, so a 64-bit division would not link,
+ * and conversion has no business sitting in a measurement hot path.
+ */
+u64 timer_cycles(void)
+{
+	u32 s1, s2, now, last;
+	u64 base;
+
+	do {
+		s1 = tsc_seq;
+		tsc_barrier();
+
+		base = tsc_base;
+		last = tsc_last;
+		now = mmio_read32(DMTIMER3_BASE + TCRR);
+
+		tsc_barrier();
+		s2 = tsc_seq;
+	} while ((s1 & 1u) || s1 != s2);
+
+	return base + (u32)(now - last);
+}
+
+/**
+ * cycles_to_us() - convert a 32-bit cycle delta to microseconds
+ * @cycles: cycle count, must fit in 32 bits (i.e. under ~179 s)
+ *
+ * Division by the constant 24 compiles to a reciprocal multiply, so this
+ * pulls in no libgcc helper.  Intervals longer than 179 s must be split
+ * by the caller.
+ */
+u32 cycles_to_us(u32 cycles)
+{
+	return cycles / TSC_CYCLES_PER_US;
+}
+
+/*
+ * tsc_probe - bring up DMTimer3 as a free-running counter
+ *
+ * Same PRCM bring-up as DMTimer2 (both live in the L4LS clock domain),
+ * except that no interrupt is ever enabled and TLDR stays 0 so the
+ * counter wraps across the full 32-bit range.
+ */
+static void tsc_probe(void)
+{
+	unsigned int timeout;
+	u32 val;
+
+	/* L4LS is shared with DMTimer2 and normally already awake; the check
+	 * is idempotent so this does not depend on probe ordering. */
+	if ((mmio_read32(CM_PER_L4LS_CLKSTCTRL) & 0x3) != CLKTRCTRL_SW_WKUP) {
+		mmio_write32(CM_PER_L4LS_CLKSTCTRL, CLKTRCTRL_SW_WKUP);
+		timeout = 10000;
+		while (((mmio_read32(CM_PER_L4LS_CLKSTCTRL) & 0x3) != CLKTRCTRL_SW_WKUP) && timeout--)
+			;
+	}
+
+	/* Reset value is already M_OSC, but say so explicitly. */
+	mmio_write32(CM_DPLL_CLKSEL_TIMER3, CLKSEL_M_OSC);
+	timeout = 10000;
+	while (((mmio_read32(CM_DPLL_CLKSEL_TIMER3) & 0x3) != CLKSEL_M_OSC) && timeout--)
+		;
+
+	mmio_write32(CM_PER_TIMER3_CLKCTRL, MODULEMODE_ENABLE);
+	timeout = 100000;
+	while (timeout--) {
+		val = mmio_read32(CM_PER_TIMER3_CLKCTRL);
+		if ((val & IDLEST_MASK) == IDLEST_FUNCTIONAL && (val & 0x3) == MODULEMODE_ENABLE)
+			break;
+	}
+
+	mmio_write32(DMTIMER3_BASE + TIOCP_CFG, TIOCP_SOFTRESET);
+	timeout = 10000;
+	while ((mmio_read32(DMTIMER3_BASE + TIOCP_CFG) & TIOCP_SOFTRESET) && timeout--)
+		;
+
+	mmio_write32(DMTIMER3_BASE + TSICR, TSICR_POSTED);
+	mmio_write32(DMTIMER3_BASE + TCLR, 0);
+	timeout = 10000;
+	while ((mmio_read32(DMTIMER3_BASE + TWPS) & TWPS_W_PEND_TCLR) && timeout--)
+		;
+
+	/* No IRQ is ever enabled for this timer — just drop stale flags. */
+	mmio_write32(DMTIMER3_BASE + IRQSTATUS, 0x7);
+
+	mmio_write32(DMTIMER3_BASE + TLDR, 0);
+	timeout = 10000;
+	while ((mmio_read32(DMTIMER3_BASE + TWPS) & TWPS_W_PEND_TLDR) && timeout--)
+		;
+
+	mmio_write32(DMTIMER3_BASE + TCRR, 0);
+	timeout = 10000;
+	while ((mmio_read32(DMTIMER3_BASE + TWPS) & TWPS_W_PEND_TCRR) && timeout--)
+		;
+
+	tsc_base = 0;
+	tsc_last = 0;
+	tsc_seq = 0;
+
+	mmio_write32(DMTIMER3_BASE + TCLR, TCLR_AR | TCLR_ST);
+	timeout = 10000;
+	while ((mmio_read32(DMTIMER3_BASE + TWPS) & TWPS_W_PEND_TCLR) && timeout--)
+		;
+}
+
+/*
+ * tsc_selftest - prove the counter advances, and check udelay's calibration
+ *
+ * udelay() is an uncalibrated busy loop assuming a 1 GHz core and ~2 cycles
+ * per iteration (see kernel/time/delay.c).  Nobody has ever verified that
+ * assumption on real silicon.  Timing udelay(1000) against real hardware
+ * cycles tests both the new clocksource and that assumption at once:
+ * a result near 1000 us means the core really is at 1 GHz, while roughly
+ * double would mean it is running at half that.
+ */
+static void tsc_selftest(void)
+{
+	u64 c0, c1;
+	u32 elapsed;
+
+	c0 = timer_cycles();
+	udelay(1000);
+	c1 = timer_cycles();
+
+	elapsed = (u32)(c1 - c0);
+
+	printk("[TSC] DMTimer3 @ 24 MHz free-running, 1 us = %u cycles\n",
+	       TSC_CYCLES_PER_US);
+	printk("[TSC] self-test: udelay(1000) took %lu cycles = %lu us (expect ~1000)\n",
+	       elapsed, cycles_to_us(elapsed));
+}
+
 static void timer_irq_handler(unsigned int irq)
 {
 	(void)irq;
 
 	mmio_write32(DMTIMER2_BASE + IRQSTATUS, IRQ_OVF_IT_FLAG);
+	tsc_update();
 	jiffies++;
 	scheduler_tick();
 	run_local_timers();
@@ -93,6 +287,12 @@ unsigned long get_jiffies(void)
 static int timer_probe(struct platform_device *pdev)
 {
 	(void)pdev;
+
+	/* Free-running clocksource first: everything after this point can be
+	 * measured, including the rest of this probe. */
+	tsc_probe();
+	tsc_selftest();
+
 	/* Step 1: Force L4LS clock domain to SW_WKUP. */
 	u32 val = mmio_read32(CM_PER_L4LS_CLKSTCTRL);
 	unsigned int timeout;
