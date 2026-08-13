@@ -42,7 +42,7 @@ static struct storagebus_ring fe2be;
  * read/yield forever, which together with the shell doing the same kept two
  * tasks permanently runnable and idle permanently starved.
  */
-static struct wait_queue_head fe2be_wait;
+static DEFINE_WAIT_QUEUE(fe2be_wait);
 
 static int storagebus_ring_read(struct storagebus_ring *r, char *buf, size_t count)
 {

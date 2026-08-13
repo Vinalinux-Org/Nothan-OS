@@ -14,6 +14,21 @@ struct wait_queue_head {
 	struct list_head task_list;
 };
 
+/*
+ * Define a wait queue that is already valid at link time.
+ *
+ * Preferred over calling init_waitqueue_head() from an init function: an
+ * uninitialised queue has next/prev NULL, and the first sleeper's
+ * list_add_tail() writes straight through address 0.  That is a kernel-mode
+ * NULL write in whatever task happened to block first — a long way from the
+ * line that forgot the call.  Making it impossible to forget is cheaper than
+ * making it easy to find.
+ */
+#define DEFINE_WAIT_QUEUE(name)						\
+	struct wait_queue_head name = {					\
+		.task_list = { &(name).task_list, &(name).task_list }	\
+	}
+
 static inline void init_waitqueue_head(struct wait_queue_head *wq)
 {
 	list_init(&wq->task_list);

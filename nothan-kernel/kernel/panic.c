@@ -118,11 +118,25 @@ void panic_dump_tasks(void)
 	 * the dump answers rather than one it leaves open.  idle has a static
 	 * stack and no kstack_base.
 	 */
-	if (cur->kstack_base)
-		printk("  kstack:  0x%08lx..0x%08lx (sp now 0x%08lx)\n",
+	if (cur->kstack_base) {
+		unsigned long sp;
+
+		/*
+		 * The live stack pointer, not cur->stack — that field only holds
+		 * a value saved the last time this task was switched out, which
+		 * for the running task is stale by definition.  We are on the
+		 * faulting task's kernel stack right now, so SP is the answer.
+		 */
+		__asm__ __volatile__("mov %0, sp" : "=r" (sp));
+
+		printk("  kstack:  0x%08lx..0x%08lx  sp 0x%08lx%s\n",
 		       (unsigned long)cur->kstack_base,
-		       (unsigned long)cur->kstack_base + PAGE_SIZE,
-		       (unsigned long)cur->stack);
+		       (unsigned long)cur->kstack_base + cur->kstack_size,
+		       sp,
+		       (sp < (unsigned long)cur->kstack_base ||
+			sp >= (unsigned long)cur->kstack_base + cur->kstack_size)
+			       ? "  <-- OFF ITS STACK" : "");
+	}
 
 	printk("  runqueue: %u runnable\n", runqueue.nr_running);
 

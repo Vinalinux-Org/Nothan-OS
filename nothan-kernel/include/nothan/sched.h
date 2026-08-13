@@ -52,6 +52,7 @@ struct sched_rt_entity {
 struct task_struct {
 	void				*stack;
 	void				*kstack_base;	/* kmalloc base of kernel stack (free on exit) */
+	unsigned int			kstack_size;	/* so a fault dump can bound it */
 	unsigned long			user_sp;
 	unsigned long			user_lr;
 	unsigned int			__state;

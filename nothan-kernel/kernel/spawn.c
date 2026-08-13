@@ -60,6 +60,7 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 
 	p->stack       = sp;
 	p->kstack_base = kstack_base;
+	p->kstack_size = PAGE_SIZE;
 	p->user_sp    = 0;
 	p->user_lr    = 0;
 	p->__state    = TASK_RUNNING;
@@ -327,6 +328,7 @@ struct task_struct *user_task_create_bin(const char *name,
 
 	p->stack      = sp;
 	p->kstack_base = ksp;	/* kmalloc base of the kernel stack, for kfree on exit */
+	p->kstack_size = KSTACK_SIZE;
 	p->user_sp    = mm->sp_top;
 	p->user_lr    = 0;
 	p->__state    = TASK_RUNNING;
