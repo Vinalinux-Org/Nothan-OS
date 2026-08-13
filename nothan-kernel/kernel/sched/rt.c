@@ -55,11 +55,20 @@ void check_preempt_curr(struct rq *rq, struct task_struct *p)
 
 #if CONFIG_SCHED_LATENCY
 	/*
-	 * Stamp the moment it became runnable.  Read here, in the one place
-	 * every wakeup passes through, so the measurement covers the same set
-	 * of paths the preemption decision does.
+	 * Stamp the moment it became runnable — but only for a task that has
+	 * run before.
+	 *
+	 * enqueue_task() is also how a brand new task joins the runqueue, and
+	 * the first version counted that as a wakeup.  It produced 2 ms for the
+	 * shell and 84 ms for storage_daemon, which are real intervals but
+	 * measure "how long after being created did it first get the CPU" —
+	 * time spent spawning other tasks and printing, nothing to do with
+	 * waking.  Worse, those two outliers became the maximum, and since only
+	 * a new maximum is reported, every genuine wakeup afterwards was
+	 * measured and never shown.
 	 */
-	p->rt.wake_ts = timer_cycles();
+	if (p->rt.ran_once)
+		p->rt.wake_ts = timer_cycles();
 #endif
 
 	if (p->prio < rq->curr->prio)

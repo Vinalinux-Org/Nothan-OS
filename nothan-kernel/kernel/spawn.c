@@ -68,6 +68,7 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 	p->prio       = prio;
 	p->rt.time_slice = RR_TIMESLICE;
 	p->rt.on_rq   = 0;
+	p->rt.ran_once = 0;
 	p->exit_code  = 0;
 	p->mm         = NULL;
 	p->cwd[0]     = '/';
@@ -336,6 +337,7 @@ struct task_struct *user_task_create_bin(const char *name,
 	p->prio       = DEFAULT_PRIO;
 	p->rt.time_slice = RR_TIMESLICE;
 	p->rt.on_rq   = 0;
+	p->rt.ran_once = 0;
 	p->mm         = mm;
 	p->exit_code  = 0;
 	p->cwd[0]     = '/';

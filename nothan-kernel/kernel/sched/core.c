@@ -128,6 +128,7 @@ static void idle_task_init(void)
 		idle_tsk.prio       = IDLE_PRIO;
 		idle_tsk.rt.time_slice = RR_TIMESLICE;
 		idle_tsk.rt.on_rq   = 0;
+		idle_tsk.rt.ran_once = 0;
 		idle_tsk.exit_code  = 0;
 		idle_tsk.mm         = NULL;
 
@@ -234,16 +235,26 @@ void schedule(void)
 		next->rt.wake_ts = 0;
 		sched_wake_count++;
 
-		if (d > sched_wake_max) {
+		if (d > sched_wake_max)
 			sched_wake_max = d;
-			printk("[SCHED] wake->run max %lu us (%lu cyc) pid=%d n=%lu\n",
-			       (unsigned long)cycles_to_us(d), (unsigned long)d,
-			       next->pid, sched_wake_count);
-		}
+
+		/*
+		 * Report on a schedule, not only on a new maximum.  Max-only
+		 * goes silent the moment one outlier lands, and then says
+		 * nothing whether that is because the system is quiet or
+		 * because measuring stopped working.  A line every 32 wakeups
+		 * shows both the worst case and that it is still counting.
+		 */
+		if ((sched_wake_count & 31u) == 0)
+			printk("[SCHED] wake->run: n=%lu max %lu us (%lu cyc)\n",
+			       sched_wake_count,
+			       (unsigned long)cycles_to_us(sched_wake_max),
+			       (unsigned long)sched_wake_max);
 	}
 #endif
 
 	runqueue.curr = next;
+	next->rt.ran_once = 1;
 	need_resched = 0;
 
 	/*

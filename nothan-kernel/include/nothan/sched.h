@@ -37,6 +37,7 @@ struct sched_rt_entity {
 	unsigned int		time_slice;
 	int					on_rq;
 	u64			wake_ts;	/* CONFIG_SCHED_LATENCY: when it became runnable */
+	int			ran_once;	/* has the scheduler ever switched to it */
 };
 
 /**
