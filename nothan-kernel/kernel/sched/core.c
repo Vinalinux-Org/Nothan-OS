@@ -253,11 +253,24 @@ void schedule(void)
 		 * look alike: one says the system is calm, the other says the
 		 * instrument is broken.
 		 */
+		/*
+		 * Cycles, not microseconds, and the pid with them.
+		 *
+		 * The first version of this line reported only microseconds and
+		 * dropped the pid, and both omissions cost a measurement round.
+		 * Integer division by 24 turns everything under a microsecond
+		 * into "0 us" — which is exactly the range a working
+		 * preempt-on-wakeup lands in, so the interesting answer was
+		 * being rounded away.  And without the pid, two outliers at boot
+		 * could not be attributed to a task at all.
+		 */
 		if (worse || (sched_wake_count & 7u) == 0)
-			printk("[SCHED] wake->run %lu us, max %lu us, n=%lu\n",
-			       (unsigned long)cycles_to_us(d),
+			printk("[SCHED] wake->run %lu cyc, max %lu cyc (%lu us)"
+			       " pid=%d n=%lu\n",
+			       (unsigned long)d,
+			       (unsigned long)sched_wake_max,
 			       (unsigned long)cycles_to_us(sched_wake_max),
-			       sched_wake_count);
+			       next->pid, sched_wake_count);
 	}
 #endif
 
