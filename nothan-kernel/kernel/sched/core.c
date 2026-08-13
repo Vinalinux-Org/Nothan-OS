@@ -235,21 +235,29 @@ void schedule(void)
 		next->rt.wake_ts = 0;
 		sched_wake_count++;
 
-		if (d > sched_wake_max)
+		int worse = (d > sched_wake_max);
+
+		if (worse)
 			sched_wake_max = d;
 
 		/*
-		 * Report on a schedule, not only on a new maximum.  Max-only
-		 * goes silent the moment one outlier lands, and then says
-		 * nothing whether that is because the system is quiet or
-		 * because measuring stopped working.  A line every 32 wakeups
-		 * shows both the worst case and that it is still counting.
+		 * On a new maximum, and every eighth wakeup regardless.
+		 *
+		 * The maximum is the number that matters for a deadline, and
+		 * reporting it as it grows means the very first wakeup produces
+		 * a line — with the previous threshold of 32, hand-typing never
+		 * reached it and the output was indistinguishable from a
+		 * measurement that had quietly stopped working.
+		 *
+		 * The periodic line stays because those two silences must not
+		 * look alike: one says the system is calm, the other says the
+		 * instrument is broken.
 		 */
-		if ((sched_wake_count & 31u) == 0)
-			printk("[SCHED] wake->run: n=%lu max %lu us (%lu cyc)\n",
-			       sched_wake_count,
+		if (worse || (sched_wake_count & 7u) == 0)
+			printk("[SCHED] wake->run %lu us, max %lu us, n=%lu\n",
+			       (unsigned long)cycles_to_us(d),
 			       (unsigned long)cycles_to_us(sched_wake_max),
-			       (unsigned long)sched_wake_max);
+			       sched_wake_count);
 	}
 #endif
 
