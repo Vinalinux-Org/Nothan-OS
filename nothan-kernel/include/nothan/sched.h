@@ -36,6 +36,7 @@ struct sched_rt_entity {
 	struct list_head	run_list;
 	unsigned int		time_slice;
 	int					on_rq;
+	u64			wake_ts;	/* CONFIG_SCHED_LATENCY: when it became runnable */
 };
 
 /**
@@ -134,6 +135,13 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name);
 
 /* The idle loop: enable interrupts, wait for one, reschedule.  Never returns. */
 void cpu_idle(void);
+
+/*
+ * Decide whether @p becoming runnable should displace whatever is running.
+ * Called from enqueue_task(), so every path that makes a task runnable is
+ * covered without any of them having to remember — which is the point.
+ */
+void check_preempt_curr(struct rq *rq, struct task_struct *p);
 void enqueue_task(struct rq *rq, struct task_struct *p);
 void dequeue_task(struct rq *rq, struct task_struct *p);
 struct task_struct *pick_next_task(struct rq *rq);

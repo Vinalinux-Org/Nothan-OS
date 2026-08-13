@@ -10,6 +10,8 @@
 #include <nothan/mm.h>
 #include <nothan/slab.h>
 #include <nothan/printk.h>
+#include <nothan/config.h>
+#include <nothan/timer.h>
 
 /*
  * PROTECTION: the interrupt mask (asm/irqflags.h), held by whoever mutates.
@@ -28,6 +30,10 @@
  */
 struct rq runqueue;
 int need_resched;
+#if CONFIG_SCHED_LATENCY
+u32 sched_wake_max;			/* worst wake->run seen, in 24 MHz cycles */
+unsigned long sched_wake_count;		/* wakeups measured */
+#endif
 bool sched_running = false;
 
 extern void __switch_to(struct task_struct *prev, struct task_struct *next);
@@ -211,6 +217,31 @@ void schedule(void)
 		runqueue.curr = NULL;
 		return;
 	}
+
+#if CONFIG_SCHED_LATENCY
+	/*
+	 * Close the interval opened in check_preempt_curr().  Only a task that
+	 * was woken carries a stamp; one merely rotated by the tick does not,
+	 * so this measures waking latency and not time-slice sharing.
+	 *
+	 * Reporting only on a new maximum keeps this quiet: the worst case is
+	 * what matters for a deadline, and after warm-up the line stops
+	 * appearing, which is itself the signal that the figure has settled.
+	 */
+	if (next->rt.wake_ts) {
+		u32 d = (u32)(timer_cycles() - next->rt.wake_ts);
+
+		next->rt.wake_ts = 0;
+		sched_wake_count++;
+
+		if (d > sched_wake_max) {
+			sched_wake_max = d;
+			printk("[SCHED] wake->run max %lu us (%lu cyc) pid=%d n=%lu\n",
+			       (unsigned long)cycles_to_us(d), (unsigned long)d,
+			       next->pid, sched_wake_count);
+		}
+	}
+#endif
 
 	runqueue.curr = next;
 	need_resched = 0;

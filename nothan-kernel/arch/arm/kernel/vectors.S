@@ -78,6 +78,19 @@ vector_svc:
 	@ --- Store return value into r0 slot on stack ---
 	str	r0, [sp, #4]		@ [sp+4] → r0 on ldmfd
 
+	@ Preemption check, same as the IRQ path. A syscall can make a
+	@ higher-priority task runnable — a write that wakes a blocked reader,
+	@ for instance — and without this the woken task waits for the next
+	@ tick instead of running now. schedule() requires interrupts masked;
+	@ the ldmfd ^ below restores CPSR from SPSR, which puts them back.
+	cpsid	i
+	ldr	r0, =need_resched
+	ldr	r0, [r0]
+	cmp	r0, #0
+	beq	.Lsvc_restore
+	bl	schedule
+
+.Lsvc_restore:
 	@ --- Restore state and return ---
 	pop	{r0}			@ r0 = SPSR
 	msr	spsr_cxsf, r0

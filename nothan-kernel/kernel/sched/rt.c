@@ -6,6 +6,9 @@
 
 #include <nothan/types.h>
 #include <nothan/sched.h>
+#include <nothan/config.h>
+#include <nothan/timer.h>
+#include <nothan/printk.h>
 
 /**
  * enqueue_task - add a task to the runqueue
@@ -23,6 +26,44 @@ void enqueue_task(struct rq *rq, struct task_struct *p)
 	sched_set_bit(rq, p->prio);
 	rq->nr_running++;
 	p->rt.on_rq = 1;
+
+	check_preempt_curr(rq, p);
+}
+
+/**
+ * check_preempt_curr() - a newly runnable task may be more urgent than the
+ *                        one holding the CPU
+ * @rq: the runqueue
+ * @p: the task that just became runnable
+ *
+ * Lives inside enqueue_task() rather than at each wake site.  Every path that
+ * makes a task runnable goes through there — wake_up(), complete(), the timer
+ * callback, task creation — so none of them can forget, and a path added later
+ * inherits it.  Putting the test at the call sites instead would be exactly the
+ * "remember to do it" discipline design-philosophy.md §1 rules out.
+ *
+ * The three conditions are explicit rather than relying on the order of lines
+ * elsewhere.  schedule() also calls enqueue_task(), to put the outgoing task
+ * back; at that moment rq->curr is still that task, so "p != rq->curr" is what
+ * keeps a reschedule from asking for another reschedule forever.  rq->curr is
+ * NULL only during sched_init(), before there is anything to preempt.
+ */
+void check_preempt_curr(struct rq *rq, struct task_struct *p)
+{
+	if (p == rq->curr || !rq->curr)
+		return;
+
+#if CONFIG_SCHED_LATENCY
+	/*
+	 * Stamp the moment it became runnable.  Read here, in the one place
+	 * every wakeup passes through, so the measurement covers the same set
+	 * of paths the preemption decision does.
+	 */
+	p->rt.wake_ts = timer_cycles();
+#endif
+
+	if (p->prio < rq->curr->prio)
+		need_resched = 1;
 }
 
 /**

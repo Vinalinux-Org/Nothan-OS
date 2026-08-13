@@ -93,6 +93,18 @@
  */
 #define CONFIG_PANIC_TEST	0
 
+/*
+ * Measure how long a task waits between being woken and actually running.
+ *
+ * The number Phase 3 exists to produce.  It costs one clocksource read per
+ * wakeup and one per context switch, so it is a measurement mode rather than
+ * something to leave on: turn it on to get a figure, act on it, turn it off.
+ *
+ * Only meaningful now that tasks genuinely sleep — before blocking reads there
+ * were no wakeups to time.
+ */
+#define CONFIG_SCHED_LATENCY	1
+
 #if CONFIG_GUI && !CONFIG_VIDEO
 #error "CONFIG_GUI requires CONFIG_VIDEO"
 #endif
