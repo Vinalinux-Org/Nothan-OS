@@ -102,8 +102,13 @@
  *
  * Only meaningful now that tasks genuinely sleep — before blocking reads there
  * were no wakeups to time.
+ *
+ * Answer obtained (roadmap §5.1.1): 13-19 cycles, max 19 over 40 wakeups, so
+ * 540-790 ns from the UART RX interrupt to the shell running.  Off again.
+ * Worth switching back on after any change to the wake path, the tick, or
+ * priority assignment — those are the things that can put a tail on it.
  */
-#define CONFIG_SCHED_LATENCY	1
+#define CONFIG_SCHED_LATENCY	0
 
 #if CONFIG_GUI && !CONFIG_VIDEO
 #error "CONFIG_GUI requires CONFIG_VIDEO"
