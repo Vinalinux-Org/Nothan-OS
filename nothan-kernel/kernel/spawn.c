@@ -26,11 +26,36 @@ extern void task_entry(void);
  *
  * Return: Pointer to the newly created task_struct, or NULL on failure.
  */
+/*
+ * kmalloc() hands back whatever was in the block, so every field of a fresh
+ * task_struct is garbage until something writes it.  The creators below set
+ * the fields they know about one by one, which means adding a field to
+ * task_struct silently leaves it full of noise in two places at once.
+ *
+ * That is not hypothetical.  rt.wake_ts was added for the latency measurement
+ * and initialised nowhere; the measurement tested only "is wake_ts non-zero",
+ * so tasks whose block happened to contain non-zero noise were timed on their
+ * very first run against a timestamp that never existed.  It reported 210 ms
+ * and 297 ms, which are not wrong arithmetic — they are now minus nonsense.
+ *
+ * Zero first, then set what needs setting.  A field added later starts at
+ * zero without anyone having to remember it.
+ */
+static void task_zero(struct task_struct *p)
+{
+	char *b = (char *)p;
+	unsigned int i;
+
+	for (i = 0; i < sizeof(*p); i++)
+		b[i] = 0;
+}
+
 struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 {
 	struct task_struct *p = (struct task_struct *)kmalloc(sizeof(*p), GFP_KERNEL);
 	if (!p)
 		return NULL;
+	task_zero(p);
 
 	unsigned long *sp = (unsigned long *)kmalloc(PAGE_SIZE, GFP_KERNEL);
 	if (!sp) {
@@ -134,6 +159,7 @@ struct task_struct *user_task_create_bin(const char *name,
 	struct task_struct *p = (struct task_struct *)kmalloc(sizeof(*p), GFP_KERNEL);
 	if (!p)
 		return NULL;
+	task_zero(p);
 
 	/*
 	 * Kernel (SVC) stack: 16 KB. 4 KB was risky — a user task takes a
