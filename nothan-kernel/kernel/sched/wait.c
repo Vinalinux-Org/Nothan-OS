@@ -24,6 +24,18 @@
  * would corrupt both lists at once, and a wake_up() arriving after the state
  * was set but before the task actually slept would be lost entirely.
  */
+void wait_event_locked(struct wait_queue_head *wq)
+{
+	struct task_struct *curr = runqueue.curr;
+
+	curr->__state = TASK_UNINTERRUPTIBLE;
+
+	/* Reuse rt.run_list to link into the wait queue. */
+	list_add_tail(&curr->rt.run_list, &wq->task_list);
+
+	schedule();	/* returns with the mask exactly as the caller left it */
+}
+
 void wait_event(struct wait_queue_head *wq)
 {
 	struct task_struct *curr = runqueue.curr;

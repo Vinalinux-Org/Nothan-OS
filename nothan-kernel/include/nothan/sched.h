@@ -130,6 +130,9 @@ static inline void list_move_tail(struct list_head *entry, struct list_head *hea
 
 void sched_init(void);
 struct task_struct *task_create(void (*fn)(void), int prio, const char *name);
+
+/* The idle loop: enable interrupts, wait for one, reschedule.  Never returns. */
+void cpu_idle(void);
 void enqueue_task(struct rq *rq, struct task_struct *p);
 void dequeue_task(struct rq *rq, struct task_struct *p);
 struct task_struct *pick_next_task(struct rq *rq);

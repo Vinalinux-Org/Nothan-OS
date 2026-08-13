@@ -20,6 +20,7 @@
 #include <nothan/ioctl.h>
 #include <nothan/fs.h>
 #include <nothan/pinctrl.h>
+#include <nothan/wait.h>
 
 #define RX_BUF_SIZE	4096u		/* power of two; headroom for long UCS2 SMS */
 #define RX_BUF_MASK	(RX_BUF_SIZE - 1u)
@@ -32,17 +33,19 @@ struct uart_inst {
 	u8           rx_buf[RX_BUF_SIZE];
 	volatile unsigned int rx_head;	/* ISR writes */
 	volatile unsigned int rx_tail;	/* read() consumes */
+	struct wait_queue_head rx_wait;	/* readers sleep here when it is empty */
 };
 
 /*
- * PROTECTION: the RX ring needs none — one producer (the IRQ handler advances
- * rx_head) and one consumer (read() advances rx_tail), each owning its own
- * index, with the volatile qualifiers making the handoff visible.  That is the
- * one shape in this kernel that is safe without masking, and it only holds
- * because there is exactly one reader per port.
+ * PROTECTION: the RX ring is single-producer (the IRQ handler advances rx_head)
+ * and single-consumer (read() advances rx_tail), each owning its own index, so
+ * the handoff itself needs no lock.
  *
- * TX is the opposite: uart_inst_write() masks, because several unrelated
- * callers push bytes at the same device.
+ * The reader still masks, for a different reason: it has to test "is the ring
+ * empty" and go to sleep as one indivisible step, or the interrupt can deliver
+ * a byte and wake an empty queue in between, and the sleeper never wakes.
+ *
+ * TX masks because several unrelated callers push bytes at the same device.
  */
 static struct uart_inst uarts[] = {
 	{ .base = UART_BASE,  .pa = UART0_PA, .irq = UART_IRQ,  .clkctrl = 0 },
@@ -99,6 +102,8 @@ static void uart_irq_handler(unsigned int irq)
 			break;
 		}
 
+	unsigned int rx_before = u->rx_head;
+
 	while (mmio_read32(u->base + UART_LSR) & LSR_DR) {
 		u8 c = mmio_read32(u->base + UART_RHR);
 		unsigned int next = (u->rx_head + 1) & RX_BUF_MASK;
@@ -107,6 +112,9 @@ static void uart_irq_handler(unsigned int irq)
 			u->rx_head = next;
 		}
 	}
+
+	if (u->rx_head != rx_before)
+		wake_up(&u->rx_wait);
 
 	/*
 	 * Console TX: the transmitter has room, so hand it more of the log
@@ -143,18 +151,33 @@ static void uart_tx_char(u32 base, int c)
 	mmio_write32(base + UART_THR, c);
 }
 
+/*
+ * Block until at least one byte, then return everything available.
+ *
+ * This used to return -1 on an empty ring, which meant callers polled: the
+ * shell spun on read/yield and so did storage_daemon, so two tasks at the same
+ * priority round-robinned forever, idle was never picked, and wfi had never
+ * once executed in this kernel.  It also meant nothing in the system ever
+ * genuinely slept — so there were no wakeups, and nothing for Phase 3 to
+ * measure.
+ */
 static int uart_inst_read(struct uart_inst *u, char *buf, size_t count)
 {
+	unsigned long flags;
 	size_t i = 0;
 
-	while (i < count) {
-		unsigned int tail = u->rx_tail;
-		if (tail == u->rx_head)
-			break;
-		buf[i++] = (char)u->rx_buf[tail];
-		u->rx_tail = (tail + 1) & RX_BUF_MASK;
+	flags = local_irq_save();
+
+	while (u->rx_tail == u->rx_head)
+		wait_event_locked(&u->rx_wait);
+
+	while (i < count && u->rx_tail != u->rx_head) {
+		buf[i++] = (char)u->rx_buf[u->rx_tail];
+		u->rx_tail = (u->rx_tail + 1) & RX_BUF_MASK;
 	}
-	return i > 0 ? (int)i : -1;
+
+	local_irq_restore(flags);
+	return (int)i;
 }
 
 /*
@@ -306,6 +329,18 @@ void console_puts(const char *s)
 }
 
 /**
+ * console_read() - blocking read from the console UART
+ * @buf: where to put the bytes
+ * @count: buffer size
+ *
+ * Return: number of bytes read (at least one — it waits).
+ */
+int console_read(char *buf, size_t count)
+{
+	return uart_inst_read(&uarts[0], buf, count);
+}
+
+/**
  * console_flush_panic() - empty the ring when the system is dying
  *
  * panic() runs with interrupts masked and nothing else will ever run again, so
@@ -415,6 +450,8 @@ static struct cdev uart1_cdev = {
 
 static void uart_hw_init(struct uart_inst *u)
 {
+	init_waitqueue_head(&u->rx_wait);
+
 	/* Enable the module clock if the bootloader did not (UART1). */
 	if (u->clkctrl) {
 		mmio_write32(u->clkctrl, 0x02);

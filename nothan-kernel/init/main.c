@@ -245,7 +245,10 @@ void kernel_main(void)
 	 */
 	schedule();
 
-	/* NOTREACHED */
-	while (1)
-		;
+	/*
+	 * Reached whenever the idle task is picked: this context *is* idle's,
+	 * so become the idle loop rather than spinning here with interrupts
+	 * masked, which would stop the tick and wedge the machine.
+	 */
+	cpu_idle();
 }

@@ -22,6 +22,8 @@
 #include <nothan/fs.h>
 #include <nothan/printk.h>
 #include <nothan/init.h>
+#include <nothan/wait.h>
+#include <asm/irqflags.h>
 
 #define STORAGEBUS_RING_SIZE  65536u        /* must be a power of two */
 #define STORAGEBUS_RING_MASK  (STORAGEBUS_RING_SIZE - 1u)
@@ -34,6 +36,13 @@ struct storagebus_ring {
 
 /* fe2be: produced by storage_fe write(), consumed by storage_be read(). */
 static struct storagebus_ring fe2be;
+
+/*
+ * Readers sleep here rather than polling.  storage_daemon used to spin on
+ * read/yield forever, which together with the shell doing the same kept two
+ * tasks permanently runnable and idle permanently starved.
+ */
+static struct wait_queue_head fe2be_wait;
 
 static int storagebus_ring_read(struct storagebus_ring *r, char *buf, size_t count)
 {
@@ -67,15 +76,29 @@ static int storagebus_ring_write(struct storagebus_ring *r, const char *buf, siz
 /* ---- backend endpoint: /dev/storage_be (storage_daemon reads) ---- */
 static int storage_be_read(struct file *file, char *buf, size_t count)
 {
+	unsigned long flags;
+	int n;
+
 	(void)file;
-	return storagebus_ring_read(&fe2be, buf, count);
+
+	flags = local_irq_save();
+	while ((n = storagebus_ring_read(&fe2be, buf, count)) < 0)
+		wait_event_locked(&fe2be_wait);
+	local_irq_restore(flags);
+
+	return n;
 }
 
 /* ---- frontend endpoint: /dev/storage_fe (GUI writes) ---- */
 static int storage_fe_write(struct file *file, const char *buf, size_t count)
 {
+	int n;
+
 	(void)file;
-	return storagebus_ring_write(&fe2be, buf, count);
+	n = storagebus_ring_write(&fe2be, buf, count);
+	if (n > 0)
+		wake_up(&fe2be_wait);
+	return n;
 }
 
 static const struct file_operations storage_be_fops = {

@@ -76,12 +76,21 @@ static unsigned long idle_stack[IDLE_STACK_WORDS];
 static struct task_struct idle_tsk;
 
 /*
+ * kernel_main runs in the idle task's context and hands over here once the
+ * initial tasks exist — see the call at the end of kernel_main.  It must,
+ * because the first schedule() saves kernel_main's own context into idle_tsk,
+ * overwriting the entry frame built below: when idle is next picked it resumes
+ * wherever kernel_main left off, not at the top of this function.  While
+ * nothing ever slept that never happened; now that reads block, idle is picked
+ * constantly, and landing back in kernel_main's trailing loop with interrupts
+ * masked would stop the tick and wedge the machine.
+ *
  * The idle task owns the global interrupt state outright — nobody is waiting
  * on a critical section it holds — so the unconditional forms are the right
  * ones here.  WFI needs interrupts enabled to be woken by one; schedule()
  * needs them masked.
  */
-static void idle_main(void)
+void cpu_idle(void)
 {
 	while (1) {
 		__asm__ __volatile__ ("cpsie i\nwfi" : : : "memory");
@@ -95,15 +104,15 @@ static void idle_task_init(void)
 	unsigned long *sp = idle_stack + IDLE_STACK_WORDS;
 
 	/* Pre-fill the switch frame (see spawn.c for layout): */
-	*--sp = (unsigned long)idle_main;	/* lr → PC */
+	*--sp = (unsigned long)cpu_idle;	/* lr → PC */
 	*--sp = 0;				/* r11 */
 	*--sp = 0;				/* r10 */
 	*--sp = 0;				/* r9  */
 	*--sp = 0;				/* r8  */
 	*--sp = 0;				/* r7  */
 	*--sp = 0;				/* r6  */
-	*--sp = (unsigned long)idle_main;	/* r5 (fallback exit) */
-	*--sp = (unsigned long)idle_main;	/* r4 (fn) */
+	*--sp = (unsigned long)cpu_idle;	/* r5 (fallback exit) */
+	*--sp = (unsigned long)cpu_idle;	/* r4 (fn) */
 
 		idle_tsk.stack      = sp;
 		idle_tsk.user_sp    = 0;

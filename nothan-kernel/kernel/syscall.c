@@ -127,15 +127,12 @@ static long sys_read(unsigned long a0, unsigned long a1, unsigned long a2)
 	if (!access_ok(buf, count))
 		return -1;
 
-	if (fd == 0) {
-		for (size_t i = 0; i < count; i++) {
-			int c = uart_getchar();
-			if (c < 0)
-				return i > 0 ? (long)i : -1;
-			buf[i] = (char)c;
-		}
-		return (long)count;
-	}
+	/*
+	 * stdin blocks.  It used to return -1 the moment the ring was empty,
+	 * so the shell polled — read, yield, read, yield — and never slept.
+	 */
+	if (fd == 0)
+		return console_read(buf, count);
 
 	return vfs_read(fd, buf, count);
 }

@@ -69,6 +69,7 @@ void uart_putchar(int c);
  *   console_write() — raw bytes, for callers holding a complete message
  *   console_puts()  — NUL-terminated, expands bare newlines to CR LF
  */
+int  console_read(char *buf, size_t count);	/* blocks until data */
 int  console_write(const char *buf, size_t count);
 void console_puts(const char *s);
 
