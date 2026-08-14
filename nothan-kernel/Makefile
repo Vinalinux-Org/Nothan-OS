@@ -5,14 +5,37 @@ OBJCOPY = $(CROSS_COMPILE)objcopy
 
 BUILD_DIR := build
 
+#
+# -MMD -MP makes the compiler emit, next to each object, the list of headers it
+# actually read; the generated .d files are pulled back in at the bottom of this
+# file so a header change rebuilds everything that included it.
+#
+# Without them the only prerequisite of an object was its own .c file, and a
+# header could be edited with nothing rebuilt at all.  Two ways that hurt, and
+# the second is the reason this is not a convenience:
+#
+#   - A switch in nothan/config.h could be changed, the kernel rebuilt, flashed,
+#     and behave exactly as before, because no file that reads the switch was
+#     recompiled.  Checking "it builds clean both ways" proved nothing, since
+#     nothing was compiled either way.
+#
+#   - Worse, objects compiled against different versions of a header could be
+#     linked together.  Change a field in struct task_struct, rebuild the two
+#     files being worked on, and every other object still reads the old offsets.
+#     There is no warning and no fault — just fields landing in the wrong place.
+#     That is precisely the class of bug design-philosophy.md §1 says a UART log
+#     cannot chase, produced by the build system rather than by the code.
+#
 KBUILD_CFLAGS := -mcpu=cortex-a8 -marm -O2 -std=gnu11 -Wall -Wextra
 KBUILD_CFLAGS += -mno-unaligned-access -fno-common
 KBUILD_CFLAGS += -ffreestanding -nostdlib -fno-stack-protector
 KBUILD_CFLAGS += -Wno-array-bounds -Wno-unused-parameter
 KBUILD_CFLAGS += -I include -I arch/arm/include
+KBUILD_CFLAGS += -MMD -MP
 
 KBUILD_AFLAGS := -mcpu=cortex-a8 -marm -D__ASSEMBLY__
 KBUILD_AFLAGS += -I include -I arch/arm/include
+KBUILD_AFLAGS += -MMD -MP
 
 LDSCRIPT := arch/arm/kernel/kernel.ld
 LDFLAGS  := -nostdlib -T $(LDSCRIPT) -Map $(BUILD_DIR)/kernel.map
@@ -121,6 +144,15 @@ $(BUILD_DIR)/%.o: %.S | $(BUILD_DIR)
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
+
+#
+# Header dependencies recorded by -MMD, one .d beside each .o.
+#
+# The leading dash keeps the first build quiet: none of these exist yet, and a
+# missing .d is not an error — it just means that object has never been built,
+# which is the one case where a rebuild is going to happen anyway.
+#
+-include $(OBJS:.o=.d)
 
 .PHONY: clean
 clean:
