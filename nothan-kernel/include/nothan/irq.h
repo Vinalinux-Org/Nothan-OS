@@ -29,4 +29,15 @@ void intc_disable_irq(unsigned int irq);
 void intc_handle_irq(void);
 void request_irq(unsigned int irq, irq_handler_t handler);
 
+/*
+ * How long each handler runs.  Printed by panic(), empty unless
+ * CONFIG_IRQ_TIMING is on.
+ *
+ * kernel-roadmap.md §9.2 requires ISRs to be short and to have an upper bound,
+ * because priority controls tasks and nothing controls interrupts: a handler
+ * doing real work steals from the highest-priority task in the system and no
+ * scheduling decision can see it happen.  Without a number, "short" is a hope.
+ */
+void irq_dump_stats(void);
+
 #endif /* _IRQ_H */

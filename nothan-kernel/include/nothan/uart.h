@@ -16,12 +16,40 @@
 #define UART_FCR		0x08
 #define UART_LCR		0x0C
 #define UART_LSR		0x14
+
+/*
+ * TRM Ch19: 64-byte TX and RX FIFOs; UART_TXFIFO_LVL (read-only) is the number
+ * of bytes currently queued, so 64 minus it is exactly how many may be written
+ * without overflowing.  Knowing the real figure beats inferring one from LSR,
+ * which only distinguishes "completely empty" from "not".
+ */
+#define UART_TXFIFO_LVL		0x68
+#define UART_TX_FIFO_SIZE	64u
 #define UART_MDR1		0x20	/* mode: 0x07=disabled (reset), 0x00=UART 16x */
 
 #define IER_RHR_IT		(1 << 0)
 #define IER_THR_IT		(1 << 1)	/* THR empty — TRM Ch19, IER[1] */
 
+/*
+ * IIR (TRM Ch19, UART_IIR_UART, offset 0x08, read-only):
+ *   [0]   IT_PENDING  0 = an interrupt is pending, 1 = none.  Note the sense.
+ *   [5:1] IT_TYPE     which one, highest priority first
+ *
+ * Reading IIR is also one of the two ways to clear a pending THR interrupt,
+ * the other being a write to THR.  A handler that does neither leaves the line
+ * asserted and is re-entered immediately.
+ */
 #define IIR_IT_PENDING		(1 << 0)
+#define IIR_IT_TYPE_SHIFT	1
+#define IIR_IT_TYPE_MASK	0x1F
+
+#define IIR_TYPE_MODEM		0x0
+#define IIR_TYPE_THR		0x1
+#define IIR_TYPE_RHR		0x2
+#define IIR_TYPE_LINE_STATUS	0x3
+#define IIR_TYPE_RX_TIMEOUT	0x6
+#define IIR_TYPE_XOFF		0x8
+#define IIR_TYPE_MODEM_STATE	0x10
 
 #define LCR_DLAB		(1 << 7)
 #define LCR_8N1			(3 << 0)
@@ -88,5 +116,8 @@ void console_puts(const char *s);
 /* Empty the console ring synchronously.  For panic() only — see the comment
  * on the definition. */
 void console_flush_panic(void);
+
+/* Which source each UART interrupt came from.  Empty unless CONFIG_IRQ_TIMING. */
+void console_dump_irq_sources(void);
 
 #endif /* _UART_H */

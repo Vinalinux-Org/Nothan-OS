@@ -40,7 +40,10 @@ void timer_start(void);
 
 /*
  * Free-running 24 MHz clocksource (DMTimer3, no interrupt).
- * timer_cycles() is monotonic and safe from any context.
+ * timer_cycles() is monotonic and safe from any context, including before the
+ * driver has probed — it returns 0 until then rather than touching a module
+ * the PRCM has not clocked yet, which on this SoC is an external abort and not
+ * a stale reading.
  * cycles_to_us() takes a 32-bit delta only — see the note in the driver.
  *
  * clocksource_ready() is false until the driver has started the counter;

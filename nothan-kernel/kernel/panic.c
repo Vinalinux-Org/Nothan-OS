@@ -18,6 +18,7 @@
 #include <nothan/sched.h>
 #include <nothan/mm.h>
 #include <nothan/uart.h>
+#include <nothan/irq.h>
 
 /*
  * The virtual memory map, in the order mmu_init() installs it — later entries
@@ -212,6 +213,8 @@ void panic(const char *fmt, ...)
 	 */
 	sched_dump_switches();
 	sched_dump_dead();
+	irq_dump_stats();
+	console_dump_irq_sources();
 	printk("=== halted ===\n");
 
 	/* Nothing will ever run to drain the ring after this. */

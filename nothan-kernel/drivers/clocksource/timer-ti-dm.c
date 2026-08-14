@@ -139,6 +139,28 @@ u64 timer_cycles(void)
 	u32 s1, s2, now, last;
 	u64 base;
 
+	/*
+	 * Nothing before tsc_probe() has run.
+	 *
+	 * This function claims to be safe from any context, and it was not: the
+	 * read below reaches DMTimer3, and reading a register of a module whose
+	 * clock the PRCM has not enabled is an external abort on this SoC, not a
+	 * garbage value.  Interrupts are enabled well before initcalls, and the
+	 * UART's handler is registered before this driver probes, so the first
+	 * interrupt after the console comes up arrives while DMTimer3 is still
+	 * dark.  Anything timing that handler faulted, at PC nowhere near the
+	 * mistake — DFAR named the register, which is the only reason it took
+	 * one boot instead of an afternoon.
+	 *
+	 * clocksource_ready() existed for exactly this, but asking every caller
+	 * to remember is the kind of discipline design-philosophy.md §1 rules
+	 * out.  Returning zero makes the promise in the comment above true, and
+	 * a caller that stamps before the clock runs measures zero rather than
+	 * taking the machine down.
+	 */
+	if (!tsc_running)
+		return 0;
+
 	do {
 		s1 = tsc_seq;
 		tsc_barrier();

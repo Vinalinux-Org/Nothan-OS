@@ -10,6 +10,7 @@
 
 #include <asm/irqflags.h>
 #include <nothan/types.h>
+#include <nothan/config.h>
 #include <nothan/uart.h>
 #include <nothan/irq.h>
 #include <nothan/mmio.h>
@@ -73,8 +74,6 @@ static volatile unsigned int log_dropped;	/* bytes lost to a full ring */
 static volatile int log_irq_ready;	/* TX interrupt usable */
 static volatile int log_tx_armed;	/* THR_IT enabled; the ISR owns the ring */
 
-#define TX_BURST	32u		/* chars pushed per TX interrupt */
-
 /* Arm the TX interrupt if there is work and it is not already running.
  * Caller must hold the interrupt mask. */
 static void log_tx_arm_locked(void)
@@ -92,9 +91,143 @@ static void log_tx_arm_locked(void)
 /* RX ring (single-producer ISR / single-consumer read) + polled TX    */
 /* ------------------------------------------------------------------ */
 
+#if CONFIG_IRQ_TIMING
+/*
+ * Why the UART interrupted, counted by source.
+ *
+ * IRQ timing put a number on something that had been invisible: 237658 entries
+ * to this handler in a run whose tasks accounted for about 300 ms, averaging
+ * 0.82 us each — the shape of a handler being re-entered with nothing to do,
+ * not of one doing work.  Nothing here ever read IIR, so nothing knew which
+ * source was asserting, and for a THR interrupt reading IIR is one of only two
+ * ways to clear it (the other being a write to THR).
+ *
+ * Bucketing by IT_TYPE says which line is responsible.  It is also a change in
+ * behaviour and worth being honest about: the read below clears a pending THR
+ * interrupt, so if the storm disappears with this in place, that is itself the
+ * diagnosis rather than a coincidence.
+ *
+ * NONE counts entries where the UART reports nothing pending at all — the
+ * clearest possible signal that the handler is being called for a condition it
+ * has already dealt with.
+ */
+#define IIR_BUCKETS	32
+static u32 iir_count[IIR_BUCKETS];
+static u32 iir_none;
+
+void console_dump_irq_sources(void)
+{
+	static const struct { u8 type; const char *name; } names[] = {
+		{ IIR_TYPE_MODEM,	"modem"      },
+		{ IIR_TYPE_THR,		"THR (tx)"   },
+		{ IIR_TYPE_RHR,		"RHR (rx)"   },
+		{ IIR_TYPE_LINE_STATUS,	"line status"},
+		{ IIR_TYPE_RX_TIMEOUT,	"rx timeout" },
+		{ IIR_TYPE_XOFF,	"xoff"       },
+		{ IIR_TYPE_MODEM_STATE,	"modem state"},
+	};
+	unsigned int i;
+
+	printk("  uart irq sources:\n");
+	if (iir_none)
+		printk("    nothing pending: %lu\n", (unsigned long)iir_none);
+	for (i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+		if (iir_count[names[i].type])
+			printk("    %s: %lu\n", names[i].name,
+			       (unsigned long)iir_count[names[i].type]);
+}
+#else
+void console_dump_irq_sources(void) { }
+#endif
+
+/* Drain the RX FIFO into the per-port ring.  Returns 1 if anything arrived. */
+static int uart_rx_drain(struct uart_inst *u)
+{
+	unsigned int before = u->rx_head;
+
+	while (mmio_read32(u->base + UART_LSR) & LSR_DR) {
+		u8 c = mmio_read32(u->base + UART_RHR);
+		unsigned int next = (u->rx_head + 1) & RX_BUF_MASK;
+
+		if (next != u->rx_tail) {
+			u->rx_buf[u->rx_head] = c;
+			u->rx_head = next;
+		}
+	}
+
+	return u->rx_head != before;
+}
+
+/*
+ * Hand the transmitter as much of the log ring as its FIFO has room for.
+ *
+ * Filled by the FIFO's actual free space, and entered only because the THR
+ * interrupt said so — neither of which used to be true.  The old version asked
+ * LSR[5] TXFIFOE whether to transmit, and that bit answers a different
+ * question: the THR interrupt asserts once the FIFO has TX_FIFO_TRIG free
+ * spaces (eight, as FCR is programmed here), while TXFIFOE is set only when
+ * the FIFO is *completely* empty.  For the whole time a full FIFO was draining
+ * the interrupt was asserted and this function declined to run: no byte
+ * written, nothing disarmed, the cause untouched, and immediate re-entry.
+ *
+ * It cost roughly 190,000 handler entries and 200 ms of CPU in a 300 ms run —
+ * most of the machine, for the duration of every console transmission, and
+ * invisible until CONFIG_IRQ_TIMING put a number on it.  That is the argument
+ * kernel-roadmap.md §9.2 makes, arriving as a bill: priority governs tasks,
+ * nothing governs interrupts, so a handler misbehaving is unaccounted work
+ * taken from whatever was running.
+ *
+ * TXFIFO_LVL gives the exact fill count, so every entry makes progress: at
+ * least the trigger level of bytes leaves, or the ring empties and the
+ * interrupt is disarmed.  No burst constant to guess at, and no overflow.
+ */
+static void uart_tx_fill(struct uart_inst *u)
+{
+	unsigned int room, n;
+
+	if (u != &uarts[0] || !log_tx_armed)
+		return;
+
+	room = UART_TX_FIFO_SIZE - (mmio_read32(u->base + UART_TXFIFO_LVL) & 0xFF);
+
+	for (n = 0; n < room && log_head != log_tail; n++)
+		mmio_write32(u->base + UART_THR,
+			     log_buf[log_tail++ & LOG_BUF_MASK]);
+
+	if (log_head == log_tail) {
+		/* Nothing left — stop the interrupt, or it re-fires forever on
+		 * an empty transmitter. */
+		log_tx_armed = 0;
+		mmio_write32(u->base + UART_IER,
+			     mmio_read32(u->base + UART_IER) & ~IER_THR_IT);
+	}
+}
+
+/*
+ * Ask the UART which interrupt fired, and service that one.
+ *
+ * The previous shape inferred the source from status bits — LSR_DR for
+ * receive, LSR_THRE for transmit — and never read IIR at all.  Inference is
+ * how the storm above happened: TXFIFOE was treated as "the transmit interrupt
+ * fired" when it actually means "the FIFO is entirely empty", so the handler
+ * silently declined to service the very interrupt that had woken it.  IIR is
+ * the register that answers the question being asked, and asking it is what
+ * makes servicing the right source structural rather than a deduction that can
+ * be wrong.
+ *
+ * Looping until IIR reports nothing pending drains several sources in one
+ * entry — a character arriving while the transmitter wants more is ordinary —
+ * and the bound stops a source nobody clears from wedging the machine here.
+ * Reaching the bound is not silent: the interrupt is still asserted, so this
+ * handler is re-entered, and CONFIG_IRQ_TIMING counts every entry.
+ */
+#define UART_IRQ_MAX_ROUNDS	64
+
 static void uart_irq_handler(unsigned int irq)
 {
 	struct uart_inst *u = &uarts[0];
+	int rx_woke = 0;
+	int rounds;
 
 	for (unsigned int i = 0; i < NR_UART; i++)
 		if (uarts[i].irq == irq) {
@@ -102,46 +235,59 @@ static void uart_irq_handler(unsigned int irq)
 			break;
 		}
 
-	unsigned int rx_before = u->rx_head;
+	for (rounds = 0; rounds < UART_IRQ_MAX_ROUNDS; rounds++) {
+		u32 iir = mmio_read32(u->base + UART_IIR);
+		unsigned int type;
 
-	while (mmio_read32(u->base + UART_LSR) & LSR_DR) {
-		u8 c = mmio_read32(u->base + UART_RHR);
-		unsigned int next = (u->rx_head + 1) & RX_BUF_MASK;
-		if (next != u->rx_tail) {
-			u->rx_buf[u->rx_head] = c;
-			u->rx_head = next;
+		if (iir & IIR_IT_PENDING)
+			break;
+
+		type = (iir >> IIR_IT_TYPE_SHIFT) & IIR_IT_TYPE_MASK;
+
+#if CONFIG_IRQ_TIMING
+		iir_count[type & (IIR_BUCKETS - 1)]++;
+#endif
+
+		switch (type) {
+		case IIR_TYPE_RHR:
+		case IIR_TYPE_RX_TIMEOUT:
+			rx_woke |= uart_rx_drain(u);
+			break;
+
+		case IIR_TYPE_THR:
+			uart_tx_fill(u);
+			break;
+
+		default:
+			/*
+			 * Line status, modem status and the rest are cleared by
+			 * reading LSR/MSR.  Nothing here acts on them, but the
+			 * read has to happen or the source stays asserted.
+			 */
+			(void)mmio_read32(u->base + UART_LSR);
+			break;
 		}
 	}
-
-	if (u->rx_head != rx_before)
-		wake_up(&u->rx_wait);
 
 	/*
-	 * Console TX: the transmitter has room, so hand it more of the log
-	 * ring.  This is the whole point of the exercise — the bytes leave
-	 * while everything else runs, and no writer ever waits on the wire.
-	 *
-	 * Up to TX_BURST at a time because the writes themselves are cheap
-	 * register stores into a 64-byte FIFO; it is the waiting that used to
-	 * cost, and there is none here.  Fewer per interrupt would just mean
-	 * more interrupts for the same bytes.
+	 * One wakeup for the whole handler, however many rounds it took: the
+	 * reader cares that bytes arrived, not how the FIFO delivered them, and
+	 * a wakeup per round would be repeated work at the highest priority in
+	 * the system.
 	 */
-	if (u == &uarts[0] && log_tx_armed &&
-	    (mmio_read32(u->base + UART_LSR) & LSR_THRE)) {
-		unsigned int n;
+	if (rx_woke)
+		wake_up(&u->rx_wait);
 
-		for (n = 0; n < TX_BURST && log_head != log_tail; n++)
-			mmio_write32(u->base + UART_THR,
-				     log_buf[log_tail++ & LOG_BUF_MASK]);
-
-		if (log_head == log_tail) {
-			/* Nothing left — stop the interrupt, or it re-fires
-			 * forever on an empty transmitter. */
-			log_tx_armed = 0;
-			mmio_write32(u->base + UART_IER,
-				     mmio_read32(u->base + UART_IER) & ~IER_THR_IT);
-		}
-	}
+#if CONFIG_IRQ_TIMING
+	/*
+	 * Entered with the UART reporting nothing pending at all.  Counted
+	 * separately because it is the signature of a source being serviced
+	 * somewhere else, or of an interrupt that should never have reached
+	 * here — either way not the same thing as a handler doing work.
+	 */
+	if (!rounds)
+		iir_none++;
+#endif
 }
 
 static void uart_tx_char(u32 base, int c)
@@ -213,8 +359,8 @@ static int uart_inst_write(struct uart_inst *u, const char *buf, size_t count)
  * still leave in the order they arrived.
  *
  * Draining happens in the TX interrupt.  A writer appends and returns; the
- * transmitter asks for more when it has room, and the handler feeds it up to
- * TX_BURST characters at a time.  Nobody waits on the wire.
+ * transmitter asks for more when it has room, and the handler fills whatever
+ * room TXFIFO_LVL reports.  Nobody waits on the wire.
  *
  * Before the console interrupt is live there is nobody to do that, and a great
  * deal of boot happens before then, so writers fall back to draining by

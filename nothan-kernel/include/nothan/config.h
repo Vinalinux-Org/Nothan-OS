@@ -107,6 +107,27 @@
 #define CONFIG_SCHED_BAND_TEST	0
 
 /*
+ * Time every interrupt handler (roadmap §9.2, and the measurement §5.3 needs).
+ *
+ * §9.2 states that priority controls tasks while nothing controls interrupts:
+ * a handler doing real work steals from the highest-priority task in the system
+ * and no scheduling decision can see it happen.  It requires ISRs to be short
+ * and bounded — which is a hope until there is a number.
+ *
+ * Immediate use is §5.3.  Taking the tick from 10 ms to 1 ms multiplies the
+ * timer interrupt rate tenfold, and the cost of that cannot be read off the
+ * scheduler accounting: an ISR does not switch tasks, so its time is charged to
+ * whoever it interrupted.  An idle task interrupted a thousand times a second
+ * looks exactly like an idle task left alone.
+ *
+ * A measurement mode rather than something left on, unlike the scheduler
+ * accounting.  That one runs per context switch; this runs per interrupt, on
+ * the shortest latency path in the machine, ahead of the handler that wakes a
+ * task.  Two clocksource reads is small but not free.
+ */
+#define CONFIG_IRQ_TIMING	0
+
+/*
  * Deliberately crash at the end of boot to exercise the panic path.
  *
  * A crash handler that has never crashed is not a handler, it is a guess.  The
