@@ -30,7 +30,19 @@
 #define FCR_RX_TRIG_8		(2 << 6)
 
 #define LSR_DR			(1 << 0)
+
+/*
+ * TRM Ch19, LSR:
+ *   [5] TXFIFOE — transmit hold register empty, "transmission not necessarily
+ *                 completed".  Room to queue another byte, nothing more.
+ *   [6] TXSRE   — both the TX FIFO *and* the shift register are empty, i.e.
+ *                 every byte handed over has actually left the pin.
+ *
+ * Waiting on [5] is right before writing a byte and wrong before touching the
+ * UART's configuration: up to a FIFO's worth of log can still be in flight.
+ */
 #define LSR_THRE		(1 << 5)
+#define LSR_TXSRE		(1 << 6)
 
 #define UART_IRQ		72
 

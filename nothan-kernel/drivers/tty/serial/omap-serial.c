@@ -274,6 +274,33 @@ static void log_drain(void)
 		return;
 	}
 	log_draining = 1;
+
+	/*
+	 * Take the ring away from the TX interrupt for the duration.
+	 *
+	 * log_draining kept two callers of this function apart but said nothing
+	 * to the interrupt handler, which consumes the same ring and tests only
+	 * log_tx_armed.  The loop below deliberately spins on the transmitter
+	 * with interrupts enabled — that is the point of it — so the handler
+	 * could fire mid-drain and start emitting from the same ring.  Neither
+	 * loses a byte, since both advance log_tail under the mask, but they
+	 * emit in whatever order they happen to reach the wire: one holds a
+	 * character in a local while the other pushes the thirty-two after it.
+	 *
+	 * The window is narrow, opening only while log_irq_ready flips from 0
+	 * to 1 with a polled drain already in flight, which is late in initcalls
+	 * — and that is exactly where a boot line came out spliced through the
+	 * middle of another one.  A race inside the console is worse than a race
+	 * anywhere else: design-philosophy.md §1 calls a log the only instrument
+	 * this project has, and this one is the instrument corrupting itself.
+	 *
+	 * Disarming rather than making the handler defer: a handler that returns
+	 * without draining leaves THR_IT enabled and re-fires immediately, which
+	 * would be an interrupt storm for as long as the polled drain lasts.
+	 */
+	log_tx_armed = 0;
+	mmio_write32(uarts[0].base + UART_IER,
+		     mmio_read32(uarts[0].base + UART_IER) & ~IER_THR_IT);
 	local_irq_restore(flags);
 
 	for (;;) {
@@ -284,13 +311,39 @@ static void log_drain(void)
 		if (log_head == log_tail) {
 			dropped = log_dropped;
 			log_dropped = 0;
-			log_draining = 0;
+
+			if (!dropped) {
+				log_draining = 0;
+				/* Hand the ring back; re-arms only if work
+				 * arrived while we were finishing. */
+				log_tx_arm_locked();
+				local_irq_restore(flags);
+				return;
+			}
 			local_irq_restore(flags);
 
-			if (dropped)
-				printk("[log] %u bytes dropped (ring full)\n",
-				       dropped);
-			return;
+			/*
+			 * Report the loss, then go round again to push the
+			 * report itself out.
+			 *
+			 * The previous version cleared log_draining, printk'd,
+			 * and returned — which only appended the line to a ring
+			 * that this call had just stopped emptying.  In normal
+			 * running the TX interrupt picked it up soon after and
+			 * nobody noticed.  On the panic path there is no TX
+			 * interrupt any more: console_flush_panic() disarms it
+			 * and drains by hand, so the notice that bytes were lost
+			 * was itself lost, every time.  The log went quiet about
+			 * the one thing it must never go quiet about — that it
+			 * is incomplete.
+			 *
+			 * log_draining stays 1 across the printk, so the nested
+			 * log_drain() inside it returns at the guard and this
+			 * loop does the emitting.  It terminates because
+			 * log_dropped was taken to zero above.
+			 */
+			printk("[log] %u bytes dropped (ring full)\n", dropped);
+			continue;
 		}
 		c = log_buf[log_tail++ & LOG_BUF_MASK];
 		local_irq_restore(flags);
@@ -458,6 +511,32 @@ static void uart_hw_init(struct uart_inst *u)
 		while ((mmio_read32(u->clkctrl) & 0x30000) != 0)
 			;
 	}
+
+	/*
+	 * Let whatever is already in flight finish before pulling the UART out
+	 * from under it.
+	 *
+	 * UART0 is the console and the bootloader left it running, so by the
+	 * time this probe executes there is a boot log's worth of text moving
+	 * through it.  The polled drain that produced that text waits on
+	 * LSR[5] TXFIFOE, which the TRM defines as "transmit hold register
+	 * empty (transmission not necessarily completed)" — it means a byte can
+	 * be handed over, not that any byte has left the pin.  So up to a
+	 * 64-byte FIFO plus a shift register of log is still queued in hardware
+	 * here, and the three lines below disable the UART and reset its FIFO.
+	 *
+	 * The symptom was one spliced line every couple of boots: the tail of
+	 * the message before this probe replaced by a short burst of garbage.
+	 * Intermittent, cosmetic-looking, and in the one instrument this project
+	 * has for reading itself — which is why it is worth a spin loop.
+	 *
+	 * LSR[6] TXSRE is the bit that means what is needed: FIFO and shift
+	 * register both empty.  Bounded, because a UART that never drains must
+	 * not be able to hang the boot it is supposed to be reporting on.
+	 */
+	unsigned int tx_wait = 100000;
+	while (!(mmio_read32(u->base + UART_LSR) & LSR_TXSRE) && tx_wait--)
+		;
 
 	/* Disable the UART (MDR1 mode 0x7) while programming the divisor — the
 	 * OMAP UART requires MDR1 to be set after the config registers. UART0 was
