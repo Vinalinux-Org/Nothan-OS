@@ -86,8 +86,8 @@ static void cmd_ps(void)
 	}
 
 	putchar('\n');
-	puts("  PID    NAME                   STATE     PRIO\n");
-	puts("  ---    ----                   -----     ----\n");
+	puts("  PID    NAME                   STATE     PRIO   CPU(us)  PICKED\n");
+	puts("  ---    ----                   -----     ----   -------  ------\n");
 	for (long i = 0; i < count; i++) {
 		putchar(' ');
 		putint(tasks[i].pid, 3);
@@ -97,9 +97,21 @@ static void cmd_ps(void)
 		putpad(state_str(tasks[i].state), 9);
 		putchar(' ');
 		putint(tasks[i].prio, 3);
+		puts("  ");
+		putint((int)tasks[i].cpu_us, 9);
+		puts("  ");
+		putint((int)tasks[i].picked, 6);
 		putchar('\n');
 	}
-	putchar('\n');
+
+	/*
+	 * Only runnable tasks appear here: the kernel builds this list by
+	 * walking the runqueue, and a sleeping task has been taken off it.  On
+	 * this box that hides most of what is running — a daemon spends nearly
+	 * all its life blocked waiting for a request.  Say so, rather than
+	 * letting a short list read as a machine with nothing on it.
+	 */
+	puts("\n  (runnable only — sleeping tasks are off the runqueue)\n");
 }
 
 static void cmd_info(void)

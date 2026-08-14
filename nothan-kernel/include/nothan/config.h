@@ -99,6 +99,10 @@
  * 2 = also claim one deadline level twice, which must panic naming both tasks.
  *     The panic is the pass condition, so the machine stops — hence a separate
  *     setting rather than something left on.
+ * 3 = run the four tasks, then panic once they finish, so the context-switch
+ *     ring (roadmap §5.4) can be read against a sequence known in advance.
+ *     Nothing else in the tree produces a switch order that is predictable
+ *     enough to check a post-mortem log against.
  */
 #define CONFIG_SCHED_BAND_TEST	0
 

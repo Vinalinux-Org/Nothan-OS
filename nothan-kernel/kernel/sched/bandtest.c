@@ -43,6 +43,7 @@
 #include <nothan/sched.h>
 #include <nothan/delay.h>
 #include <nothan/printk.h>
+#include <nothan/panic.h>
 
 #if CONFIG_SCHED_BAND_TEST
 
@@ -91,8 +92,27 @@ static void bandtest_work(char mark)
 	int last = (--bandtest_left == 0);
 	local_irq_restore(flags);
 
-	if (last)
-		printk("\n[BAND] done\n");
+	if (!last)
+		return;
+
+	printk("\n[BAND] done\n");
+
+	/*
+	 * Mode 3: stop here so the switch log can be read.
+	 *
+	 * The context-switch ring exists for post-mortems, and until one has
+	 * been read it is a claim rather than a tool.  This is the only thing
+	 * in the tree that produces a switch sequence known in advance — hi
+	 * runs to completion, then lo, then the shared pair alternating — so
+	 * the dump can be checked against something instead of merely admired.
+	 *
+	 * A panic is the honest way to trigger it: sched_dump_switches() is
+	 * wired into the panic path and nowhere else, so calling that path is
+	 * what actually gets tested.
+	 */
+#if CONFIG_SCHED_BAND_TEST == 3
+	panic("band test finished — switch log below is the point of this run");
+#endif
 }
 
 static void bandtest_hi(void)  { bandtest_work('H'); }

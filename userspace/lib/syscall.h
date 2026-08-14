@@ -33,11 +33,17 @@
 #define UNAME_LEN     16
 #define FILE_NAME_LEN 32
 
+/*
+ * Duplicated verbatim in nothan-kernel/include/nothan/syscall.h — the two must
+ * stay identical, since this crosses the syscall boundary and nothing checks it.
+ */
 struct task_info {
 	int pid;
 	char name[TASK_NAME_LEN];
 	int state;
 	int prio;
+	unsigned long cpu_us;	/* CPU time consumed */
+	unsigned long picked;	/* times the scheduler chose it */
 };
 
 struct sys_info {

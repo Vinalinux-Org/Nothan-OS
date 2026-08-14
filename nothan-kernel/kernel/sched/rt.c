@@ -72,7 +72,7 @@ void check_preempt_curr(struct rq *rq, struct task_struct *p)
 #endif
 
 	if (p->prio < rq->curr->prio)
-		need_resched = 1;
+		set_need_resched(RESCHED_WAKEUP);
 }
 
 /**

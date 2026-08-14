@@ -202,6 +202,8 @@ static long sys_gettasklist(unsigned long a0, unsigned long a1, unsigned long a2
 		buf[count].pid = rq->curr->pid;
 		buf[count].state = rq->curr->__state;
 		buf[count].prio = rq->curr->prio;
+		buf[count].cpu_us = rq->curr->cpu_us;
+		buf[count].picked = rq->curr->nr_picked;
 		unsigned int i;
 		for (i = 0; i < TASK_NAME_LEN - 1 && rq->curr->comm[i]; i++)
 			buf[count].name[i] = rq->curr->comm[i];
@@ -220,6 +222,8 @@ static long sys_gettasklist(unsigned long a0, unsigned long a1, unsigned long a2
 			buf[count].pid = tsk->pid;
 			buf[count].state = tsk->__state;
 			buf[count].prio = tsk->prio;
+			buf[count].cpu_us = tsk->cpu_us;
+			buf[count].picked = tsk->nr_picked;
 			unsigned int i;
 			for (i = 0; i < TASK_NAME_LEN - 1 && tsk->comm[i]; i++)
 				buf[count].name[i] = tsk->comm[i];

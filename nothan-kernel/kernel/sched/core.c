@@ -31,6 +31,7 @@
  */
 struct rq runqueue;
 int need_resched;
+int resched_cause;
 #if CONFIG_SCHED_LATENCY
 u32 sched_wake_max;			/* worst wake->run seen, in 24 MHz cycles */
 unsigned long sched_wake_count;		/* wakeups measured */
@@ -75,6 +76,174 @@ static void reap_dead(void)
 			kfree(z->kstack_base);
 		kfree(z);
 	}
+}
+
+/*
+ * The last SCHED_EVENTS context switches, and why each happened.
+ *
+ * panic_dump_tasks() answers "what state did the machine die in".  This
+ * answers the question that usually matters more and that nothing could
+ * answer before: how it got there.  A deadline missed, a task that never ran,
+ * a rotation that did not happen — none of those leave a trace in the final
+ * state, only in the sequence leading to it.
+ *
+ * Always on, unlike CONFIG_SCHED_LATENCY.  The difference is what each is
+ * for: that one produces a number, so it is switched on, read, and switched
+ * off again.  This one exists for the moment something unexpected happens,
+ * and an instrument that has to be enabled before the surprise is an
+ * instrument that is not there when the surprise arrives.
+ *
+ * The cost is one clocksource read per real context switch.  Names are copied
+ * rather than pointed at: a task can be reaped and its task_struct freed long
+ * before the panic that reads this, and a dump that dereferences freed memory
+ * to explain a crash is not much of a witness.
+ *
+ * PROTECTION: the interrupt mask, held by schedule()'s contract — every write
+ * happens inside it.  sched_dump_switches() reads from panic(), which has
+ * already stopped everything else.
+ */
+#define SCHED_EVENTS		32	/* power of two: index masks, no modulo */
+
+struct sched_event {
+	u32	ts;		/* low 32 bits of the cycle counter at the switch */
+	u32	ran;		/* cycles @from had held the CPU */
+	int	from_pid;
+	int	to_pid;
+	short	from_prio;
+	short	to_prio;
+	u8	reason;
+	u8	baseline;	/* @ran is not a measurement, see schedule() */
+	char	from[16];
+	char	to[16];
+};
+
+static struct sched_event sched_events[SCHED_EVENTS];
+static unsigned int sched_event_next;	/* total switches; index = & (N-1) */
+
+static const char *resched_reason_name(int cause)
+{
+	switch (cause) {
+	case RESCHED_TICK:	return "tick";
+	case RESCHED_WAKEUP:	return "wakeup";
+	case RESCHED_BLOCK:	return "block";
+	case RESCHED_EXIT:	return "exit";
+	case RESCHED_VOLUNTARY:	return "yield";
+	default:		return "?";
+	}
+}
+
+static void sched_copy_comm(char *dst, const char *src)
+{
+	unsigned int i = 0;
+
+	for (; i < 15 && src[i]; i++)
+		dst[i] = src[i];
+	dst[i] = '\0';
+}
+
+static void sched_record_switch(struct task_struct *from,
+				struct task_struct *to,
+				u32 ts, u32 ran, int reason, int baseline)
+{
+	struct sched_event *e = &sched_events[sched_event_next & (SCHED_EVENTS - 1)];
+
+	e->ts        = ts;
+	e->ran       = ran;
+	e->from_pid  = from->pid;
+	e->to_pid    = to->pid;
+	e->from_prio = (short)from->prio;
+	e->to_prio   = (short)to->prio;
+	e->reason    = (u8)reason;
+	e->baseline  = (u8)baseline;
+	sched_copy_comm(e->from, from->comm);
+	sched_copy_comm(e->to, to->comm);
+
+	sched_event_next++;
+}
+
+void sched_dump_switches(void)
+{
+	unsigned int have = sched_event_next < SCHED_EVENTS
+			  ? sched_event_next : SCHED_EVENTS;
+	unsigned int i;
+
+	if (!have) {
+		printk("  switches: none yet\n");
+		return;
+	}
+
+	printk("  last %u of %u switches (oldest first):\n",
+	       have, sched_event_next);
+
+	/*
+	 * Oldest first, so the dump reads in the direction things happened.
+	 * A cause is easier to spot at the top of a story than at the bottom.
+	 */
+	for (i = sched_event_next - have; i < sched_event_next; i++) {
+		struct sched_event *e = &sched_events[i & (SCHED_EVENTS - 1)];
+
+		/*
+		 * Right-aligned width only: this printk understands a width and
+		 * zero-padding but not the '-' flag, and an unsupported flag
+		 * lands in the default arm rather than being ignored.
+		 */
+		if (e->baseline) {
+			/*
+			 * The first switch has nothing to measure against, so
+			 * say that instead of printing a zero.  A zero here
+			 * would read as "idle ran for no time at all", which is
+			 * false in a way that invites chasing.
+			 */
+			printk("    %6s  %d:%s(p%d) -> %d:%s(p%d)"
+			       "  ran ? (clock baseline)\n",
+			       resched_reason_name(e->reason),
+			       e->from_pid, e->from, e->from_prio,
+			       e->to_pid, e->to, e->to_prio);
+			continue;
+		}
+
+		printk("    %6s  %d:%s(p%d) -> %d:%s(p%d)  ran %lu us\n",
+		       resched_reason_name(e->reason),
+		       e->from_pid, e->from, e->from_prio,
+		       e->to_pid, e->to, e->to_prio,
+		       (unsigned long)cycles_to_us(e->ran));
+	}
+}
+
+/*
+ * Tasks that have died and not yet had their kernel stack reclaimed.
+ *
+ * Printed by panic() for two reasons.  The plain one: a task that died and was
+ * never reaped is worth seeing in a post-mortem, and until now the dump said
+ * nothing about the dead at all.
+ *
+ * The immediate one: sched_defer_free() prints "[DEAD] queued" and that line
+ * has gone missing from the log, while the format string is present in the
+ * image and the console reports no dropped bytes.  Since the ring is a FIFO,
+ * text that entered it before other text cannot come out after — so those
+ * bytes never entered it.  Asking whether the *list* has the task on it
+ * answers whether the function ran at all, using a data structure instead of
+ * another printk that might vanish the same way.
+ */
+void sched_dump_dead(void)
+{
+	struct list_head *pos;
+	unsigned int n = 0;
+
+	list_for_each(pos, &dead_list) {
+		struct sched_rt_entity *rt =
+			list_entry(pos, struct sched_rt_entity, run_list);
+		struct task_struct *z = container_of(rt, struct task_struct, rt);
+
+		printk("    dead: pid=%d \"%s\" kstack=%p\n",
+		       z->pid, z->comm, z->kstack_base);
+		n++;
+	}
+
+	if (!n)
+		printk("  dead list: empty\n");
+	else
+		printk("  dead list: %u task(s) awaiting reap\n", n);
 }
 
 /*
@@ -325,9 +494,85 @@ void schedule(void)
 	}
 #endif
 
+	/*
+	 * Accounting, on real switches only.
+	 *
+	 * schedule() is often reached with prev == next: nothing more urgent was
+	 * ready, so the same task carries on.  Nothing happened there worth
+	 * recording, and leaving switch_ts alone is also what keeps the numbers
+	 * right — prev goes on running and the whole span lands on its account
+	 * at whatever switch finally does take the CPU away.
+	 *
+	 * The reason is decided here rather than trusted from resched_cause
+	 * alone, because the two can disagree honestly: the tick can ask for a
+	 * reschedule and then the task blocks before the request is serviced.
+	 * What prev is doing now outranks what something wanted a moment ago.
+	 * Exit is the one case state cannot show, since do_exit() parks a dying
+	 * task in TASK_UNINTERRUPTIBLE exactly like a sleeping one — so it says
+	 * so explicitly, and that is checked first.
+	 */
+	if (prev && prev != next) {
+		u64 now = timer_cycles();
+		u32 ran;
+		int reason;
+
+		/*
+		 * Establish the baseline on the first switch instead of trusting
+		 * a zero.
+		 *
+		 * switch_ts cannot be set in sched_init(): the clocksource is
+		 * brought up by an initcall, which runs later, so a stamp taken
+		 * there would be meaningless.  Left at zero, the first switch
+		 * would compute "now minus the beginning of time" and hand the
+		 * idle task a run of several seconds — which would then be its
+		 * maximum forever, and every genuine sample afterwards would be
+		 * measured and never reported.
+		 *
+		 * That is the same trap as the uninitialised wake_ts in
+		 * kernel-roadmap.md §5.1.1, and it is worth noticing that it
+		 * came back in a different field: an instrument that starts
+		 * measuring before it has a zero point produces numbers that
+		 * look real.
+		 */
+		int baseline = !runqueue.switch_ts;
+
+		if (baseline)
+			runqueue.switch_ts = now;
+
+		ran = (u32)(now - runqueue.switch_ts);
+
+		if (resched_cause == RESCHED_EXIT)
+			reason = RESCHED_EXIT;
+		else if (prev->__state != TASK_RUNNING)
+			reason = RESCHED_BLOCK;
+		else if (resched_cause != RESCHED_NONE)
+			reason = resched_cause;
+		else
+			reason = RESCHED_VOLUNTARY;
+
+		/*
+		 * Fold cycles into microseconds keeping the remainder, so a task
+		 * switched thousands of times does not lose most of its runtime
+		 * to truncation one switch at a time.  Split this way the
+		 * intermediate cannot overflow: both remainders stay under 24.
+		 */
+		u32 rem = prev->cpu_cyc_rem + (ran % TSC_CYCLES_PER_US);
+
+		prev->cpu_us     += ran / TSC_CYCLES_PER_US + rem / TSC_CYCLES_PER_US;
+		prev->cpu_cyc_rem = rem % TSC_CYCLES_PER_US;
+
+		if (ran > prev->max_run_cyc)
+			prev->max_run_cyc = ran;
+
+		next->nr_picked++;
+		sched_record_switch(prev, next, (u32)now, ran, reason, baseline);
+		runqueue.switch_ts = now;
+	}
+
 	runqueue.curr = next;
 	next->rt.ran_once = 1;
 	need_resched = 0;
+	resched_cause = RESCHED_NONE;
 
 	/*
 	 * Interrupts stay masked across __switch_to: a timer IRQ landing
@@ -406,6 +651,6 @@ void scheduler_tick(void)
 
 	curr->rt.time_slice = BG_TIMESLICE;
 #if SCHED_PREEMPT
-	need_resched = 1;
+	set_need_resched(RESCHED_TICK);
 #endif
 }

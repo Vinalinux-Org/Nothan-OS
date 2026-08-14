@@ -110,8 +110,25 @@ void panic_dump_tasks(void)
 		return;
 	}
 
-	printk("  current: pid=%d \"%s\" prio=%d state=0x%x\n",
-	       cur->pid, cur->comm, cur->prio, cur->__state);
+	printk("  current: pid=%d \"%s\" prio=%d(%s) state=0x%x\n",
+	       cur->pid, cur->comm, cur->prio, prio_band_name(cur->prio),
+	       cur->__state);
+
+	/*
+	 * The running task's accounting, which the runqueue listing below
+	 * cannot show: it is not on the runqueue, it holds the CPU.  On a box
+	 * whose daemons sleep most of the time, the listing is frequently just
+	 * the idle task, and without this line the dump reports nothing at all
+	 * about the only task that was definitely doing something.
+	 *
+	 * cpu_us excludes the stretch it is running right now — that is only
+	 * added at the switch which has not happened.
+	 */
+	printk("           cpu=%lu us picked=%lu longest=%lu us"
+	       " (current run not yet counted)\n",
+	       (unsigned long)cur->cpu_us,
+	       (unsigned long)cur->nr_picked,
+	       (unsigned long)cycles_to_us(cur->max_run_cyc));
 
 	/*
 	 * Kernel stack bounds, so "did it run off its own stack" is a question
@@ -149,8 +166,20 @@ void panic_dump_tasks(void)
 			struct task_struct *t =
 				container_of(rt, struct task_struct, rt);
 
-			printk("    prio %2d: pid=%d \"%s\"\n",
-			       prio, t->pid, t->comm);
+			/*
+			 * Accounting alongside the name, because "who is
+			 * runnable" and "who has actually been getting the CPU"
+			 * are different questions and the second one is how
+			 * starvation shows itself.  A task sitting on the
+			 * runqueue with picked=0 has been ready and passed over
+			 * every single time, which no other line here reveals.
+			 */
+			printk("    prio %2d: pid=%d \"%s\" cpu=%lu us"
+			       " picked=%lu longest=%lu us\n",
+			       prio, t->pid, t->comm,
+			       (unsigned long)t->cpu_us,
+			       (unsigned long)t->nr_picked,
+			       (unsigned long)cycles_to_us(t->max_run_cyc));
 		}
 	}
 }
@@ -174,6 +203,15 @@ void panic(const char *fmt, ...)
 	printk("\n=== KERNEL PANIC ===\n");
 	printk("  %s\n", buf);
 	panic_dump_tasks();
+	/*
+	 * What state the machine died in, then how it got there.  The second
+	 * question is usually the one worth answering: a deadline missed, a
+	 * rotation that never happened, a task that stopped being scheduled —
+	 * none of those leave a mark on the final state, only on the sequence
+	 * that produced it.
+	 */
+	sched_dump_switches();
+	sched_dump_dead();
 	printk("=== halted ===\n");
 
 	/* Nothing will ever run to drain the ring after this. */

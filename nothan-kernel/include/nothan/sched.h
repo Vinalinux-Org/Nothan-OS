@@ -119,7 +119,40 @@ struct task_struct {
 	struct mm_struct		*mm;    /* NULL = kernel thread */
 	int				exit_code;
 	char				cwd[64];
+
+	/*
+	 * Accounting — debug data, not a scheduler input.  Nothing here is ever
+	 * read by a scheduling decision; putting it in task_struct rather than
+	 * in the rt entity is the reminder of that.
+	 *
+	 * Kept in microseconds rather than cycles because a total has to be
+	 * printable, and this kernel links -nostdlib with no libgcc, so a 64-bit
+	 * division would not link.  Division by the constant 24 compiles to a
+	 * reciprocal multiply.  @cpu_cyc_rem carries the cycles left over from
+	 * the last conversion so a task switched thousands of times does not
+	 * lose most of its runtime to truncation, one switch at a time.
+	 *
+	 * @cpu_us wraps after about 71 minutes of accumulated CPU.  Acceptable
+	 * for a counter whose job is explaining the last few seconds before
+	 * something went wrong; worth remembering before treating it as uptime.
+	 */
+	u32				cpu_us;		/* CPU time consumed */
+	u32				cpu_cyc_rem;	/* cycles not yet folded in */
+	u32				max_run_cyc;	/* longest single run */
+	u32				nr_picked;	/* times chosen to run */
 };
+
+/*
+ * Why the scheduler is about to switch.  Recorded per switch so a panic can
+ * say how the machine reached the state it died in, not only what that state
+ * was.
+ */
+#define RESCHED_NONE		0	/* must stay 0 — vectors.S tests non-zero */
+#define RESCHED_TICK		1	/* timeslice expired, shared band rotating */
+#define RESCHED_WAKEUP		2	/* something more urgent became runnable */
+#define RESCHED_BLOCK		3	/* the running task is going to sleep */
+#define RESCHED_EXIT		4	/* the running task is dying */
+#define RESCHED_VOLUNTARY	5	/* schedule() called with nothing pending */
 
 /**
  * struct rt_prio_array - O(1) priority queue with bitmap
@@ -141,6 +174,7 @@ struct rq {
 	struct rt_prio_array	active;
 	unsigned int			nr_running;
 	struct task_struct		*curr;
+	u64				switch_ts;	/* when @curr took the CPU */
 };
 
 /* Bitmap helpers */
@@ -222,6 +256,47 @@ void scheduler_tick(void);
 
 extern struct rq runqueue;
 extern int need_resched;
+extern int resched_cause;
+
+/*
+ * Ask for a reschedule and say why, in one step.
+ *
+ * The two words are always written together and never separately, so they
+ * cannot drift into disagreeing about whether a switch is pending — which is
+ * the failure a second flag invites if each caller is trusted to set both.
+ * need_resched keeps its 0/1 meaning because vectors.S tests it directly.
+ */
+static inline void set_need_resched(int cause)
+{
+	resched_cause = cause;
+	need_resched = 1;
+}
+
+/*
+ * Record why the next switch happens, without asking for one.
+ *
+ * For a caller that is going to call schedule() itself, and must not be
+ * switched out before it gets there.  Using set_need_resched() instead is a
+ * quiet way to lose the rest of the function: any interrupt taken before the
+ * call will service the request on the way out and never come back — and if
+ * the caller had already parked itself in a non-runnable state, it is not
+ * merely late, it is gone.  do_exit() lost the whole of its own cleanup that
+ * way, kernel stack included.
+ *
+ * Only safe to call with interrupts masked; otherwise the same interrupt can
+ * arrive between this and the schedule() and read a cause for a switch the
+ * caller has not decided on yet.
+ */
+static inline void set_resched_cause(int cause)
+{
+	resched_cause = cause;
+}
+
+/* Last N context switches, with reasons.  Printed by panic(). */
+void sched_dump_switches(void);
+
+/* Tasks that died and have not been reaped yet.  Printed by panic(). */
+void sched_dump_dead(void);
 extern bool sched_running;  /* true after first real context switch */
 
 void do_exit(int code);

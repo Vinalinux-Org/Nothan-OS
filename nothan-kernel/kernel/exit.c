@@ -97,6 +97,33 @@ void do_exit(int code)
 	 */
 	local_irq_disable();
 
+	/*
+	 * Say that this is a death, not a sleep — and say it here, masked,
+	 * rather than up where the state was set.
+	 *
+	 * A dying task is parked in TASK_UNINTERRUPTIBLE, the same state a task
+	 * waiting on a device sits in, so the switch below is indistinguishable
+	 * from an ordinary block by state alone.  The distinction matters: it is
+	 * the difference between "this task stopped and is never coming back"
+	 * and "this task is waiting for something", two readings of a stalled
+	 * machine that lead in opposite directions.
+	 *
+	 * The first attempt asked for a reschedule at the top of this function,
+	 * with interrupts still open.  The very next interrupt — and printk()
+	 * arms the console TX interrupt, so one arrives almost at once — served
+	 * that request on its way out and never returned here.  The task was
+	 * already non-runnable, so schedule() did not put it back either: it
+	 * left the CPU for good in the middle of its own cleanup, before
+	 * reaching the line below.  Nothing was queued for the reaper, so its
+	 * kernel stack and task_struct were simply lost, once per task death,
+	 * and the only outward sign was a missing log line.
+	 *
+	 * set_resched_cause() records the reason without requesting anything,
+	 * which is what a caller that is about to call schedule() itself
+	 * actually means.
+	 */
+	set_resched_cause(RESCHED_EXIT);
+
 	sched_defer_free(tsk);
 	schedule();
 
