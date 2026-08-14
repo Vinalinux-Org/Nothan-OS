@@ -699,9 +699,18 @@ static int musb_hcd_probe(struct platform_device *pdev)
 	/* Expose touch as the /dev/input0 pointer backend. */
 	input_register_ops(&musb_input_ops);
 
-	/* Enumeration runs in its own thread, woken by the connect IRQ. */
+	/*
+	 * Enumeration runs in its own thread, woken by the connect IRQ.
+	 *
+	 * BG rather than a deadline level: enumerating a newly plugged device is
+	 * a long conversation of control transfers with timeouts in it, and
+	 * nothing is waiting on a deadline for it to finish.  Priority means
+	 * urgency x shortness (kernel-roadmap.md §9.3), and this is neither, so
+	 * it belongs where tasks take turns.  Delivering input events once the
+	 * device is up is a different path — short, and driven by the IRQ.
+	 */
 	init_completion(&musb_connect_event);
-	struct task_struct *t = task_create(musb_enum_thread, DEFAULT_PRIO,
+	struct task_struct *t = task_create(musb_enum_thread, PRIO_BG,
 					    "musb-enum");
 	if (t)
 		enqueue_task(&runqueue, t);

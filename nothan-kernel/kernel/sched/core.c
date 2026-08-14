@@ -12,6 +12,7 @@
 #include <nothan/printk.h>
 #include <nothan/config.h>
 #include <nothan/timer.h>
+#include <nothan/panic.h>
 
 /*
  * PROTECTION: the interrupt mask (asm/irqflags.h), held by whoever mutates.
@@ -76,6 +77,51 @@ static void reap_dead(void)
 	}
 }
 
+/*
+ * Owner of each deadline-band priority, or NULL if free.
+ *
+ * PROTECTION: none needed.  Every entry is written once, during boot, from the
+ * task-creation path with interrupts already masked, and read only by panic
+ * paths afterwards.  Nothing claims a priority once the machine is running —
+ * the app set is fixed at build time, which is exactly what makes a table this
+ * simple sufficient.
+ */
+static const char *prio_owner[MAX_PRIO];
+
+const char *prio_band_name(int prio)
+{
+	if (prio >= IDLE_PRIO)
+		return "IDLE";
+	if (prio >= PRIO_BG)
+		return "BG";
+	if (prio >= PRIO_UI)
+		return "UI";
+	if (prio >= PRIO_VIDEO)
+		return "VIDEO";
+	if (prio >= PRIO_NET)
+		return "NET";
+	return "AUDIO";
+}
+
+void sched_claim_prio(int prio, const char *name)
+{
+	if (prio < 0 || prio >= MAX_PRIO)
+		panic("prio %d out of range for '%s'", prio, name);
+
+	/*
+	 * The shared band is shared on purpose — that is the whole difference
+	 * between it and the deadline bands, so there is nothing to claim.
+	 */
+	if (prio_is_shared(prio))
+		return;
+
+	if (prio_owner[prio])
+		panic("prio %d (%s) wanted by '%s', already held by '%s'",
+		      prio, prio_band_name(prio), name, prio_owner[prio]);
+
+	prio_owner[prio] = name;
+}
+
 /* Idle task — always runnable, lowest priority, no kmalloc needed. */
 #define IDLE_STACK_WORDS 256
 static unsigned long idle_stack[IDLE_STACK_WORDS];
@@ -126,7 +172,7 @@ static void idle_task_init(void)
 		idle_tsk.__state    = TASK_RUNNING;
 		idle_tsk.pid        = 0;
 		idle_tsk.prio       = IDLE_PRIO;
-		idle_tsk.rt.time_slice = RR_TIMESLICE;
+		idle_tsk.rt.time_slice = BG_TIMESLICE;
 		idle_tsk.rt.on_rq   = 0;
 		idle_tsk.rt.ran_once = 0;
 		idle_tsk.exit_code  = 0;
@@ -138,6 +184,7 @@ static void idle_task_init(void)
 		idle_tsk.comm[i] = name[i];
 	idle_tsk.comm[i] = '\0';
 
+	sched_claim_prio(IDLE_PRIO, idle_tsk.comm);
 	enqueue_task(&runqueue, &idle_tsk);
 		runqueue.curr = &idle_tsk;
 }
@@ -170,8 +217,12 @@ void sched_init(void)
 	 */
 	rq->curr = &idle_tsk;
 
-	printk("[SCHED] %d prio levels, RR timeslice=%d tick(s), idle at %d\n",
-	       MAX_PRIO, RR_TIMESLICE, IDLE_PRIO);
+	printk("[SCHED] bands AUDIO=%d NET=%d VIDEO=%d UI=%d BG=%d-%d IDLE=%d\n",
+	       PRIO_AUDIO, PRIO_NET, PRIO_VIDEO, PRIO_UI,
+	       PRIO_BG, PRIO_BG_LAST, IDLE_PRIO);
+	printk("[SCHED] deadline bands strict + exclusive; BG shares one level,"
+	       " %d ms slice (%d tick(s) of %d ms)\n",
+	       BG_TIMESLICE_MS, BG_TIMESLICE, TICK_MS);
 }
 
 /**
@@ -319,12 +370,27 @@ void schedule(void)
 
 /*
  * Preemptive scheduling: the timer tick rotates the running task once its
- * RR timeslice is spent. (Was toggled to 0 during a 2026-06 A/B test; the
+ * timeslice is spent. (Was toggled to 0 during a 2026-06 A/B test; the
  * project has since chosen real preemptive multitasking so background tasks
  * can run alongside the GUI without it having to yield() cooperatively.)
  */
 #define SCHED_PREEMPT  1
 
+/*
+ * The tick rotates the shared band and nothing else.
+ *
+ * The previous version rotated whatever was running, which is the right rule
+ * when every task is equal and the wrong one here.  A task in a deadline band
+ * owns its level alone, so rotating it can only hand the CPU to something less
+ * urgent while its own deadline is approaching — and it buys nothing, because
+ * there is no equal waiting behind it to be fair to.  Those tasks give up the
+ * CPU by blocking, or lose it to a wakeup at a better priority; both paths run
+ * through check_preempt_curr() already.
+ *
+ * Rotation exists for the shared band, where several applications sit on one
+ * level with no deadline between them.  There, taking turns is the only thing
+ * standing between Word and never running while Excel is busy.
+ */
 void scheduler_tick(void)
 {
 	struct task_struct *curr = runqueue.curr;
@@ -332,10 +398,13 @@ void scheduler_tick(void)
 	if (!curr)
 		return;
 
+	if (!prio_is_shared(curr->prio))
+		return;
+
 	if (--curr->rt.time_slice > 0)
 		return;
 
-	curr->rt.time_slice = RR_TIMESLICE;
+	curr->rt.time_slice = BG_TIMESLICE;
 #if SCHED_PREEMPT
 	need_resched = 1;
 #endif

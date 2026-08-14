@@ -197,7 +197,15 @@ void stress_start(void)
 	       " and the allocator probe is consistent\n");
 
 	for (i = 0; i < sizeof(tasks) / sizeof(tasks[0]); i++) {
-		struct task_struct *t = task_create(tasks[i].fn, DEFAULT_PRIO,
+		/*
+		 * All four on the shared BG level, which is what makes this a
+		 * concurrency test: the tick rotates between equals, so they
+		 * genuinely interleave inside each other's critical sections.
+		 * A deadline band would not do — those levels are exclusive and
+		 * are never rotated by the tick, so the tasks would run one
+		 * after another and contend with nothing.
+		 */
+		struct task_struct *t = task_create(tasks[i].fn, PRIO_BG,
 						    tasks[i].name);
 		if (t)
 			enqueue_task(&runqueue, t);

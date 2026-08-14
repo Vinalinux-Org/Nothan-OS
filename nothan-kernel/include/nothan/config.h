@@ -83,6 +83,26 @@
 #define CONFIG_STRESS_TEST	0
 
 /*
+ * Priority-band acceptance test (roadmap Phase 3 §5.2).
+ *
+ * Four tasks that busy-wait and print: two on exclusive deadline levels, two
+ * sharing the BG level.  The two scheduling rules produce opposite output from
+ * the same shape of task, so one glance at the log tells them apart — and the
+ * expected string is printed before they start, so the answer is known in
+ * advance rather than inferred from whatever appears.
+ *
+ * Boot alone cannot check this.  It reports the priorities that were assigned,
+ * which says what was intended, not what the scheduler does with them.
+ *
+ * 0 = off
+ * 1 = run the four tasks
+ * 2 = also claim one deadline level twice, which must panic naming both tasks.
+ *     The panic is the pass condition, so the machine stops — hence a separate
+ *     setting rather than something left on.
+ */
+#define CONFIG_SCHED_BAND_TEST	0
+
+/*
  * Deliberately crash at the end of boot to exercise the panic path.
  *
  * A crash handler that has never crashed is not a handler, it is a guess.  The

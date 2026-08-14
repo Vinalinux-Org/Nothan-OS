@@ -355,8 +355,17 @@ static int timer_probe(struct platform_device *pdev)
 	/* Clear any pending interrupts. */
 	mmio_write32(DMTIMER2_BASE + IRQSTATUS, 0x7);
 
-	/* Step 6: Configure reload value for 10 ms @ 24 MHz. */
-	u32 reload = 0xFFFFFFFF - 240000 + 1;
+	/*
+	 * Step 6: Configure the reload value from TICK_MS.
+	 *
+	 * The count was a literal 240000 with a comment saying "10 ms", so the
+	 * period lived in two places: here, and in every constant elsewhere
+	 * derived from it.  Roadmap §5.3 changes the tick to 1 ms; with the
+	 * literal, that change would have left the scheduler's timeslices
+	 * meaning a tenth of what they say, silently.
+	 */
+	u32 ticks_per_period = (TSC_CYCLES_PER_US * 1000u) * TICK_MS;
+	u32 reload = 0xFFFFFFFF - ticks_per_period + 1;
 
 	mmio_write32(DMTIMER2_BASE + TLDR, reload);
 	timeout = 10000;
@@ -379,7 +388,8 @@ static int timer_probe(struct platform_device *pdev)
 	while ((mmio_read32(DMTIMER2_BASE + TWPS) & TWPS_W_PEND_TCLR) && timeout--)
 		;
 	/* Timer intentionally NOT started yet — timer_start() after sched_init() */
-	printk("[TIMER] DMTimer2 @ 24 MHz, 10 ms tick, IRQ %d\n", DMTIMER2_IRQ);
+	printk("[TIMER] DMTimer2 @ 24 MHz, %d ms tick (%lu counts), IRQ %d\n",
+	       TICK_MS, (unsigned long)ticks_per_period, DMTIMER2_IRQ);
 	return 0;
 }
 

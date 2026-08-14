@@ -20,6 +20,7 @@ extern void mmu_drop_idmap(void);
 extern void omap_intc_init(void);
 extern void cache_bench(void);
 extern void stress_start(void);
+extern void bandtest_start(void);
 extern struct task_struct *user_task_create(const char *name);
 extern struct task_struct *user_task_create_gui(void);
 extern struct task_struct *user_task_create_phone_daemon(void);
@@ -200,6 +201,7 @@ void kernel_main(void)
 
 	/* Interrupts are still masked here, same as the spawns above. */
 	stress_start();
+	bandtest_start();
 
 #if CONFIG_PANIC_TEST
 	/*

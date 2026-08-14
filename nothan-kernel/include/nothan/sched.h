@@ -3,6 +3,7 @@
 
 #include <nothan/types.h>
 #include <nothan/mm.h>
+#include <nothan/timer.h>	/* TICK_MS, for the timeslice below */
 
 /* Task state constants (Linux v6.17 compatible, bitmask-style) */
 #define TASK_RUNNING		0x00000000	/* running or on runqueue */
@@ -23,8 +24,61 @@
 /* Scheduling constants */
 #define MAX_PRIO			32	/* 32 fixed priority levels */
 #define IDLE_PRIO			(MAX_PRIO - 1)	/* lowest: idle task */
-#define DEFAULT_PRIO		16	/* mid-point for normal tasks */
-#define RR_TIMESLICE		1	/* ticks per timeslice (1 tick = 10 ms) */
+
+/*
+ * Priority bands — Documentation/kernel-roadmap.md §5.2.
+ *
+ * Lower number is more urgent.  A band is named after the *kind of work*, not
+ * after an application: the mute button belongs to UI even though it is about
+ * sound, because priority means urgency x shortness, not importance.
+ *
+ * Two different rules apply, and mixing them up is the whole point of naming
+ * the bands:
+ *
+ *   AUDIO/NET/VIDEO/UI  deadline bands.  One task per level, enforced at boot
+ *                       (sched_claim_prio).  Strict priority: a task here runs
+ *                       until it blocks or something more urgent wakes.  The
+ *                       tick never rotates it — rotation would hand the CPU to
+ *                       an equal just as a deadline approached.
+ *
+ *   BG                  no deadline, and must not starve.  Tasks share one
+ *                       level and rotate on the tick.  This is where the seven
+ *                       box applications live: giving Word and Excel unique
+ *                       priorities would mean the lower of the two never runs
+ *                       at all while the other is busy.
+ */
+#define PRIO_AUDIO		0	/* 0-3   audio in/out, 10 ms deadline */
+#define PRIO_NET		4	/* 4-7   packet RX/TX, budgeted */
+#define PRIO_VIDEO		8	/* 8-11  capture, frame assembly */
+#define PRIO_UI			12	/* 12-19 compositor, input, focused app */
+#define PRIO_BG			20	/* 20-27 daemons and applications, shared */
+#define PRIO_BG_LAST		27
+
+/* Priority assignment for the tasks this box actually runs. */
+#define PRIO_SHELL		(PRIO_UI + 0)	/* echoing a keypress: short, urgent */
+#define PRIO_GUI		(PRIO_UI + 1)	/* redraw: long, so below the shell */
+
+/*
+ * True for levels where several tasks may share a priority and take turns.
+ * Everything else is a deadline level and is exclusive.
+ */
+static inline int prio_is_shared(int prio)
+{
+	return prio >= PRIO_BG && prio <= PRIO_BG_LAST;
+}
+
+/*
+ * Timeslice for the shared band, expressed in milliseconds and converted to
+ * ticks here.
+ *
+ * The old constant was "1 tick" with a comment noting that a tick was 10 ms.
+ * Roadmap §5.3 takes the tick to 1 ms, which would have silently turned a
+ * 10 ms timeslice into a 1 ms one — a thousand context switches a second for
+ * tasks that have no deadline and no reason to react quickly.  Deriving it
+ * from TICK_MS keeps the duration meaning what it says through that change.
+ */
+#define BG_TIMESLICE_MS		20
+#define BG_TIMESLICE		(BG_TIMESLICE_MS / TICK_MS)
 
 /**
  * struct sched_rt_entity - per-task scheduling entity
@@ -133,6 +187,23 @@ static inline void list_move_tail(struct list_head *entry, struct list_head *hea
 
 void sched_init(void);
 struct task_struct *task_create(void (*fn)(void), int prio, const char *name);
+
+/*
+ * Take ownership of a deadline-band priority, or panic naming both claimants.
+ *
+ * The app set is fixed at build time, so a duplicate is a build mistake that
+ * happens to be discovered at boot — not a condition to recover from.  Two
+ * tasks on one deadline level means the scheduler's "next task is a pure
+ * function of the ready set" property is gone, and with it the ability to
+ * reproduce a scheduling bug from a log (design-philosophy.md §1).  Better to
+ * refuse to boot than to run a machine whose timing cannot be explained.
+ *
+ * A shared-band priority claims nothing and always succeeds.
+ */
+void sched_claim_prio(int prio, const char *name);
+
+/* Band name for logs: "AUDIO preempted VIDEO" explains itself, "3" does not. */
+const char *prio_band_name(int prio);
 
 /* The idle loop: enable interrupts, wait for one, reschedule.  Never returns. */
 void cpu_idle(void);

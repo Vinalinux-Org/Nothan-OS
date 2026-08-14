@@ -91,7 +91,7 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 	p->__state    = TASK_RUNNING;
 	p->pid        = next_pid++;
 	p->prio       = prio;
-	p->rt.time_slice = RR_TIMESLICE;
+	p->rt.time_slice = BG_TIMESLICE;
 	p->rt.on_rq   = 0;
 	p->rt.ran_once = 0;
 	p->exit_code  = 0;
@@ -103,6 +103,9 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 	for (; i < 15 && name[i]; i++)
 		p->comm[i] = name[i];
 	p->comm[i] = '\0';
+
+	/* Claim after comm is set, so a collision can name both tasks. */
+	sched_claim_prio(prio, p->comm);
 
 	return p;
 }
@@ -143,6 +146,7 @@ struct user_bin_header {
 /**
  * user_task_create_bin() - Create a user-mode task from a binary blob
  * @name: Task name for debugging
+ * @prio: scheduling priority — see the band table in nothan/sched.h
  * @blob_start: Start of the binary image in kernel memory
  * @blob_end: End of the binary image in kernel memory
  *
@@ -151,9 +155,14 @@ struct user_bin_header {
  * Copies the binary into the code pages and sets up the L2 mapping so
  * the task can run at PL0.
  *
+ * @prio used to be DEFAULT_PRIO for every user task, which put all of them on
+ * one level of what is now a deadline band.  Each caller states its own now,
+ * because the band a task belongs to is a property of the work it does and
+ * cannot be guessed here.
+ *
  * Return: Pointer to the task_struct ready to enqueue, or NULL on failure.
  */
-struct task_struct *user_task_create_bin(const char *name,
+struct task_struct *user_task_create_bin(const char *name, int prio,
 	char *blob_start, char *blob_end)
 {
 	struct task_struct *p = (struct task_struct *)kmalloc(sizeof(*p), GFP_KERNEL);
@@ -360,8 +369,8 @@ struct task_struct *user_task_create_bin(const char *name,
 	p->user_lr    = 0;
 	p->__state    = TASK_RUNNING;
 	p->pid        = next_pid++;
-	p->prio       = DEFAULT_PRIO;
-	p->rt.time_slice = RR_TIMESLICE;
+	p->prio       = prio;
+	p->rt.time_slice = BG_TIMESLICE;
 	p->rt.on_rq   = 0;
 	p->rt.ran_once = 0;
 	p->mm         = mm;
@@ -374,8 +383,13 @@ struct task_struct *user_task_create_bin(const char *name,
 		p->comm[i] = name[i];
 	p->comm[i] = '\0';
 
-	printk("[SPAWN] user task \"%s\" pid=%d, code_pa=0x%lx, stack_pa=0x%lx\n",
-	       p->comm, p->pid, code_pa, stack_pa);
+	/* Claim after comm is set, so a collision can name both tasks. */
+	sched_claim_prio(prio, p->comm);
+
+	printk("[SPAWN] user task \"%s\" pid=%d prio=%d(%s),"
+	       " code_pa=0x%lx, stack_pa=0x%lx\n",
+	       p->comm, p->pid, p->prio, prio_band_name(p->prio),
+	       code_pa, stack_pa);
 	printk("[SPAWN]   pgd_pa=0x%lx nr_l2=%u sp_top=0x%lx (stack high VA)\n",
 	       mm->pgd_pa, mm->nr_l2, mm->sp_top);
 
@@ -399,6 +413,16 @@ struct task_struct *user_task_create_bin(const char *name,
 	return p;
 }
 
+/*
+ * The four tasks this build can spawn, and the band each one belongs to.
+ *
+ * Band membership follows the kind of work, not the name of the program —
+ * kernel-roadmap.md §9.3.  Echoing a keypress is short and urgent, so the
+ * shell sits above the GUI, whose redraw is long and can wait.  Both daemons
+ * do work with no deadline at all and share the BG level, where the tick
+ * rotates between them.
+ */
+
 /**
  * user_task_create() - Create the init shell task from the embedded binary
  * @name: Task name passed to user_task_create_bin()
@@ -407,7 +431,8 @@ struct task_struct *user_task_create_bin(const char *name,
  */
 struct task_struct *user_task_create(const char *name)
 {
-	return user_task_create_bin(name, _binary_user_shell_start,
+	return user_task_create_bin(name, PRIO_SHELL,
+				    _binary_user_shell_start,
 				    _binary_user_shell_end);
 }
 
@@ -418,7 +443,8 @@ struct task_struct *user_task_create(const char *name)
  */
 struct task_struct *user_task_create_gui(void)
 {
-	return user_task_create_bin("gui", _binary_user_gui_start,
+	return user_task_create_bin("gui", PRIO_GUI,
+				    _binary_user_gui_start,
 				    _binary_user_gui_end);
 }
 
@@ -430,7 +456,7 @@ struct task_struct *user_task_create_gui(void)
  */
 struct task_struct *user_task_create_phone_daemon(void)
 {
-	return user_task_create_bin("phone_daemon",
+	return user_task_create_bin("phone_daemon", PRIO_BG,
 				    _binary_user_phone_daemon_start,
 				    _binary_user_phone_daemon_end);
 }
@@ -443,7 +469,7 @@ struct task_struct *user_task_create_phone_daemon(void)
  */
 struct task_struct *user_task_create_storage_daemon(void)
 {
-	return user_task_create_bin("storage_daemon",
+	return user_task_create_bin("storage_daemon", PRIO_BG,
 				    _binary_user_storage_daemon_start,
 				    _binary_user_storage_daemon_end);
 }
