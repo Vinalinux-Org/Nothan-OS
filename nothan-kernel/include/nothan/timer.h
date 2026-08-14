@@ -5,15 +5,22 @@
 #include <nothan/mm.h>
 
 /*
- * Scheduler tick period.
+ * Scheduler tick period — the one definition of it.
  *
- * One definition, used both by the DMTimer2 driver to compute its reload value
- * and by anything that converts a duration into ticks.  It used to be a literal
- * 10 in the driver and a comment everywhere else, which is two sources of truth
- * for the same number: changing the driver would have left every "1 tick =
- * 10 ms" comment quietly wrong, and roadmap §5.3 is going to change it.
+ * The DMTimer2 driver computes its reload value from this, nothan/time.h
+ * derives HZ from it, and the scheduler converts BG_TIMESLICE_MS through it.
+ * It used to be a literal 10 in the driver, a literal 100 in time.h, and a
+ * comment everywhere else — three copies of one fact, none of which could
+ * notice the others changing.
+ *
+ * 1 ms as of roadmap §5.3.  The audio pipeline this box exists for has a 10 ms
+ * period, and a tick of the same length cannot control anything: a deadline
+ * would be either met or missed with no point in between at which the
+ * scheduler could act.  Cost measured before the change rather than assumed —
+ * §9.2.1 puts the timer handler at 0.7 us average, so ten times as many of
+ * them is under a tenth of one percent of the CPU.
  */
-#define TICK_MS			10
+#define TICK_MS			1
 #define TICK_HZ			(1000 / TICK_MS)
 
 struct timer_list {

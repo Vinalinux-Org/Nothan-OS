@@ -149,9 +149,15 @@
  * were no wakeups to time.
  *
  * Answer obtained (roadmap §5.1.1): 13-19 cycles, max 19 over 40 wakeups, so
- * 540-790 ns from the UART RX interrupt to the shell running.  Off again.
+ * 540-790 ns from the UART RX interrupt to the shell running.  Re-measured at
+ * the 1 ms tick (§5.3.1): max 20 over 32, one cycle apart, no tail.  Off again.
  * Worth switching back on after any change to the wake path, the tick, or
  * priority assignment — those are the things that can put a tail on it.
+ *
+ * Never on at the same time as CONFIG_IRQ_TIMING.  That one reads the
+ * clocksource after the handler returns, which lands inside the interval this
+ * one is timing, because wake_ts is stamped within that handler.  Running both
+ * cost a measurement round and nearly cost a wrong conclusion about the tick.
  */
 #define CONFIG_SCHED_LATENCY	0
 
