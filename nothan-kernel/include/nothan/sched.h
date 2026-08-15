@@ -105,6 +105,15 @@ struct sched_rt_entity {
  * @mm:        NULL = kernel thread
  * @exit_code: exit status code set by do_exit()
  */
+/*
+ * Field order here is part of switch_to.S's contract: that file reaches in by
+ * byte offset, and the offsets are declared in asm/task-offsets.h and asserted
+ * against this struct in kernel/sched/core.c.  Moving @stack, @user_sp or
+ * @user_lr — or inserting anything ahead of them — will fail the build, which
+ * is the point: the last time they moved, every context switch wrote the user
+ * stack pointer over the outgoing task's kernel-stack base for months without
+ * a symptom.
+ */
 struct task_struct {
 	void				*stack;
 	void				*kstack_base;	/* kmalloc base of kernel stack (free on exit) */

@@ -7,22 +7,29 @@
  *
  * r0 = prev, r1 = next
  */
+#include <asm/task-offsets.h>
+
 	.text
 
 	.globl	__switch_to
 	.type	__switch_to, %function
 __switch_to:
 	stmfd	sp!, {r4-r11, lr}
-	str	sp, [r0, #0]
+	str	sp, [r0, #TSK_STACK]
 
+	@ Banked user-mode sp/lr, reached through System mode.  Named offsets,
+	@ not literals: these used to be #4 and #8, which stopped being user_sp
+	@ and user_lr when two fields were added ahead of them — see
+	@ asm/task-offsets.h.  The names are checked against the C struct at
+	@ compile time in kernel/sched/core.c.
 	cps	#0x1F
-	str	sp, [r0, #4]
-	str	lr, [r0, #8]
-	ldr	sp, [r1, #4]
-	ldr	lr, [r1, #8]
+	str	sp, [r0, #TSK_USER_SP]
+	str	lr, [r0, #TSK_USER_LR]
+	ldr	sp, [r1, #TSK_USER_SP]
+	ldr	lr, [r1, #TSK_USER_LR]
 	cps	#0x13
 
-	ldr	sp, [r1, #0]
+	ldr	sp, [r1, #TSK_STACK]
 	ldmfd	sp!, {r4-r11, pc}
 	.size	__switch_to, . - __switch_to
 

@@ -13,6 +13,25 @@
 #include <nothan/config.h>
 #include <nothan/timer.h>
 #include <nothan/panic.h>
+#include <asm/task-offsets.h>
+
+/*
+ * switch_to.S reads and writes task_struct by byte offset.  Nothing in C or in
+ * assembly connects the two, so the field order of this struct is part of an
+ * .S file's contract — and it was broken silently for as long as kstack_base
+ * and kstack_size sat where user_sp and user_lr used to be.
+ *
+ * These turn that into a build failure.  Adding a field ahead of user_sp now
+ * stops the compiler instead of overwriting a kernel stack pointer at every
+ * context switch, which is the only kind of protection worth having for a
+ * mistake whose symptom appears in a different subsystem entirely.
+ */
+_Static_assert(__builtin_offsetof(struct task_struct, stack) == TSK_STACK,
+	       "switch_to.S expects task_struct.stack at TSK_STACK");
+_Static_assert(__builtin_offsetof(struct task_struct, user_sp) == TSK_USER_SP,
+	       "switch_to.S expects task_struct.user_sp at TSK_USER_SP");
+_Static_assert(__builtin_offsetof(struct task_struct, user_lr) == TSK_USER_LR,
+	       "switch_to.S expects task_struct.user_lr at TSK_USER_LR");
 
 /*
  * PROTECTION: the interrupt mask (asm/irqflags.h), held by whoever mutates.
@@ -311,6 +330,25 @@ void task_stack_check(struct task_struct *p)
 	if (!guard)
 		return;
 
+	/*
+	 * Check the pointer before following it.
+	 *
+	 * A diagnostic that faults is worse than no diagnostic: the report
+	 * names the checker instead of the fault it was built to explain, and
+	 * whoever reads it starts in the wrong file.  This one did exactly
+	 * that — it took a data abort inside itself on a kstack_base holding
+	 * 0x402f5770, and the dump described task_stack_check rather than
+	 * whatever had put that value there.
+	 *
+	 * Every kernel stack is either inside the image (idle's is static) or
+	 * from kmalloc, which returns direct-map addresses at or above
+	 * PAGE_OFFSET.  Anything below that cannot be a stack, so say so with
+	 * the task's name attached rather than dereferencing it to find out.
+	 */
+	if ((unsigned long)guard < PAGE_OFFSET)
+		panic("task \"%s\" (pid=%d) has a corrupt kstack_base %p"
+		      " — not a kernel address", p->comm, p->pid, guard);
+
 	for (i = 0; i < KSTACK_CANARY_WORDS; i++) {
 		if (guard[i] == KSTACK_CANARY)
 			continue;
@@ -441,6 +479,17 @@ void sched_init(void)
 	printk("[SCHED] deadline bands strict + exclusive; BG shares one level,"
 	       " %d ms slice (%d tick(s) of %d ms)\n",
 	       BG_TIMESLICE_MS, BG_TIMESLICE, TICK_MS);
+
+	/*
+	 * Printed so a later complaint about this pointer can be told apart
+	 * from a pointer that was never right: if the value here is sane and
+	 * the value at the fault is not, something overwrote it, and that is a
+	 * different search from a field that was never assigned.
+	 */
+	printk("[SCHED] idle kstack %p..%p, guard 0x%08lx\n",
+	       idle_tsk.kstack_base,
+	       (char *)idle_tsk.kstack_base + idle_tsk.kstack_size,
+	       (unsigned long)KSTACK_CANARY);
 }
 
 /**

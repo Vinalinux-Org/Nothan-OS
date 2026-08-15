@@ -133,27 +133,38 @@ void panic_dump_tasks(void)
 
 	/*
 	 * Kernel stack bounds, so "did it run off its own stack" is a question
-	 * the dump answers rather than one it leaves open.  idle has a static
-	 * stack and no kstack_base.
+	 * the dump answers rather than one it leaves open.
 	 */
 	if (cur->kstack_base) {
 		unsigned long sp;
 
 		/*
-		 * The live stack pointer, not cur->stack — that field only holds
-		 * a value saved the last time this task was switched out, which
-		 * for the running task is stale by definition.  We are on the
-		 * faulting task's kernel stack right now, so SP is the answer.
+		 * SP here is this handler's, not the faulting task's, and the
+		 * difference used to be printed as an accusation.
+		 *
+		 * panic() is reached from the abort vector, which runs in ABT
+		 * mode on abt_stack (head.S) — so "mov %0, sp" reads a pointer
+		 * that has nothing to do with the task named on the line above
+		 * it.  The old version compared the two and appended "<-- OFF
+		 * ITS STACK" whenever they disagreed, which is every fault: it
+		 * announced a stack overflow in a dump about something else
+		 * entirely, and it did so in the one place a reader has no
+		 * reason to doubt.
+		 *
+		 * cur->stack is the honest answer available here — the SP saved
+		 * when this task was last switched out.  Stale for a running
+		 * task, and labelled as such, which is a smaller lie than a
+		 * confident wrong one.  A real overflow is caught by the guard
+		 * word (task_stack_check), which does not have to guess.
 		 */
 		__asm__ __volatile__("mov %0, sp" : "=r" (sp));
 
-		printk("  kstack:  0x%08lx..0x%08lx  sp 0x%08lx%s\n",
+		printk("  kstack:  0x%08lx..0x%08lx  last saved sp 0x%08lx\n",
 		       (unsigned long)cur->kstack_base,
 		       (unsigned long)cur->kstack_base + cur->kstack_size,
-		       sp,
-		       (sp < (unsigned long)cur->kstack_base ||
-			sp >= (unsigned long)cur->kstack_base + cur->kstack_size)
-			       ? "  <-- OFF ITS STACK" : "");
+		       (unsigned long)cur->stack);
+		printk("           handler sp 0x%08lx (exception stack, not the"
+		       " task's)\n", sp);
 	}
 
 	printk("  runqueue: %u runnable\n", runqueue.nr_running);
