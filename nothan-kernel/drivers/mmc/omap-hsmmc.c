@@ -11,6 +11,7 @@
 #include <nothan/mmio.h>
 #include <nothan/genhd.h>
 #include <nothan/init.h>
+#include <nothan/wait.h>
 
 /* Register offsets — mmc_base = module_base + 0x100 */
 #define MMCHS_SYSCONFIG  0x010
@@ -170,25 +171,80 @@ static int mmc_send_cmd(uint32_t cmd, uint32_t arg, uint32_t flags)
 }
 
 /*
- * The HSMMC controller is a single shared resource with no per-request
- * queue: a transfer is driven register-by-register (issue command, drain
- * or fill the 512-byte data FIFO, wait for Transfer Complete). If a task
- * is preempted mid-transfer and another task starts its own command, the
- * second mmc_send_cmd() clears STAT (0xFFFFFFFF) and reprograms the FIFO,
- * destroying the first task's in-flight state — the first task then reads
- * garbage or times out, and the controller is left wedged (cascading
- * "[MMC] Read block N failed").
+ * The HSMMC controller is a single shared resource with no per-request queue:
+ * a transfer is driven register-by-register (issue command, drain or fill the
+ * 512-byte data FIFO, wait for Transfer Complete).  If one task is part-way
+ * through and another starts its own command, the second mmc_send_cmd() clears
+ * STAT and reprograms the FIFO, destroying the first task's in-flight state —
+ * the first then reads garbage or times out, and the controller is left wedged.
+ * Userspace storage and the shell both reach this path, so the race is real.
  *
- * Userspace storage (the GUI loading CONTACTS/SMS/CALLLOG) and the shell
- * (ls) both hit this path, so the race is real. Make each block transfer
- * atomic by masking IRQs around it: with no timer IRQ there is no
- * preemption, so a transfer always runs to completion. Transfers are
- * polled (they wait on STAT bits the hardware sets, not on any IRQ), so
- * masking IRQs cannot deadlock, and a healthy transfer is only ~tens of
- * microseconds.
+ * Ownership, not a critical section.
+ *
+ * This used to mask interrupts around each transfer, on the reasoning that
+ * with no timer interrupt there is no preemption.  That works, and the cost
+ * was stated in the comment as "~tens of microseconds".  Measured with
+ * CONFIG_IRQ_OFF_TIMING, the worst was 10,792 us — five hundred times the
+ * estimate, and longer than the entire 10 ms audio period the box exists to
+ * serve.  One `ls` could take out a whole period of sound.
+ *
+ * The estimate was wrong, but the choice of tool was the real mistake.  What
+ * needs excluding here is task against task; masking interrupts is the
+ * primitive for task against ISR, and this driver has no interrupt handler at
+ * all — nothing in it is registered with request_irq().  So the cost was being
+ * paid to guard against a direction the danger never came from.  It also broke
+ * the rule asm/irqflags.h sets out in as many words: no waiting on hardware
+ * inside a masked region, and `while (!(STAT & BRR))` is exactly that.
+ *
+ * A second task now sleeps instead.  Interrupts stay enabled for the whole
+ * transfer, so audio and the tick are untouched by a slow card.  Being
+ * preempted mid-transfer is harmless: nobody else can touch the controller
+ * while the flag is held, the poll loops count iterations rather than time so
+ * a pause cannot fake a timeout, and the same task resumes into its own
+ * in-flight state.
+ *
+ * Priority inversion is the thing this does not solve — a BG task holding the
+ * card while something more urgent waits.  It does not bite here because the
+ * deadline bands are forbidden from touching storage at all
+ * (os-architecture.md §4.2a).  If that ever changes, this is where to look.
+ *
+ * The end state is one task owning the device outright and everyone else
+ * sending it requests, which needs the channel from os-architecture.md §5.
+ * This is the shape that gets there without waiting for it.
  */
-#define mmc_irq_save()		local_irq_save()
-#define mmc_irq_restore(flags)	local_irq_restore(flags)
+static DEFINE_WAIT_QUEUE(mmc_wq);
+static int mmc_busy;
+
+static void mmc_claim(void)
+{
+	unsigned long flags = local_irq_save();
+
+	/*
+	 * Test and set under one mask, so two tasks cannot both find the
+	 * controller free.  wait_event_locked() gives the mask back on return,
+	 * which is what keeps the loop atomic across a sleep.
+	 *
+	 * A loop rather than an if: waking proves only that the owner released
+	 * it, not that this task got there before another waiter.
+	 */
+	while (mmc_busy)
+		wait_event_locked(&mmc_wq);
+
+	mmc_busy = 1;
+	local_irq_restore(flags);
+}
+
+static void mmc_release(void)
+{
+	unsigned long flags = local_irq_save();
+
+	mmc_busy = 0;
+	local_irq_restore(flags);
+
+	/* wake_up() masks for itself; a task that claims the card in the gap
+	 * before the sleeper runs simply wins, and the sleeper re-checks. */
+	wake_up(&mmc_wq);
+}
 
 static int omap_hsmmc_read_block_inner(struct gendisk *disk, u64 block, void *buf)
 {
@@ -292,20 +348,26 @@ static int omap_hsmmc_write_block_inner(struct gendisk *disk, u64 block, const v
 	return 0;
 }
 
-/* IRQ-masked wrappers — serialize the controller against preemption. */
+/* One owner at a time — see mmc_claim() above for why it is not a mask. */
 static int omap_hsmmc_read_block(struct gendisk *disk, u64 block, void *buf)
 {
-	unsigned long flags = mmc_irq_save();
-	int ret = omap_hsmmc_read_block_inner(disk, block, buf);
-	mmc_irq_restore(flags);
+	int ret;
+
+	mmc_claim();
+	ret = omap_hsmmc_read_block_inner(disk, block, buf);
+	mmc_release();
+
 	return ret;
 }
 
 static int omap_hsmmc_write_block(struct gendisk *disk, u64 block, const void *buf)
 {
-	unsigned long flags = mmc_irq_save();
-	int ret = omap_hsmmc_write_block_inner(disk, block, buf);
-	mmc_irq_restore(flags);
+	int ret;
+
+	mmc_claim();
+	ret = omap_hsmmc_write_block_inner(disk, block, buf);
+	mmc_release();
+
 	return ret;
 }
 
