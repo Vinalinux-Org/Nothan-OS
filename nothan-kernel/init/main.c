@@ -237,6 +237,22 @@ void kernel_main(void)
 	}
 #endif
 
+#if CONFIG_STACK_CANARY_TEST
+	{
+		/*
+		 * kernel_main executes in the idle task's context, so this is
+		 * idle's own guard.  The panic must name "idle" and show the
+		 * guard word holding 0 where 0x5AFEC0DE belongs — anything else,
+		 * including reaching the shell prompt, is a fail.
+		 */
+		struct task_struct *cur = runqueue.curr;
+
+		printk("[CANARY-TEST] smashing the guard of pid=%d \"%s\";"
+		       " a panic naming it is the pass\n", cur->pid, cur->comm);
+		((volatile u32 *)cur->kstack_base)[0] = 0;
+	}
+#endif
+
 	printk("[KERN] NothanOS started\n");
 
 	/*

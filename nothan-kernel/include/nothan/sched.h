@@ -297,6 +297,30 @@ void sched_dump_switches(void);
 
 /* Tasks that died and have not been reaped yet.  Printed by panic(). */
 void sched_dump_dead(void);
+
+/*
+ * Kernel stack overflow detection.
+ *
+ * A kernel stack is a kmalloc'd block with neighbours, and it grows down — so
+ * running off the bottom does not fault, it quietly overwrites whatever the
+ * allocator handed out just below: another task's stack, an L2 page table, a
+ * task_struct.  The crash then happens somewhere else entirely, in code that
+ * did nothing wrong, which is the exact shape design-philosophy.md §1 says a
+ * UART log cannot chase.
+ *
+ * A known pattern at the lowest addresses turns that into an ordinary bug: the
+ * check names the task that overflowed, at the moment it is caught, instead of
+ * leaving a fault to be attributed to its victim.  Four words rather than one,
+ * so a store that skips past a single word does not skip past the whole guard.
+ *
+ * 0x5AFEC0DE reads as "safe code" in a hex dump, which matters when the value
+ * shows up in a fault dump and someone has to recognise it.
+ */
+#define KSTACK_CANARY		0x5AFEC0DEu
+#define KSTACK_CANARY_WORDS	4
+
+void task_stack_arm(struct task_struct *p);
+void task_stack_check(struct task_struct *p);
 extern bool sched_running;  /* true after first real context switch */
 
 void do_exit(int code);

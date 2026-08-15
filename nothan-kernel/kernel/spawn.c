@@ -107,6 +107,14 @@ struct task_struct *task_create(void (*fn)(void), int prio, const char *name)
 	/* Claim after comm is set, so a collision can name both tasks. */
 	sched_claim_prio(prio, p->comm);
 
+	/*
+	 * Arm the guard after the switch frame is built, not before: the frame
+	 * is written from the top of the stack downwards and comes nowhere near
+	 * the bottom, but ordering it this way means the guard is the last word
+	 * on the stack anyone touches before the task runs.
+	 */
+	task_stack_arm(p);
+
 	return p;
 }
 
@@ -385,6 +393,7 @@ struct task_struct *user_task_create_bin(const char *name, int prio,
 
 	/* Claim after comm is set, so a collision can name both tasks. */
 	sched_claim_prio(prio, p->comm);
+	task_stack_arm(p);
 
 	printk("[SPAWN] user task \"%s\" pid=%d prio=%d(%s),"
 	       " code_pa=0x%lx, stack_pa=0x%lx\n",

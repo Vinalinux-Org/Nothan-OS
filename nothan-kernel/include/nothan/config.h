@@ -128,6 +128,25 @@
 #define CONFIG_IRQ_TIMING	0
 
 /*
+ * Deliberately smash a kernel stack guard to exercise the overflow check.
+ *
+ * Same reasoning as CONFIG_PANIC_TEST below: a check that has never fired is a
+ * guess.  This one overwrites the guard at the bottom of the *current* task's
+ * stack — kernel_main runs in the idle task's context — and then schedules, so
+ * the very next switch must panic naming "idle" and printing 0 where
+ * 0x5AFEC0DE belongs.
+ *
+ * Writing the guard directly rather than actually overflowing: a real overflow
+ * would have to run off the stack, which on the way there corrupts the
+ * neighbouring allocation and makes the rest of the boot unpredictable.  The
+ * question here is whether the guard is armed and checked, and that is
+ * answered without the collateral damage.
+ *
+ * The panic is the pass condition, so the machine stops.
+ */
+#define CONFIG_STACK_CANARY_TEST	0
+
+/*
  * Deliberately crash at the end of boot to exercise the panic path.
  *
  * A crash handler that has never crashed is not a handler, it is a guess.  The

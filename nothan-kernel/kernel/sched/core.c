@@ -291,6 +291,45 @@ void sched_claim_prio(int prio, const char *name)
 	prio_owner[prio] = name;
 }
 
+void task_stack_arm(struct task_struct *p)
+{
+	u32 *guard = (u32 *)p->kstack_base;
+	unsigned int i;
+
+	if (!guard)
+		return;
+
+	for (i = 0; i < KSTACK_CANARY_WORDS; i++)
+		guard[i] = KSTACK_CANARY;
+}
+
+void task_stack_check(struct task_struct *p)
+{
+	const u32 *guard = (const u32 *)p->kstack_base;
+	unsigned int i;
+
+	if (!guard)
+		return;
+
+	for (i = 0; i < KSTACK_CANARY_WORDS; i++) {
+		if (guard[i] == KSTACK_CANARY)
+			continue;
+
+		/*
+		 * Report the task that owns this stack, not whatever is running
+		 * now — they are the same for the outgoing task and different
+		 * for the incoming one, and the difference is the whole point:
+		 * a corrupted guard on a task that was asleep means somebody
+		 * else wrote through it.
+		 */
+		panic("kernel stack overflow: pid=%d \"%s\" stack %p..%p,"
+		      " guard word %u = 0x%08lx",
+		      p->pid, p->comm, p->kstack_base,
+		      (char *)p->kstack_base + p->kstack_size,
+		      i, (unsigned long)guard[i]);
+	}
+}
+
 /* Idle task — always runnable, lowest priority, no kmalloc needed. */
 #define IDLE_STACK_WORDS 256
 static unsigned long idle_stack[IDLE_STACK_WORDS];
@@ -336,6 +375,15 @@ static void idle_task_init(void)
 	*--sp = (unsigned long)cpu_idle;	/* r4 (fn) */
 
 		idle_tsk.stack      = sp;
+		/*
+		 * Idle's stack is static, but recording it here is what lets the
+		 * guard below cover idle too, and what lets a fault dump bound
+		 * idle's stack the way it bounds everyone else's.  The reaper's
+		 * kfree() of kstack_base is unreachable for this task: cpu_idle
+		 * never returns, so idle never reaches do_exit.
+		 */
+		idle_tsk.kstack_base = idle_stack;
+		idle_tsk.kstack_size = sizeof(idle_stack);
 		idle_tsk.user_sp    = 0;
 		idle_tsk.user_lr    = 0;
 		idle_tsk.__state    = TASK_RUNNING;
@@ -354,6 +402,7 @@ static void idle_task_init(void)
 	idle_tsk.comm[i] = '\0';
 
 	sched_claim_prio(IDLE_PRIO, idle_tsk.comm);
+	task_stack_arm(&idle_tsk);
 	enqueue_task(&runqueue, &idle_tsk);
 		runqueue.curr = &idle_tsk;
 }
@@ -429,6 +478,20 @@ void schedule(void)
 
 	struct task_struct *prev = runqueue.curr;
 
+	/*
+	 * Both ends of the switch, and they catch different things.
+	 *
+	 * The outgoing task is checked because this is the first moment after
+	 * it stopped running, so an overflow it caused is reported against it
+	 * rather than against whatever later trips over the damage.  The
+	 * incoming one is checked because its guard was intact when it went to
+	 * sleep: if it is broken now, something else wrote through a stack that
+	 * was not running — cross-owner corruption, the case §1 says a log
+	 * cannot chase, and the one worth paying two loads a switch to catch.
+	 */
+	if (prev)
+		task_stack_check(prev);
+
 	if (prev && prev->__state == TASK_RUNNING)
 		enqueue_task(&runqueue, prev);
 
@@ -438,6 +501,8 @@ void schedule(void)
 		runqueue.curr = NULL;
 		return;
 	}
+
+	task_stack_check(next);
 
 #if CONFIG_SCHED_LATENCY
 	/*
