@@ -40,6 +40,10 @@
 #include <nothan/printk.h>
 #include <nothan/init.h>
 #include <nothan/delay.h>
+#include <nothan/ring.h>
+#include <nothan/wait.h>
+#include <nothan/sched.h>
+#include <nothan/irq.h>
 
 /* ---- PRCM ---------------------------------------------------------- */
 #define CM_PER_BASE		0x44E00000
@@ -167,7 +171,107 @@
 
 #define CPSW_TIMEOUT		100000
 
+/* ---- Port, MAC and switch configuration ---------------------------- */
+#define PORT_P1_SA_LO		(CPSW_PORT + 0x120)
+#define PORT_P1_SA_HI		(CPSW_PORT + 0x124)
+
+#define SL_MACCONTROL		(CPSW_SL1 + 0x04)
+#define MAC_FULLDUPLEX		(1u << 0)
+#define MAC_GMII_EN		(1u << 5)
+
+#define ALE_CONTROL		(CPSW_ALE + 0x08)
+#define ALE_PORTCTL(n)		(CPSW_ALE + 0x40 + (n) * 4)
+#define ALE_CTL_ENABLE		(1u << 31)
+#define ALE_CTL_CLEAR_TBL	(1u << 30)
+#define ALE_CTL_BYPASS		(1u << 4)
+#define ALE_PORT_FORWARD	3
+
+/* ---- CPDMA --------------------------------------------------------- */
+#define CPDMA_TX_CONTROL	(CPSW_CPDMA + 0x04)
+#define CPDMA_RX_CONTROL	(CPSW_CPDMA + 0x14)
+#define CPDMA_RX_BUFFER_OFFSET	(CPSW_CPDMA + 0x28)
+#define CPDMA_TX_INTMASK_SET	(CPSW_CPDMA + 0x88)
+#define CPDMA_EOI_VECTOR	(CPSW_CPDMA + 0x94)
+#define CPDMA_RX_INTMASK_SET	(CPSW_CPDMA + 0xA8)
+#define CPDMA_EOI_RX		1
+
+#define SR_TX0_HDP		(CPSW_STATERAM + 0x00)
+#define SR_RX0_HDP		(CPSW_STATERAM + 0x20)
+#define SR_TX0_CP		(CPSW_STATERAM + 0x40)
+#define SR_RX0_CP		(CPSW_STATERAM + 0x60)
+
+#define WR_C0_RX_EN		(CPSW_WR + 0x14)
+#define WR_C0_TX_EN		(CPSW_WR + 0x18)
+
+/* ---- Buffer descriptors -------------------------------------------- */
+#define BD_SOP			(1u << 31)
+#define BD_EOP			(1u << 30)
+#define BD_OWNER		(1u << 29)
+#define BD_EOQ			(1u << 28)
+#define BD_PKT_LEN_MASK		0x7FFu
+
+/*
+ * Descriptors and packet buffers both live in the subsystem's own 8 KB of
+ * CPPI RAM rather than in DDR, which is the single decision that keeps this
+ * step small.  CPPI RAM is strongly ordered device memory, so the CPU and the
+ * DMA see the same bytes with no cache maintenance anywhere — the whole class
+ * of "DMA wrote it, the CPU read a stale line, nothing faulted" simply does
+ * not arise (os-architecture.md §3.4).
+ *
+ * The ceiling that buys is real and worth stating now: four buffers, and every
+ * byte read out costs an MMIO access.  That will not carry 12 Mbit/s of video.
+ * Moving buffers to DDR with EDMA is the throughput step, and that is when the
+ * DMA API — the last outstanding piece of Phase 7 — gets built, with a
+ * consumer that exists.
+ *
+ * TRM §14.3.2.4.1: descriptors must be addressed from 0x4a102000.  The
+ * addresses written *into* a descriptor are what the DMA engine will use, so
+ * they are physical; the addresses this code dereferences are virtual.  Mixing
+ * those two up produces a DMA that writes somewhere else entirely.
+ */
+#define CPPI_PA			0x4A102000u
+#define CPSW_RX_COUNT		4
+#define CPSW_BUF_SIZE		1536
+
+#define RX_BD_PA(i)		(CPPI_PA + (i) * 16u)
+#define RX_BUF_PA(i)		(CPPI_PA + 0x100u + (i) * CPSW_BUF_SIZE)
+#define RX_BD_VA(i)		(cppi_va + (i) * 16u)
+#define RX_BUF_VA(i)		(cppi_va + 0x100u + (i) * CPSW_BUF_SIZE)
+
+#define ETH_HDR_LEN		14
+
 static u32 cpsw_va;		/* subsystem base, already translated */
+static u32 cppi_va;		/* CPPI RAM, already translated */
+static u8  cpsw_mac[6];
+static int link_full_duplex;
+
+/*
+ * What the interrupt hands to the task: which descriptor completed, and the
+ * flags it completed with.  Nothing else — the frame itself stays in CPPI RAM
+ * until a task can copy it, because copying 1536 bytes through strongly
+ * ordered memory is exactly the work kernel-roadmap.md §9.2 forbids a handler
+ * from doing, and the driver this one is derived from did it anyway.
+ *
+ * Sixteen slots against four descriptors, so the ring cannot fill: the DMA
+ * cannot complete a fifth buffer while four are still held. The full path is
+ * still written and counted, because "cannot happen" is a claim about today's
+ * buffer count and not a property of the code.
+ */
+struct rx_event {
+	u32	flags;
+	u32	idx;
+};
+
+DEFINE_RING(rxq, struct rx_event, 4);
+
+static struct rxq_ring		rx_ring;
+static DEFINE_WAIT_QUEUE(rx_wait);
+
+static unsigned int rx_isr_idx;		/* ISR side: next descriptor to inspect */
+static unsigned int rx_tail;		/* task side: last descriptor in the chain */
+static unsigned long rx_frames;		/* task side: frames handed up */
+static unsigned long rx_dropped;	/* ring was full — see above */
+
 
 static inline u32 rd(u32 off)		{ return mmio_read32(cpsw_va + off); }
 static inline void wr(u32 off, u32 v)	{ mmio_write32(cpsw_va + off, v); }
@@ -417,6 +521,8 @@ static void cpsw_report_link(void)
 
 	common = adv & lpa;
 
+	link_full_duplex = (common & (LPA_100FULL | LPA_10FULL)) ? 1 : 0;
+
 	printk("[CPSW] link UP after %d ms: %s, %s duplex"
 	       " (adv 0x%04lx lpa 0x%04lx)\n",
 	       waited,
@@ -428,12 +534,269 @@ static void cpsw_report_link(void)
 		printk("[CPSW] WARNING: no common capability — check the pads\n");
 }
 
+static void cpsw_bd_write(u32 bd_va, u32 next_pa, u32 buf_pa, u32 len, u32 flags)
+{
+	mmio_write32(bd_va +  0, next_pa);
+	mmio_write32(bd_va +  4, buf_pa);
+	mmio_write32(bd_va +  8, len);
+	mmio_write32(bd_va + 12, flags);
+}
+
+/*
+ * ALE in bypass: every frame goes straight to the host port.
+ *
+ * The address lookup engine is a switch's forwarding table, and this board
+ * has one external port — there is nothing to switch between.  Bypass says so
+ * directly instead of programming a table whose only entry would be "send
+ * everything to the host".
+ */
+static void cpsw_ale_init(void)
+{
+	int i;
+
+	wr(ALE_CONTROL, ALE_CTL_ENABLE | ALE_CTL_CLEAR_TBL | ALE_CTL_BYPASS);
+	for (i = 0; i < 3; i++)
+		wr(ALE_PORTCTL(i), ALE_PORT_FORWARD);
+
+	printk("[CPSW] ALE bypass, control 0x%08lx\n",
+	       (unsigned long)rd(ALE_CONTROL));
+}
+
+/*
+ * Port address and MAC mode.
+ *
+ * Duplex comes from what auto-negotiation actually settled on, not from a
+ * constant.  A MAC configured full against a half-duplex partner does not
+ * fail loudly — it collides, retries, and loses frames in a pattern that
+ * looks like a bad cable, which is a long way from the line that hard-coded
+ * it.  The driver this is derived from wrote MAC_FULLDUPLEX unconditionally.
+ */
+static void cpsw_port_init(void)
+{
+	u32 sa_lo = ((u32)cpsw_mac[0] << 8) | cpsw_mac[1];
+	u32 sa_hi = ((u32)cpsw_mac[2] << 24) | ((u32)cpsw_mac[3] << 16) |
+		    ((u32)cpsw_mac[4] << 8)  |  (u32)cpsw_mac[5];
+	u32 mac_ctl = MAC_GMII_EN;
+
+	wr(PORT_P1_SA_LO, sa_lo);
+	wr(PORT_P1_SA_HI, sa_hi);
+
+	if (link_full_duplex)
+		mac_ctl |= MAC_FULLDUPLEX;
+
+	wr(SL_MACCONTROL, mac_ctl);
+
+	printk("[CPSW] MAC %02lx:%02lx:%02lx:%02lx:%02lx:%02lx, %s duplex,"
+	       " maccontrol 0x%08lx\n",
+	       (unsigned long)cpsw_mac[0], (unsigned long)cpsw_mac[1],
+	       (unsigned long)cpsw_mac[2], (unsigned long)cpsw_mac[3],
+	       (unsigned long)cpsw_mac[4], (unsigned long)cpsw_mac[5],
+	       link_full_duplex ? "full" : "half",
+	       (unsigned long)rd(SL_MACCONTROL));
+}
+
+static void cpsw_rx_ring_init(void)
+{
+	int i;
+
+	for (i = 0; i < CPSW_RX_COUNT; i++) {
+		u32 next = (i < CPSW_RX_COUNT - 1) ? RX_BD_PA(i + 1) : 0;
+
+		cpsw_bd_write(RX_BD_VA(i), next, RX_BUF_PA(i),
+			      CPSW_BUF_SIZE, BD_OWNER);
+	}
+
+	rx_isr_idx = 0;
+	rx_tail = CPSW_RX_COUNT - 1;
+	wr(SR_RX0_HDP, RX_BD_PA(0));
+}
+
+static void cpsw_cpdma_init(void)
+{
+	int i;
+
+	/* Every head and completion pointer must be zero before a channel is
+	 * enabled; the hardware treats a stale pointer as a live queue. */
+	for (i = 0; i < 8; i++) {
+		wr(SR_TX0_HDP + i * 4, 0);
+		wr(SR_RX0_HDP + i * 4, 0);
+		wr(SR_TX0_CP  + i * 4, 0);
+		wr(SR_RX0_CP  + i * 4, 0);
+	}
+
+	wr(CPDMA_RX_BUFFER_OFFSET, 0);
+	wr(CPDMA_TX_CONTROL, 1);
+	wr(CPDMA_RX_CONTROL, 1);
+
+	cpsw_rx_ring_init();
+
+	wr(CPDMA_RX_INTMASK_SET, 1);
+	wr(WR_C0_RX_EN, 1);
+}
+
+/*
+ * Receive interrupt: recognise, queue, wake.  Nothing else.
+ *
+ * The frame stays where the DMA put it and the descriptor stays held until a
+ * task has copied it out — an interrupt that copied 1536 bytes through
+ * strongly ordered memory and then ran a protocol stack is what the driver
+ * this is derived from did, and what §9.2 exists to prevent.  The measurement
+ * that made the cost concrete is in §9.2.1: an ISR misbehaving took 73% of
+ * this machine and a third of its clock ticks.
+ */
+static void cpsw_rx_isr(unsigned int irq)
+{
+	int woke = 0;
+
+	(void)irq;
+
+	for (;;) {
+		u32 flags = mmio_read32(RX_BD_VA(rx_isr_idx) + 12);
+		struct rx_event ev;
+
+		if (flags & BD_OWNER)
+			break;		/* still the DMA's — nothing new */
+
+		ev.flags = flags;
+		ev.idx   = rx_isr_idx;
+
+		if (rxq_put(&rx_ring, ev)) {
+			woke = 1;
+		} else {
+			/*
+			 * Unreachable while there are more ring slots than
+			 * descriptors, but a full ring must still leave the
+			 * hardware in a working state: hand the buffer back
+			 * rather than stranding it, and count the loss.
+			 */
+			rx_dropped++;
+			cpsw_bd_write(RX_BD_VA(rx_isr_idx), 0,
+				      RX_BUF_PA(rx_isr_idx),
+				      CPSW_BUF_SIZE, BD_OWNER);
+		}
+
+		wr(SR_RX0_CP, RX_BD_PA(rx_isr_idx));
+		rx_isr_idx = (rx_isr_idx + 1) % CPSW_RX_COUNT;
+	}
+
+	wr(CPDMA_EOI_VECTOR, CPDMA_EOI_RX);
+
+	if (woke)
+		wake_up(&rx_wait);
+}
+
+/* CPPI RAM is device memory: read it a word at a time, never with a memcpy. */
+static void cpsw_read_hdr(u8 *dst, u32 va, unsigned int len)
+{
+	unsigned int i;
+
+	for (i = 0; i < len; i += 4) {
+		u32 w = mmio_read32(va + i);
+
+		dst[i]     = (u8)w;
+		dst[i + 1] = (u8)(w >> 8);
+		dst[i + 2] = (u8)(w >> 16);
+		dst[i + 3] = (u8)(w >> 24);
+	}
+}
+
+/*
+ * The receive task: NET band, woken by the handler, does the work the handler
+ * is not allowed to.
+ *
+ * For this step that work is to read the Ethernet header and say what arrived.
+ * The header is enough to prove the frames are real — the source address of
+ * the first ones should be the machine at the other end of the cable, which is
+ * an answer that can be checked rather than admired.
+ */
+static void cpsw_rx_task(void)
+{
+	u8 hdr[16];
+
+	printk("[CPSW] rx task up, waiting for frames\n");
+
+	for (;;) {
+		struct rx_event ev;
+
+		wait_event_cond(&rx_wait, rxq_used(&rx_ring) != 0);
+
+		while (rxq_get(&rx_ring, &ev)) {
+			unsigned int len = ev.flags & BD_PKT_LEN_MASK;
+
+			if (len >= ETH_HDR_LEN && len <= CPSW_BUF_SIZE) {
+				cpsw_read_hdr(hdr, RX_BUF_VA(ev.idx), 16);
+				rx_frames++;
+
+				/*
+				 * Every frame for the first sixty-four, then
+				 * one line in sixty-four.
+				 *
+				 * The threshold was eight, and reception
+				 * happened to stop being visible at eight —
+				 * which is either the traffic running out or
+				 * the driver stopping, and the log could not
+				 * say which.  A limit that coincides with a
+				 * plausible failure point is a limit in the
+				 * wrong place.
+				 */
+				if (rx_frames <= 64 || (rx_frames & 63) == 0)
+					printk("[CPSW] rx %lu: %u bytes,"
+					       " %02lx:%02lx:%02lx:%02lx:%02lx:%02lx"
+					       " <- %02lx:%02lx:%02lx:%02lx:%02lx:%02lx"
+					       " type %02lx%02lx\n",
+					       rx_frames, len,
+					       (unsigned long)hdr[0], (unsigned long)hdr[1],
+					       (unsigned long)hdr[2], (unsigned long)hdr[3],
+					       (unsigned long)hdr[4], (unsigned long)hdr[5],
+					       (unsigned long)hdr[6], (unsigned long)hdr[7],
+					       (unsigned long)hdr[8], (unsigned long)hdr[9],
+					       (unsigned long)hdr[10], (unsigned long)hdr[11],
+					       (unsigned long)hdr[12], (unsigned long)hdr[13]);
+
+				if ((rx_frames & 63) == 0 && rx_dropped)
+					printk("[CPSW] %lu frames dropped so far"
+					       " (ring full)\n", rx_dropped);
+			}
+
+			/*
+			 * Hand the buffer back, now that it has been read, and
+			 * put it on the end of the chain the DMA is walking.
+			 *
+			 * The link is the part that is easy to leave out.  A
+			 * descriptor is armed with next = 0, which means "end
+			 * of queue"; arming all four that way and stopping
+			 * there leaves the engine with nowhere to go after the
+			 * first, and reception halts after exactly as many
+			 * frames as there are buffers.  It has to be appended
+			 * to the tail as well, which is what makes the four
+			 * descriptors a queue rather than four dead ends.
+			 */
+			cpsw_bd_write(RX_BD_VA(ev.idx), 0, RX_BUF_PA(ev.idx),
+				      CPSW_BUF_SIZE, BD_OWNER);
+
+			mmio_write32(RX_BD_VA(rx_tail) + 0, RX_BD_PA(ev.idx));
+			rx_tail = ev.idx;
+
+			/*
+			 * EOQ says the engine reached the end and stopped, so
+			 * the append above came too late for it to notice.
+			 * Restarting it is the only way back, and doing so
+			 * only on EOQ is what keeps a rewrite from interrupting
+			 * a queue that is still being walked.
+			 */
+			if (ev.flags & BD_EOQ)
+				wr(SR_RX0_HDP, RX_BD_PA(ev.idx));
+		}
+	}
+}
+
 static int cpsw_probe(struct platform_device *pdev)
 {
 	int id1, id2;
 	u32 idver;
 
 	cpsw_va = phys_to_mmio(pdev->base);
+	cppi_va = phys_to_mmio(CPPI_PA);
 	printk("[CPSW] probing at PA 0x%08lx (VA 0x%08lx), irq %d\n",
 	       (unsigned long)pdev->base, (unsigned long)cpsw_va, pdev->irq);
 
@@ -483,7 +846,26 @@ static int cpsw_probe(struct platform_device *pdev)
 
 	cpsw_report_link();
 
-	printk("[CPSW] bring-up done; no traffic yet\n");
+	board_get_mac_addr(cpsw_mac);
+	cpsw_ale_init();
+	cpsw_port_init();
+	cpsw_cpdma_init();
+
+	{
+		struct task_struct *t = task_create(cpsw_rx_task, PRIO_NET,
+						    "net-rx");
+		if (!t) {
+			printk("[CPSW] could not create the rx task\n");
+			return -1;
+		}
+		enqueue_task(&runqueue, t);
+	}
+
+	request_irq(pdev->irq, cpsw_rx_isr);
+	intc_enable_irq(pdev->irq);
+
+	printk("[CPSW] receiving on irq %d; %d buffers of %d bytes in CPPI RAM\n",
+	       pdev->irq, CPSW_RX_COUNT, CPSW_BUF_SIZE);
 	return 0;
 }
 

@@ -6,6 +6,7 @@
 
 #include <nothan/config.h>
 #include <nothan/platform.h>
+#include <nothan/mmio.h>
 #include <nothan/pinctrl.h>
 #include <nothan/i2c.h>
 #include <nothan/init.h>
@@ -22,6 +23,34 @@
 /* CPSW Ethernet subsystem; RX_PULSE is 3PGSWRXINT0 (TRM Ch06). */
 #define CPSW_BASE		0x4A100000
 #define CPSW_RX_IRQ		41
+
+/*
+ * The MAC address is fused into the control module.  Byte order is the trap:
+ * the register named _lo holds the *high* two bytes of the address and _hi
+ * holds the low four, so reading them in the order their names suggest
+ * produces a reversed address — one that fails unicast filtering silently
+ * while broadcast still arrives, which is about the most confusing way this
+ * could go wrong.
+ *
+ * Verified against two sources, as roadmap §1 requires: TRM §9.3.1.24 and
+ * §9.3.1.25 for the field layout, and cpsw-common.c in the Digikey u-boot
+ * for the byte assembly a working boot actually performs.  They agree.
+ */
+#define CTRL_MAC_ID0_LO		0x44E10630
+#define CTRL_MAC_ID0_HI		0x44E10634
+
+void board_get_mac_addr(u8 *addr)
+{
+	u32 lo = mmio_read32(phys_to_mmio(CTRL_MAC_ID0_LO));
+	u32 hi = mmio_read32(phys_to_mmio(CTRL_MAC_ID0_HI));
+
+	addr[0] =  hi        & 0xFF;
+	addr[1] = (hi >>  8) & 0xFF;
+	addr[2] = (hi >> 16) & 0xFF;
+	addr[3] = (hi >> 24) & 0xFF;
+	addr[4] =  lo        & 0xFF;
+	addr[5] = (lo >>  8) & 0xFF;
+}
 
 /* L4_WKUP peripherals */
 #define L4_WKUP_BASE		0x44E00000
