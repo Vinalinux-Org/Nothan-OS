@@ -104,6 +104,7 @@
 
 #define MDIO_CTRL_ENABLE	(1u << 30)
 #define MDIO_UA_GO		(1u << 31)
+#define MDIO_UA_WRITE		(1u << 30)
 #define MDIO_UA_ACK		(1u << 29)
 #define MDIO_UA_DATA		0xFFFFu
 
@@ -115,11 +116,54 @@
 #define MDIO_CLKDIV		55
 
 #define PHY_ADDR		0	/* am335x-bone-common.dtsi */
-#define PHY_REG_ID1		2
-#define PHY_REG_ID2		3
+
+/*
+ * IEEE 802.3 clause 22 register set — the part every PHY implements.
+ *
+ * Speed and duplex come from ADVERTISE and LPA rather than from the LAN8710A's
+ * vendor register 31.  The standard registers say the same thing and say it on
+ * any PHY, which matters because the board this becomes is not chosen yet
+ * (os-architecture.md §14) and a vendor register is one more thing that would
+ * have to be found and re-verified when it changes.
+ */
+#define MII_BMCR		0
+#define MII_BMSR		1
+#define MII_PHYSID1		2
+#define MII_PHYSID2		3
+#define MII_ADVERTISE		4
+#define MII_LPA			5
+
+#define BMCR_ANRESTART		(1u << 9)
+#define BMCR_RESET		(1u << 15)
+#define BMCR_ANENABLE		(1u << 12)
+
+#define BMSR_LSTATUS		(1u << 2)	/* latching low — read twice */
+#define BMSR_ANEGCOMPLETE	(1u << 5)
+
+/* Technology bits, identical in ADVERTISE and LPA. */
+#define LPA_10HALF		(1u << 5)
+#define LPA_10FULL		(1u << 6)
+#define LPA_100HALF		(1u << 7)
+#define LPA_100FULL		(1u << 8)
+
 #define LAN8710A_ID1		0x0007u
 #define LAN8710A_ID2		0xC0F0u	/* low nibble is silicon revision */
 #define LAN8710A_ID2_MASK	0xFFF0u
+
+/*
+ * How long to wait for auto-negotiation, in milliseconds.
+ *
+ * Boot continues either way: a box that refused to finish starting because a
+ * cable was missing would be a worse machine than one that says so and carries
+ * on.  So the only cost of a generous limit is a slower boot with no cable,
+ * and the cost of a tight one is reporting a working link as broken.
+ *
+ * Measured on this board against a laptop: 1690 ms.  The first value here was
+ * 2000, which passed with 15% to spare — close enough that a slower partner,
+ * or a switch still bringing its own port up, would have been reported as no
+ * cable.  The standard allows several seconds, so allow several seconds.
+ */
+#define PHY_ANEG_TIMEOUT_MS	5000
 
 #define CPSW_TIMEOUT		100000
 
@@ -256,6 +300,134 @@ static int cpsw_mdio_init(void)
 	return 0;
 }
 
+static int mdio_write(unsigned int phy, unsigned int reg, u16 val)
+{
+	u32 off = CPSW_MDIO + MDIO_USERACCESS0;
+	int timeout = CPSW_TIMEOUT;
+
+	wr(off, MDIO_UA_GO | MDIO_UA_WRITE |
+	   ((reg & 0x1F) << 21) | ((phy & 0x1F) << 16) | val);
+
+	while ((rd(off) & MDIO_UA_GO) && --timeout)
+		;
+
+	return timeout ? 0 : -1;
+}
+
+/*
+ * Report the link, and what it negotiated.
+ *
+ * BMSR is read twice because the link bit latches low: a link that dropped and
+ * came back still reads down once, and reporting that first read would be a
+ * driver that lies about the present in order to remember the past.
+ *
+ * Speed and duplex are whatever both ends advertised — the intersection of
+ * ADVERTISE and LPA, taking the best of what is left.  Asking the PHY what it
+ * settled on would need a vendor register; deriving it needs none, and gives
+ * the same answer.
+ */
+static void cpsw_report_link(void)
+{
+	int bmsr, bmcr, adv, lpa, common;
+	int waited = 0;
+	int timeout;
+
+	/*
+	 * What the bootloader left behind, before anything here changes it.
+	 * Printed because the first version of this function found link down
+	 * with a cable attached, and the state it started from was the one
+	 * thing the log could not say.
+	 */
+	printk("[CPSW] PHY initial bmcr 0x%04lx bmsr 0x%04lx\n",
+	       (unsigned long)mdio_read(PHY_ADDR, MII_BMCR),
+	       (unsigned long)mdio_read(PHY_ADDR, MII_BMSR));
+
+	/*
+	 * Reset the PHY and wait for the bit to clear itself.
+	 *
+	 * Skipping this was the difference between this driver and the one in
+	 * nothan_os_old that reached traffic on this board.  A PHY left in
+	 * whatever mode the bootloader chose will answer MDIO perfectly while
+	 * declining to negotiate, which reads as a cable fault and is not one.
+	 */
+	mdio_write(PHY_ADDR, MII_BMCR, BMCR_RESET);
+
+	timeout = 1000;
+	while (timeout--) {
+		bmcr = mdio_read(PHY_ADDR, MII_BMCR);
+		if (bmcr < 0) {
+			printk("[CPSW] PHY unreadable during reset\n");
+			return;
+		}
+		if (!(bmcr & BMCR_RESET))
+			break;
+		mdelay(1);
+	}
+	if (timeout <= 0) {
+		printk("[CPSW] PHY reset never cleared (bmcr 0x%04lx)\n",
+		       (unsigned long)bmcr);
+		return;
+	}
+
+	/* Make sure negotiation is actually running before waiting for it. */
+	mdio_write(PHY_ADDR, MII_BMCR, BMCR_ANENABLE | BMCR_ANRESTART);
+
+	/*
+	 * Read it back.  Reads are proven — BMSR returns this PHY's real
+	 * capability bits — but nothing has yet shown that a *write* reaches
+	 * it, and a write that quietly does nothing looks exactly like a PHY
+	 * that will not negotiate.  Separating those two is worth one line.
+	 */
+	bmcr = mdio_read(PHY_ADDR, MII_BMCR);
+	printk("[CPSW] PHY bmcr after autoneg request 0x%04lx (expect bits"
+	       " 0x%04lx set) %s\n",
+	       (unsigned long)bmcr, (unsigned long)BMCR_ANENABLE,
+	       (bmcr >= 0 && (bmcr & BMCR_ANENABLE)) ? "write OK"
+						     : "WRITE NOT TAKING");
+
+	for (;;) {
+		mdio_read(PHY_ADDR, MII_BMSR);		/* clear the latch */
+		bmsr = mdio_read(PHY_ADDR, MII_BMSR);
+
+		if (bmsr < 0) {
+			printk("[CPSW] link: BMSR read failed\n");
+			return;
+		}
+		if ((bmsr & BMSR_LSTATUS) && (bmsr & BMSR_ANEGCOMPLETE))
+			break;
+		if (waited >= PHY_ANEG_TIMEOUT_MS) {
+			printk("[CPSW] link DOWN after %d ms"
+			       " (bmsr 0x%04lx: link %s, autoneg %s)\n",
+			       waited, (unsigned long)bmsr,
+			       (bmsr & BMSR_LSTATUS) ? "up" : "down",
+			       (bmsr & BMSR_ANEGCOMPLETE) ? "done" : "incomplete");
+			printk("[CPSW] no cable, or nothing at the other end\n");
+			return;
+		}
+		mdelay(10);
+		waited += 10;
+	}
+
+	adv = mdio_read(PHY_ADDR, MII_ADVERTISE);
+	lpa = mdio_read(PHY_ADDR, MII_LPA);
+	if (adv < 0 || lpa < 0) {
+		printk("[CPSW] link UP but capabilities unreadable\n");
+		return;
+	}
+
+	common = adv & lpa;
+
+	printk("[CPSW] link UP after %d ms: %s, %s duplex"
+	       " (adv 0x%04lx lpa 0x%04lx)\n",
+	       waited,
+	       (common & (LPA_100FULL | LPA_100HALF)) ? "100 Mbit" : "10 Mbit",
+	       (common & (LPA_100FULL | LPA_10FULL))  ? "full" : "half",
+	       (unsigned long)adv, (unsigned long)lpa);
+
+	if (!common)
+		printk("[CPSW] WARNING: no common capability — check the pads\n");
+}
+
 static int cpsw_probe(struct platform_device *pdev)
 {
 	int id1, id2;
@@ -293,8 +465,8 @@ static int cpsw_probe(struct platform_device *pdev)
 
 	/* Second known answer: is the PHY the one this board is supposed to
 	 * have, and is the MDIO bus carrying real data rather than zeros? */
-	id1 = mdio_read(PHY_ADDR, PHY_REG_ID1);
-	id2 = mdio_read(PHY_ADDR, PHY_REG_ID2);
+	id1 = mdio_read(PHY_ADDR, MII_PHYSID1);
+	id2 = mdio_read(PHY_ADDR, MII_PHYSID2);
 
 	if (id1 < 0 || id2 < 0) {
 		printk("[CPSW] PHY id read failed\n");
@@ -308,6 +480,8 @@ static int cpsw_probe(struct platform_device *pdev)
 	       (id1 == LAN8710A_ID1 &&
 		(id2 & LAN8710A_ID2_MASK) == LAN8710A_ID2)
 		       ? "OK" : "MISMATCH");
+
+	cpsw_report_link();
 
 	printk("[CPSW] bring-up done; no traffic yet\n");
 	return 0;
