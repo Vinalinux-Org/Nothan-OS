@@ -57,6 +57,20 @@
 #define CONFIG_STORAGE_DAEMON	1
 
 /*
+ * CPSW Ethernet (port 1, LAN8710A over MII).
+ *
+ * The one link on this board that can carry a video call: 320x240 RGB565 at
+ * 10 fps is 12.3 Mbit/s, against 0.09 Mbit/s for the SIM7600 over its UART.
+ * That module is for voice and SMS, which is what phone_daemon uses it for.
+ *
+ * On: the PHY is on the board and answers, so this is real hardware rather
+ * than a driver waiting for something absent.  Everything above the netdev
+ * seam is link-agnostic, so choosing Ethernet here is not a choice about the
+ * product — it is the only link this dev board offers at that bandwidth.
+ */
+#define CONFIG_ETHERNET		1
+
+/*
  * Boot-time cache hierarchy measurement (roadmap Phase 0.3).
  *
  * Question answered — the 256 KB L2 is enabled and working, knees measured at

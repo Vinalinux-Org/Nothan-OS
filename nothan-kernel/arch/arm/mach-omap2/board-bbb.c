@@ -19,6 +19,10 @@
 #define USBSS_BASE		0x47400000
 #define USB1_IRQ		19
 
+/* CPSW Ethernet subsystem; RX_PULSE is 3PGSWRXINT0 (TRM Ch06). */
+#define CPSW_BASE		0x4A100000
+#define CPSW_RX_IRQ		41
+
 /* L4_WKUP peripherals */
 #define L4_WKUP_BASE		0x44E00000
 #define UART0_BASE		(L4_WKUP_BASE + 0x9000)		/* 0x44E09000 */
@@ -108,6 +112,14 @@ static struct platform_device bbb_devices[] = {
 	{ .name = "omap_gpio",  .base = GPIO3_BASE,   .irq = 0  },
 #if CONFIG_USB_TOUCH
 	{ .name = "musb_hcd",   .base = USBSS_BASE,   .irq = USB1_IRQ },
+#endif
+#if CONFIG_ETHERNET
+	/*
+	 * CPSW subsystem base, and the receive interrupt: TRM Ch06 lists 41 as
+	 * 3PGSWRXINT0 (c0_rx_pend).  40 is the threshold pulse, 42 transmit,
+	 * 43 miscellaneous — only the receive one is wanted here.
+	 */
+	{ .name = "cpsw",       .base = CPSW_BASE,    .irq = CPSW_RX_IRQ },
 #endif
 };
 
