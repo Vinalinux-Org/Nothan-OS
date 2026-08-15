@@ -147,6 +147,24 @@
 #define CONFIG_IRQ_OFF_TIMING	0
 
 /*
+ * Lock-free ISR-to-task ring acceptance test (os-architecture.md §3.3).
+ *
+ * nothan/ring.h claims one producer and one consumer need no lock, because
+ * each index has a single writer.  That is an argument about memory ordering
+ * on a machine with a store buffer, and such arguments read as obviously
+ * correct while being wrong — the §1 cell where a log cannot help.
+ *
+ * So it runs in the shape real users will have: the producer is the timer
+ * interrupt, the consumer an ordinary BG task, nothing masked.  The producer
+ * advances its sequence only on a successful put, so the consumer must see
+ * every value exactly once and in order; a gap, repeat or reordering panics
+ * naming expected and actual.  A momentarily full ring is an ordinary
+ * condition, counted separately so a contended run can be told from a quiet
+ * one.
+ */
+#define CONFIG_RING_TEST	0
+
+/*
  * Deliberately smash a kernel stack guard to exercise the overflow check.
  *
  * Same reasoning as CONFIG_PANIC_TEST below: a check that has never fired is a

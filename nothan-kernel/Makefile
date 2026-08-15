@@ -64,6 +64,7 @@ OBJS += $(BUILD_DIR)/kernel/spawn.o
 OBJS += $(BUILD_DIR)/kernel/sched/core.o
 OBJS += $(BUILD_DIR)/kernel/sched/rt.o
 OBJS += $(BUILD_DIR)/kernel/sched/bandtest.o
+OBJS += $(BUILD_DIR)/kernel/ringtest.o
 OBJS += $(BUILD_DIR)/kernel/sched/wait.o
 OBJS += $(BUILD_DIR)/kernel/sched/completion.o
 OBJS += $(BUILD_DIR)/kernel/syscall.o

@@ -33,6 +33,10 @@ _Static_assert(__builtin_offsetof(struct task_struct, user_sp) == TSK_USER_SP,
 _Static_assert(__builtin_offsetof(struct task_struct, user_lr) == TSK_USER_LR,
 	       "switch_to.S expects task_struct.user_lr at TSK_USER_LR");
 
+#if CONFIG_RING_TEST
+void ringtest_produce(void);
+#endif
+
 /*
  * PROTECTION: the interrupt mask (asm/irqflags.h), held by whoever mutates.
  *
@@ -753,6 +757,15 @@ void schedule(void)
 void scheduler_tick(void)
 {
 	struct task_struct *curr = runqueue.curr;
+
+#if CONFIG_RING_TEST
+	/*
+	 * The ring test's producer.  Here because this is genuine interrupt
+	 * context and the point of the test is the hand-off across that
+	 * boundary — calling it from a task would test nothing that matters.
+	 */
+	ringtest_produce();
+#endif
 
 	if (!curr)
 		return;
