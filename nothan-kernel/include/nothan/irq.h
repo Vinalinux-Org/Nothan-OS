@@ -40,4 +40,10 @@ void request_irq(unsigned int irq, irq_handler_t handler);
  */
 void irq_dump_stats(void);
 
+/*
+ * Longest stretch with interrupts masked, and where it started.  Empty unless
+ * CONFIG_IRQ_OFF_TIMING.  The address is raw — look it up in build/kernel.map.
+ */
+void irqoff_dump(void);
+
 #endif /* _IRQ_H */

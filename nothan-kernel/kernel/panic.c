@@ -197,6 +197,25 @@ void panic(const char *fmt, ...)
 	 */
 	local_irq_disable();
 
+	/*
+	 * Take the console back before printing anything, not after.
+	 *
+	 * This used to run only at the end, so the whole dump was appended to a
+	 * 4096-byte ring and pushed out in one go afterwards — which worked
+	 * until the dump grew past the ring.  It did: with the switch log, the
+	 * dead list and the interrupt figures, a busy run overflowed and the
+	 * tail was dropped, taking exactly the newest and most specific lines
+	 * with it.  The report of the loss survived only because log_drain()
+	 * was taught to push its own notice out; without that the log would
+	 * simply have stopped mid-word.
+	 *
+	 * Calling it here disarms the TX interrupt and clears log_irq_ready,
+	 * and console_puts() drains synchronously whenever that flag is down.
+	 * So every line below goes straight to the wire as it is produced, and
+	 * the dump can be any length at all.
+	 */
+	console_flush_panic();
+
 	va_start(args, fmt);
 	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
@@ -214,10 +233,16 @@ void panic(const char *fmt, ...)
 	sched_dump_switches();
 	sched_dump_dead();
 	irq_dump_stats();
+	irqoff_dump();
 	console_dump_irq_sources();
 	printk("=== halted ===\n");
 
-	/* Nothing will ever run to drain the ring after this. */
+	/*
+	 * Belt and braces: with the console already taken above every line has
+	 * gone out as it was produced, so this normally finds an empty ring.
+	 * It stays because it costs nothing and covers anything appended by a
+	 * path that did not go through console_puts().
+	 */
 	console_flush_panic();
 
 	while (1)

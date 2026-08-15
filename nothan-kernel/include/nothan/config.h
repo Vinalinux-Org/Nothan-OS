@@ -128,6 +128,25 @@
 #define CONFIG_IRQ_TIMING	0
 
 /*
+ * Measure how long interrupts stay masked, and where the worst region began.
+ *
+ * The last thing in this kernel that can miss a deadline leaving no trace.
+ * Priority does not govern a masked region — a task holding the mask is not
+ * preempted by anything, at any band.  The scheduler accounting cannot see it,
+ * because no switch happens.  CONFIG_IRQ_TIMING cannot, because it is not a
+ * handler.  asm/irqflags.h states the rule — critical sections short and
+ * bounded, no unbounded loops, no printk — and until this runs, that is a hope.
+ *
+ * Budget: 100 us, one percent of the 10 ms audio period.
+ *
+ * A measurement mode: two clocksource reads per outermost critical section,
+ * which is a lot of critical sections.  Turn it on, read the worst case and
+ * the address that produced it, look the address up in build/kernel.map, act,
+ * turn it off.
+ */
+#define CONFIG_IRQ_OFF_TIMING	0
+
+/*
  * Deliberately smash a kernel stack guard to exercise the overflow check.
  *
  * Same reasoning as CONFIG_PANIC_TEST below: a check that has never fired is a

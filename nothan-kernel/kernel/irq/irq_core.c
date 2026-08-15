@@ -14,6 +14,63 @@
 
 static irq_handler_t irq_handlers[NR_IRQS];
 
+#if CONFIG_IRQ_OFF_TIMING
+/*
+ * PROTECTION: none needed — every write happens with interrupts masked, by
+ * construction: irqoff_enter() runs just after the mask goes on and
+ * irqoff_leave() just before it comes off.  Read from panic(), after
+ * everything else has stopped.
+ */
+static u64 irqoff_start;	/* 0 when no measured region is open */
+static void *irqoff_site;	/* who opened the region currently being timed */
+static u32 irqoff_max_cyc;
+static void *irqoff_max_site;
+static unsigned long irqoff_regions;
+
+void irqoff_enter(void *site)
+{
+	/*
+	 * Overwrite rather than refuse if a region is somehow already open.
+	 * One can be left dangling by the unconditional forms — the idle loop
+	 * re-enables with raw asm beside its WFI — and carrying a stale start
+	 * forward would turn the next ordinary critical section into a
+	 * fictional maximum.  Losing a sample is the cheaper error, and a
+	 * fictional worst case is the expensive one: it would send someone
+	 * looking for a critical section that never existed.
+	 */
+	irqoff_start = timer_cycles();
+	irqoff_site  = site;
+}
+
+void irqoff_leave(void)
+{
+	u32 d;
+
+	if (!irqoff_start)
+		return;
+
+	d = (u32)(timer_cycles() - irqoff_start);
+	irqoff_start = 0;
+	irqoff_regions++;
+
+	if (d > irqoff_max_cyc) {
+		irqoff_max_cyc = d;
+		irqoff_max_site = irqoff_site;
+	}
+}
+#endif /* CONFIG_IRQ_OFF_TIMING */
+
+void irqoff_dump(void)
+{
+#if CONFIG_IRQ_OFF_TIMING
+	printk("  irq-off: %lu regions, worst %lu us (%lu cyc) from %p\n",
+	       irqoff_regions,
+	       (unsigned long)cycles_to_us(irqoff_max_cyc),
+	       (unsigned long)irqoff_max_cyc, irqoff_max_site);
+	printk("           budget is 100 us — 1%% of the 10 ms audio period\n");
+#endif
+}
+
 #if CONFIG_IRQ_TIMING
 /*
  * Time spent inside each handler.

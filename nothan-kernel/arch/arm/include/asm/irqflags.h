@@ -39,8 +39,31 @@
  */
 
 #include <nothan/types.h>
+#include <nothan/config.h>
 
 #define PSR_I_BIT	0x80
+
+#if CONFIG_IRQ_OFF_TIMING
+/*
+ * How long interrupts stay masked, and where the worst one started.
+ *
+ * The rule above — critical sections must be short and bounded — is the last
+ * thing in this kernel that can miss a deadline without leaving a trace.
+ * Priority does not govern it: a task holding the mask is not preempted by
+ * anything, at any band.  The scheduler accounting cannot see it either, since
+ * no switch happens.  CONFIG_IRQ_TIMING cannot, since this is not a handler.
+ * So the rule stays a hope until something measures it.
+ *
+ * Only the save/restore pair is instrumented, deliberately.  The unconditional
+ * forms belong to early boot, the idle loop and the halt path, which own the
+ * global state outright — idle in particular masks around every schedule() and
+ * re-enables with raw inline asm next to its WFI, so counting it would blend
+ * "idle waiting for work" into the same figure as "a list operation held the
+ * mask".  Those are different questions and the second is the one being asked.
+ */
+void irqoff_enter(void *site);
+void irqoff_leave(void);
+#endif
 
 /**
  * local_irq_save() - mask interrupts, returning the previous state
@@ -57,6 +80,17 @@ static inline unsigned long local_irq_save(void)
 		"cpsid	i"
 		: "=r" (flags) : : "memory", "cc");
 
+#if CONFIG_IRQ_OFF_TIMING
+	/*
+	 * Only the outermost mask starts the clock.  A nested save finds
+	 * interrupts already off and leaves the enclosing region's start
+	 * stamp alone, which is what makes the figure "how long were
+	 * interrupts actually off" rather than "how long was this function".
+	 */
+	if (!(flags & PSR_I_BIT))
+		irqoff_enter(__builtin_return_address(0));
+#endif
+
 	return flags;
 }
 
@@ -66,6 +100,17 @@ static inline unsigned long local_irq_save(void)
  */
 static inline void local_irq_restore(unsigned long flags)
 {
+#if CONFIG_IRQ_OFF_TIMING
+	/*
+	 * Closed before the mask actually lifts, so the reading covers the
+	 * masked region and not the instruction that ends it — and so the
+	 * bookkeeping itself runs with interrupts still off, where it needs no
+	 * protection of its own.
+	 */
+	if (!(flags & PSR_I_BIT))
+		irqoff_leave();
+#endif
+
 	__asm__ __volatile__(
 		"msr	cpsr_c, %0"
 		: : "r" (flags) : "memory", "cc");
