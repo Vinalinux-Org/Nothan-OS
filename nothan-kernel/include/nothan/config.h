@@ -71,6 +71,21 @@
 #define CONFIG_ETHERNET		1
 
 /*
+ * Send ARP requests at boot, to check that a transmitted frame is well formed.
+ *
+ * Not a network stack and not the start of one.  It asks the machine on the
+ * other end of the cable for an address that machine actually holds, and a
+ * real operating system answering is the judge: the reply proves the frame
+ * left the port, that a real stack found it valid, and that it came back
+ * addressed to this board's own MAC — the only check so far that exercises
+ * the address programmed into the port rather than broadcast.
+ *
+ * Addresses are hard-coded to the shared link the dev laptop uses; change them
+ * in cpsw.c if that link changes.  Off unless a transmit path is being tested.
+ */
+#define CONFIG_NET_ARP_PROBE	0
+
+/*
  * Boot-time cache hierarchy measurement (roadmap Phase 0.3).
  *
  * Question answered — the 256 KB L2 is enabled and working, knees measured at

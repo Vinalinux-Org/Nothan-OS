@@ -194,6 +194,7 @@
 #define CPDMA_EOI_VECTOR	(CPSW_CPDMA + 0x94)
 #define CPDMA_RX_INTMASK_SET	(CPSW_CPDMA + 0xA8)
 #define CPDMA_EOI_RX		1
+#define CPDMA_EOI_TX		2
 
 #define SR_TX0_HDP		(CPSW_STATERAM + 0x00)
 #define SR_RX0_HDP		(CPSW_STATERAM + 0x20)
@@ -208,6 +209,8 @@
 #define BD_EOP			(1u << 30)
 #define BD_OWNER		(1u << 29)
 #define BD_EOQ			(1u << 28)
+#define BD_TO_PORT_EN		(1u << 20)
+#define BD_TO_PORT1		(1u << 16)
 #define BD_PKT_LEN_MASK		0x7FFu
 
 /*
@@ -233,12 +236,19 @@
 #define CPSW_RX_COUNT		4
 #define CPSW_BUF_SIZE		1536
 
+#define TX_BD_PA		(CPPI_PA + 0x40u)
+#define TX_BD_VA		(cppi_va + 0x40u)
+#define TX_BUF_PA		(CPPI_PA + 0x1900u)
+#define TX_BUF_VA		(cppi_va + 0x1900u)
+
 #define RX_BD_PA(i)		(CPPI_PA + (i) * 16u)
 #define RX_BUF_PA(i)		(CPPI_PA + 0x100u + (i) * CPSW_BUF_SIZE)
 #define RX_BD_VA(i)		(cppi_va + (i) * 16u)
 #define RX_BUF_VA(i)		(cppi_va + 0x100u + (i) * CPSW_BUF_SIZE)
 
 #define ETH_HDR_LEN		14
+#define ETH_MIN_FRAME		60	/* without FCS; the MAC pads nothing */
+#define ETH_P_ARP		0x0806
 
 static u32 cpsw_va;		/* subsystem base, already translated */
 static u32 cppi_va;		/* CPPI RAM, already translated */
@@ -271,6 +281,9 @@ static unsigned int rx_isr_idx;		/* ISR side: next descriptor to inspect */
 static unsigned int rx_tail;		/* task side: last descriptor in the chain */
 static unsigned long rx_frames;		/* task side: frames handed up */
 static unsigned long rx_dropped;	/* ring was full — see above */
+
+static DEFINE_WAIT_QUEUE(tx_wait);
+static volatile int tx_busy;		/* one buffer, so one frame in flight */
 
 
 static inline u32 rd(u32 off)		{ return mmio_read32(cpsw_va + off); }
@@ -631,7 +644,9 @@ static void cpsw_cpdma_init(void)
 	cpsw_rx_ring_init();
 
 	wr(CPDMA_RX_INTMASK_SET, 1);
+	wr(CPDMA_TX_INTMASK_SET, 1);
 	wr(WR_C0_RX_EN, 1);
+	wr(WR_C0_TX_EN, 1);
 }
 
 /*
@@ -683,6 +698,84 @@ static void cpsw_rx_isr(unsigned int irq)
 
 	if (woke)
 		wake_up(&rx_wait);
+}
+
+/*
+ * Transmit completion: acknowledge and release the slot.  Nothing else — the
+ * frame is already gone, and the only work left is bookkeeping.
+ */
+static void cpsw_tx_isr(unsigned int irq)
+{
+	(void)irq;
+
+	wr(SR_TX0_CP, TX_BD_PA);
+	wr(CPDMA_EOI_VECTOR, CPDMA_EOI_TX);
+
+	tx_busy = 0;
+	wake_up(&tx_wait);
+}
+
+/* CPPI RAM is device memory: write it a word at a time, never with a memcpy. */
+static void cpsw_write_buf(u32 va, const u8 *src, unsigned int len)
+{
+	unsigned int i;
+
+	for (i = 0; i < len; i += 4) {
+		u32 w = (u32)src[i]
+		      | ((u32)src[i + 1] << 8)
+		      | ((u32)src[i + 2] << 16)
+		      | ((u32)src[i + 3] << 24);
+
+		mmio_write32(va + i, w);
+	}
+}
+
+/*
+ * Send one frame.  Blocks — sleeping, not spinning — while a previous frame is
+ * still in flight, because there is exactly one transmit buffer.
+ *
+ * Sleeping rather than polling matters even though transmits are rare here.  A
+ * spin would hold the CPU at whatever priority the caller runs at, and the
+ * driver this is derived from spun with a bare loop and a timeout; that is the
+ * shape that turned out to cost 10.8 ms in the SD card path (§3.6).  The wait
+ * queue costs nothing when the slot is free, which is the normal case.
+ *
+ * @len is padded to the Ethernet minimum with zeros: a MAC does not invent the
+ * padding, and a 42-byte ARP frame put on the wire as 42 bytes is a runt that
+ * the receiver discards without telling anyone.
+ */
+static int __attribute__((unused)) cpsw_tx(const u8 *frame, unsigned int len)
+{
+	unsigned long flags;
+	unsigned int pad;
+
+	if (len > CPSW_BUF_SIZE)
+		return -1;
+
+	flags = local_irq_save();
+	while (tx_busy)
+		wait_event_locked(&tx_wait);
+	tx_busy = 1;
+	local_irq_restore(flags);
+
+	cpsw_write_buf(TX_BUF_VA, frame, (len + 3u) & ~3u);
+
+	for (pad = (len + 3u) & ~3u; pad < ETH_MIN_FRAME; pad += 4)
+		mmio_write32(TX_BUF_VA + pad, 0);
+
+	if (len < ETH_MIN_FRAME)
+		len = ETH_MIN_FRAME;
+
+	/*
+	 * Directed transmit: with the ALE in bypass there is no forwarding
+	 * table to consult, so the descriptor has to name the port itself.
+	 */
+	cpsw_bd_write(TX_BD_VA, 0, TX_BUF_PA, len,
+		      BD_SOP | BD_EOP | BD_OWNER |
+		      BD_TO_PORT_EN | BD_TO_PORT1 | (len & BD_PKT_LEN_MASK));
+
+	wr(SR_TX0_HDP, TX_BD_PA);
+	return 0;
 }
 
 /* CPPI RAM is device memory: read it a word at a time, never with a memcpy. */
@@ -790,6 +883,78 @@ static void cpsw_rx_task(void)
 	}
 }
 
+#if CONFIG_NET_ARP_PROBE
+
+/*
+ * Ask the machine at the other end of the cable a question it will answer.
+ *
+ * This is not a network stack and is not the beginning of one — it is a way to
+ * check that a transmitted frame is well formed, using a real operating system
+ * as the judge.  An ARP request for an address the far end actually holds gets
+ * a reply, and that reply proves three separate things at once: the frame left
+ * the port, a real stack parsed it and found it valid, and the answer came
+ * back addressed to this board's own MAC rather than to broadcast — which is
+ * the only test so far that exercises the address programmed into the port.
+ *
+ * The addresses are the ones the laptop is using on the shared link.  Nothing
+ * here holds an IP in any meaningful sense; the bytes are only what makes the
+ * question answerable.
+ */
+#define PROBE_LOCAL_IP		{ 10, 42, 0, 2 }
+#define PROBE_TARGET_IP		{ 10, 42, 0, 1 }
+#define PROBE_COUNT		10
+#define PROBE_INTERVAL_MS	1000
+
+static void cpsw_arp_probe_task(void)
+{
+	static const u8 target_ip[4] = PROBE_TARGET_IP;
+	static const u8 local_ip[4]  = PROBE_LOCAL_IP;
+	u8 frame[42];
+	int i;
+
+	/* Ethernet header: broadcast, from us, ARP. */
+	for (i = 0; i < 6; i++)
+		frame[i] = 0xFF;
+	for (i = 0; i < 6; i++)
+		frame[6 + i] = cpsw_mac[i];
+	frame[12] = ETH_P_ARP >> 8;
+	frame[13] = ETH_P_ARP & 0xFF;
+
+	/* ARP: Ethernet over IPv4, request. */
+	frame[14] = 0x00; frame[15] = 0x01;	/* hardware type: Ethernet */
+	frame[16] = 0x08; frame[17] = 0x00;	/* protocol type: IPv4     */
+	frame[18] = 6;				/* hardware address length */
+	frame[19] = 4;				/* protocol address length */
+	frame[20] = 0x00; frame[21] = 0x01;	/* operation: request      */
+
+	for (i = 0; i < 6; i++)
+		frame[22 + i] = cpsw_mac[i];	/* sender hardware address */
+	for (i = 0; i < 4; i++)
+		frame[28 + i] = local_ip[i];	/* sender protocol address */
+	for (i = 0; i < 6; i++)
+		frame[32 + i] = 0;		/* target hardware: unknown */
+	for (i = 0; i < 4; i++)
+		frame[38 + i] = target_ip[i];	/* target protocol address */
+
+	printk("[CPSW] arp probe: who has %u.%u.%u.%u, tell %u.%u.%u.%u\n",
+	       target_ip[0], target_ip[1], target_ip[2], target_ip[3],
+	       local_ip[0], local_ip[1], local_ip[2], local_ip[3]);
+	printk("[CPSW] a reply addressed to this board's MAC is the pass\n");
+
+	for (i = 0; i < PROBE_COUNT; i++) {
+		if (cpsw_tx(frame, sizeof(frame)))
+			printk("[CPSW] arp probe %d: transmit refused\n", i + 1);
+		else
+			printk("[CPSW] arp probe %d sent\n", i + 1);
+
+		msleep(PROBE_INTERVAL_MS);
+	}
+
+	printk("[CPSW] arp probe done\n");
+}
+
+#endif /* CONFIG_NET_ARP_PROBE */
+
 static int cpsw_probe(struct platform_device *pdev)
 {
 	int id1, id2;
@@ -864,8 +1029,27 @@ static int cpsw_probe(struct platform_device *pdev)
 	request_irq(pdev->irq, cpsw_rx_isr);
 	intc_enable_irq(pdev->irq);
 
-	printk("[CPSW] receiving on irq %d; %d buffers of %d bytes in CPPI RAM\n",
-	       pdev->irq, CPSW_RX_COUNT, CPSW_BUF_SIZE);
+	/*
+	 * Transmit completion is a separate line: TRM Ch06 lists 41 as
+	 * 3PGSWRXINT0 and 42 as 3PGSWTXINT0.  The board table names the
+	 * receive one; the transmit one is its neighbour and is derived here
+	 * rather than added as a second board entry for the same device.
+	 */
+	request_irq(pdev->irq + 1, cpsw_tx_isr);
+	intc_enable_irq(pdev->irq + 1);
+
+	printk("[CPSW] rx on irq %d, tx on irq %d;"
+	       " %d rx buffers of %d bytes in CPPI RAM\n",
+	       pdev->irq, pdev->irq + 1, CPSW_RX_COUNT, CPSW_BUF_SIZE);
+
+#if CONFIG_NET_ARP_PROBE
+	{
+		struct task_struct *t = task_create(cpsw_arp_probe_task,
+						    PRIO_BG, "net-arp");
+		if (t)
+			enqueue_task(&runqueue, t);
+	}
+#endif
 	return 0;
 }
 
