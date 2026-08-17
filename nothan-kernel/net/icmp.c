@@ -33,6 +33,13 @@
 static unsigned long icmp_echoes;
 
 /*
+ * The first few say the path works; after that one a second is plenty.  A
+ * flood printing per packet is a flood the console cannot carry, and the
+ * console is the only instrument here.
+ */
+DEFINE_RATELIMIT(icmp_rl, 1000, 1);
+
+/*
  * Built from the request, not from a blank frame.
  *
  * An echo reply is the request with two ends exchanged and one byte changed,
@@ -109,7 +116,7 @@ void icmp_input(struct netdev *dev, const u8 *frame,
 
 	icmp_echoes++;
 
-	if (icmp_echoes <= 8 || (icmp_echoes & 63) == 0)
+	if (icmp_echoes <= 4 || ratelimit_allow(&icmp_rl))
 		printk("[ICMP] echo %lu from %lu.%lu.%lu.%lu,"
 		       " %u bytes — replying\n",
 		       icmp_echoes,

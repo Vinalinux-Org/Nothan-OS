@@ -11,6 +11,7 @@
 #include <stddef.h>
 #include <nothan/printk.h>
 #include <nothan/uart.h>
+#include <nothan/time.h>
 
 /*
  * Minimal vsnprintf — %s %d %i %u %x %X %c %p %% + width + zero-pad
@@ -267,4 +268,33 @@ unsigned long long __aeabi_uidivmod(unsigned int n, unsigned int d)
 		}
 	}
 	return ((unsigned long long)r << 32) | q;
+}
+
+/*
+ * See the note in nothan/printk.h.  Deliberately not locked: the counters are
+ * advisory, every writer is a task or a handler that would at worst lose a
+ * count, and a lock on the path taken by every log line is a cost paid at all
+ * loads to make a statistic exact at none.
+ */
+int ratelimit_allow(struct ratelimit *r)
+{
+	unsigned long now = get_jiffies();
+
+	if (!r->started || (now - r->begin) >= r->interval) {
+		r->started      = 1;
+		r->begin        = now;
+		r->last_dropped = r->dropped;
+		r->dropped      = 0;
+		r->printed      = 1;
+		return 1;
+	}
+
+	if (r->printed < r->burst) {
+		r->printed++;
+		r->last_dropped = 0;
+		return 1;
+	}
+
+	r->dropped++;
+	return 0;
 }

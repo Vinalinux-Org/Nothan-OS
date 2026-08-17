@@ -30,6 +30,9 @@
 
 static struct udp_sock echo_sock;
 
+/* Same reasoning as ICMP: see nothan/printk.h. */
+DEFINE_RATELIMIT(echo_rl, 1000, 1);
+
 static void udp_echo_task(void)
 {
 	unsigned long seen = 0;
@@ -38,7 +41,7 @@ static void udp_echo_task(void)
 		struct udp_datagram *dg = udp_recv(&echo_sock);
 
 		seen++;
-		if (seen <= 8 || (seen & 63) == 0)
+		if (seen <= 4 || ratelimit_allow(&echo_rl))
 			printk("[ECHO] %lu: %u bytes from"
 			       " %lu.%lu.%lu.%lu:%lu\n",
 			       seen, dg->len,
