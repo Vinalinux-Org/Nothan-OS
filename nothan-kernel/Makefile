@@ -89,6 +89,8 @@ OBJS += $(BUILD_DIR)/arch/arm/mach-omap2/board-bbb.o
 OBJS += $(BUILD_DIR)/drivers/video/fb.o
 OBJS += $(BUILD_DIR)/drivers/video/lcdc.o
 OBJS += $(BUILD_DIR)/drivers/video/tda19988.o
+OBJS += $(BUILD_DIR)/drivers/video/vsource.o
+OBJS += $(BUILD_DIR)/drivers/video/vsource-test.o
 OBJS += $(BUILD_DIR)/drivers/input/input.o
 OBJS += $(BUILD_DIR)/drivers/char/phonebus.o
 OBJS += $(BUILD_DIR)/drivers/char/storagebus.o
@@ -104,6 +106,7 @@ OBJS += $(BUILD_DIR)/net/udp.o
 OBJS += $(BUILD_DIR)/net/udp_echo.o
 OBJS += $(BUILD_DIR)/net/udp_sink.o
 OBJS += $(BUILD_DIR)/net/udp_source.o
+OBJS += $(BUILD_DIR)/net/video_tx.o
 
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 KERNEL_BIN := $(BUILD_DIR)/kernel.bin

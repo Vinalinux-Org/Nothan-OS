@@ -65,8 +65,23 @@
  * out of its slot is overwritten and gone, while one waiting to be sent is
  * only late.  Loss that cannot be undone outranks delay that can.
  */
-#define PRIO_VIDEO_RX		(PRIO_VIDEO + 0)
-#define PRIO_VIDEO_TX		(PRIO_VIDEO + 1)
+#define PRIO_VIDEO_RX		(PRIO_VIDEO + 0)	/* arrives, assembles, draws */
+#define PRIO_VIDEO_TX		(PRIO_VIDEO + 1)	/* captures, sends */
+
+/*
+ * The throughput benchmarks, one level below each of the two they stand in for.
+ *
+ * They held VIDEO_RX and VIDEO_TX while they were the only things in the band,
+ * which was accurate then and stopped being so the moment a real capture task
+ * existed: a level is a claim about a deadline, and a task that exists to
+ * saturate a link has no deadline to miss.  Below the real pair, so a
+ * measurement running beside a call cannot delay the call it is measuring.
+ *
+ * That fills the band.  Whichever of these two pairs is next to want a third
+ * task is the one that has to argue for a wider band or a shared level.
+ */
+#define PRIO_NETBENCH_RX	(PRIO_VIDEO + 2)
+#define PRIO_NETBENCH_TX	(PRIO_VIDEO + 3)
 
 /*
  * True for levels where several tasks may share a priority and take turns.

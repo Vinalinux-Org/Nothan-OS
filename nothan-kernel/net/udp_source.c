@@ -20,12 +20,15 @@
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 
+#include <nothan/config.h>
 #include <nothan/types.h>
 #include <nothan/udp.h>
 #include <nothan/sched.h>
 #include <nothan/init.h>
 #include <nothan/time.h>
 #include <nothan/printk.h>
+
+#if CONFIG_NET_BENCH
 
 #define UDP_SOURCE_PORT		19
 #define REQUEST_LEN		10		/* "BLST" + u32 + u16 */
@@ -175,7 +178,7 @@ static int __init udp_source_init(void)
 	 * run — but cpsw_tx sleeps waiting for each frame rather than spinning,
 	 * so this yields on every datagram and starves nothing.
 	 */
-	t = task_create(udp_source_task, PRIO_VIDEO_TX, "udp-source");
+	t = task_create(udp_source_task, PRIO_NETBENCH_TX, "udp-source");
 	if (!t) {
 		printk("[SRC] could not create the source task\n");
 		return -1;
@@ -185,3 +188,5 @@ static int __init udp_source_init(void)
 	return 0;
 }
 late_initcall(udp_source_init);
+
+#endif /* CONFIG_NET_BENCH */

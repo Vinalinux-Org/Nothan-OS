@@ -122,6 +122,16 @@ int udp_bind(struct udp_sock *s, u16 port, const char *name);
  */
 struct udp_datagram *udp_recv(struct udp_sock *s);
 
+/*
+ * The same borrow, without the sleep: the oldest datagram, or NULL if none has
+ * arrived.  Released by udp_done() exactly as udp_recv()'s is.
+ *
+ * For a task that has other work to get on with — a sender pushing out frames
+ * that must still notice a control message between them.  Blocking there would
+ * stop the stream to wait for an instruction that will probably never come.
+ */
+struct udp_datagram *udp_poll(struct udp_sock *s);
+
 /* Give the slot back.  Nothing may read through the pointer afterwards. */
 void udp_done(struct udp_sock *s);
 

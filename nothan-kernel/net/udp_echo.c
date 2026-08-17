@@ -20,11 +20,14 @@
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 
+#include <nothan/config.h>
 #include <nothan/types.h>
 #include <nothan/udp.h>
 #include <nothan/sched.h>
 #include <nothan/init.h>
 #include <nothan/printk.h>
+
+#if CONFIG_NET_BENCH
 
 #define UDP_ECHO_PORT		7
 
@@ -81,3 +84,5 @@ static int __init udp_echo_init(void)
 	return 0;
 }
 late_initcall(udp_echo_init);
+
+#endif /* CONFIG_NET_BENCH */

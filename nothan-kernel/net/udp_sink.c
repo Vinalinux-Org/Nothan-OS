@@ -27,12 +27,15 @@
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
 
+#include <nothan/config.h>
 #include <nothan/types.h>
 #include <nothan/udp.h>
 #include <nothan/sched.h>
 #include <nothan/init.h>
 #include <nothan/time.h>
 #include <nothan/printk.h>
+
+#if CONFIG_NET_BENCH
 
 #define UDP_SINK_PORT		9
 
@@ -152,7 +155,7 @@ static int __init udp_sink_init(void)
 	 * of a stream like this one will actually run.  Measuring it in the
 	 * driver's own band would answer a question nobody is going to ask.
 	 */
-	t = task_create(udp_sink_task, PRIO_VIDEO_RX, "udp-sink");
+	t = task_create(udp_sink_task, PRIO_NETBENCH_RX, "udp-sink");
 	if (!t) {
 		printk("[SINK] could not create the sink task\n");
 		return -1;
@@ -162,3 +165,5 @@ static int __init udp_sink_init(void)
 	return 0;
 }
 late_initcall(udp_sink_init);
+
+#endif /* CONFIG_NET_BENCH */

@@ -71,6 +71,29 @@
 #define CONFIG_ETHERNET		1
 
 /*
+ * Video over the network: the capture seam, a generated stand-in for the
+ * camera, and the task that frames captures onto the wire.
+ *
+ * Separate from CONFIG_VIDEO, which is the display side — the LCDC, the
+ * framebuffer and the HDMI framer.  The two halves of a call are independent
+ * and it is useful to run either alone: sending needs no panel, and a box
+ * showing a remote picture needs no camera.  Needs CONFIG_ETHERNET.
+ */
+#define CONFIG_VIDEO_STREAM	1
+
+/*
+ * The throughput benchmarks: the discard sink on port 9, the blaster on
+ * port 19, the echo on port 7.
+ *
+ * They are how every number this project has about the link was obtained, and
+ * they are also three tasks holding two deadline levels in a band four wide.
+ * Kept on because the measurements are not finished; the switch exists so that
+ * the day the video path wants those levels, taking them is one line rather
+ * than an argument.
+ */
+#define CONFIG_NET_BENCH	1
+
+/*
  * Send ARP requests at boot, to check that a transmitted frame is well formed.
  *
  * Not a network stack and not the start of one.  It asks the machine on the
@@ -248,6 +271,10 @@
 
 #if CONFIG_GUI && !CONFIG_VIDEO
 #error "CONFIG_GUI requires CONFIG_VIDEO"
+#endif
+
+#if CONFIG_VIDEO_STREAM && !CONFIG_ETHERNET
+#error "CONFIG_VIDEO_STREAM requires CONFIG_ETHERNET"
 #endif
 
 #endif /* _NOTHAN_CONFIG_H */

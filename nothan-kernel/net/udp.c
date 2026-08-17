@@ -204,6 +204,11 @@ struct udp_datagram *udp_recv(struct udp_sock *s)
 	return dg;
 }
 
+struct udp_datagram *udp_poll(struct udp_sock *s)
+{
+	return udp_rx_peek(&s->rx);
+}
+
 void udp_done(struct udp_sock *s)
 {
 	udp_rx_release(&s->rx);
