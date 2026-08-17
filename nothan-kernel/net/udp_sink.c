@@ -132,11 +132,11 @@ static int __init udp_sink_init(void)
 		return -1;
 
 	/*
-	 * The VIDEO band, because that is where the reader of a stream like
-	 * this one will actually run.  Measuring it in the driver's own band
-	 * would answer a question nobody is going to ask.
+	 * The receive half of the VIDEO band, because that is where the reader
+	 * of a stream like this one will actually run.  Measuring it in the
+	 * driver's own band would answer a question nobody is going to ask.
 	 */
-	t = task_create(udp_sink_task, PRIO_VIDEO, "udp-sink");
+	t = task_create(udp_sink_task, PRIO_VIDEO_RX, "udp-sink");
 	if (!t) {
 		printk("[SINK] could not create the sink task\n");
 		return -1;

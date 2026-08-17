@@ -59,6 +59,16 @@
 #define PRIO_GUI		(PRIO_UI + 1)	/* redraw: long, so below the shell */
 
 /*
+ * A call sends and receives at once, so the video band holds two tasks, and
+ * the band being four levels wide is what lets it.  Receiving is the more
+ * urgent of the two and not by preference: an arriving frame that is not taken
+ * out of its slot is overwritten and gone, while one waiting to be sent is
+ * only late.  Loss that cannot be undone outranks delay that can.
+ */
+#define PRIO_VIDEO_RX		(PRIO_VIDEO + 0)
+#define PRIO_VIDEO_TX		(PRIO_VIDEO + 1)
+
+/*
  * True for levels where several tasks may share a priority and take turns.
  * Everything else is a deadline level and is exclusive.
  */

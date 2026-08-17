@@ -103,6 +103,7 @@ OBJS += $(BUILD_DIR)/net/icmp.o
 OBJS += $(BUILD_DIR)/net/udp.o
 OBJS += $(BUILD_DIR)/net/udp_echo.o
 OBJS += $(BUILD_DIR)/net/udp_sink.o
+OBJS += $(BUILD_DIR)/net/udp_source.o
 
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 KERNEL_BIN := $(BUILD_DIR)/kernel.bin

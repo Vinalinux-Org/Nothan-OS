@@ -128,16 +128,28 @@ struct udp_datagram *udp_recv(struct udp_sock *s);
 void udp_done(struct udp_sock *s);
 
 /*
- * Answer a borrowed datagram.  Destination address, port and link address all
- * come from @dg, so this needs no route and no ARP cache.  Returns 0 on
- * success.
+ * Send to an address the caller already knows, link address included.
  *
- * There is deliberately no udp_send_to() yet.  Sending to an address nobody
- * told us about needs a way to turn an IP into a MAC, and that is the ARP
- * cache — worth writing when something needs it, and not before.
+ * Naming the three destinations separately rather than taking a datagram is
+ * what lets a sender outlive the datagram that told it where to send: a task
+ * blasting a thousand frames cannot hold a receive slot for the duration, and
+ * a copy of one on the stack is 1512 bytes against a 4 KB kernel stack.
+ *
+ * It is also the shape the ARP cache will slot into.  When something finally
+ * needs to start a conversation rather than continue one, what changes is
+ * where @dst_mac comes from — a lookup instead of an argument — and not this
+ * signature.  There is still deliberately no udp_send_to() that takes only an
+ * IP, because nothing yet has an address it was not handed.
  */
-int udp_reply(struct udp_sock *s, const struct udp_datagram *dg,
-	      const u8 *data, unsigned int len);
+int udp_send(struct udp_sock *s, const u8 *dst_mac, const u8 *dst_ip,
+	     u16 dst_port, const u8 *data, unsigned int len);
+
+/* Answer a borrowed datagram: the frame that arrived says where to reply. */
+static inline int udp_reply(struct udp_sock *s, const struct udp_datagram *dg,
+			    const u8 *data, unsigned int len)
+{
+	return udp_send(s, dg->src_mac, dg->src_ip, dg->src_port, data, len);
+}
 
 /* Called by the IP layer for protocol 17. */
 void udp_input(struct netdev *dev, const u8 *frame,

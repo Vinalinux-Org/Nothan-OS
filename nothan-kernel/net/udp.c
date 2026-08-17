@@ -209,8 +209,8 @@ void udp_done(struct udp_sock *s)
 	udp_rx_release(&s->rx);
 }
 
-int udp_reply(struct udp_sock *s, const struct udp_datagram *dg,
-	      const u8 *data, unsigned int len)
+int udp_send(struct udp_sock *s, const u8 *dst_mac, const u8 *dst_ip,
+	     u16 dst_port, const u8 *data, unsigned int len)
 {
 	struct netdev *dev = netdev_get();
 	unsigned int total, i;
@@ -227,7 +227,7 @@ int udp_reply(struct udp_sock *s, const struct udp_datagram *dg,
 
 	/* Ethernet: back where it came from, from us. */
 	for (i = 0; i < ETH_ALEN; i++) {
-		s->tx[i]            = dg->src_mac[i];
+		s->tx[i]            = dst_mac[i];
 		s->tx[ETH_ALEN + i] = dev->mac[i];
 	}
 	put_be16(s->tx + 12, ETH_P_IPV4);
@@ -253,14 +253,14 @@ int udp_reply(struct udp_sock *s, const struct udp_datagram *dg,
 
 	for (i = 0; i < IP_ALEN; i++) {
 		ip[IP_SRC + i] = ipv4_addr()[i];
-		ip[IP_DST + i] = dg->src_ip[i];
+		ip[IP_DST + i] = dst_ip[i];
 	}
 
 	put_be16(ip + IP_CHECKSUM, 0);
 	put_be16(ip + IP_CHECKSUM, ip_checksum(ip, IP_MIN_HDR, 0));
 
 	put_be16(udp + UDP_SRC_PORT, s->port);
-	put_be16(udp + UDP_DST_PORT, dg->src_port);
+	put_be16(udp + UDP_DST_PORT, dst_port);
 	put_be16(udp + UDP_LEN, (u16)(UDP_HDR_LEN + len));
 	put_be16(udp + UDP_CHECKSUM, 0);
 
