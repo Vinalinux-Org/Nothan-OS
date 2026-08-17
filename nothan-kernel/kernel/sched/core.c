@@ -377,6 +377,11 @@ void task_stack_check(struct task_struct *p)
 static unsigned long idle_stack[IDLE_STACK_WORDS];
 static struct task_struct idle_tsk;
 
+u32 sched_idle_us(void)
+{
+	return idle_tsk.cpu_us;
+}
+
 /*
  * kernel_main runs in the idle task's context and hands over here once the
  * initial tasks exist — see the call at the end of kernel_main.  It must,

@@ -152,8 +152,8 @@ void ipv4_input(struct netdev *dev, const u8 *frame, unsigned int len)
 
 void ipv4_dump_stats(void)
 {
-	printk("[IP] %lu seen, %lu delivered, %lu elsewhere, %lu bad header,"
-	       " %lu bad checksum, %lu no handler\n",
+	printk("[IP] %lu seen, %lu to us, %lu elsewhere; bad %lu hdr /"
+	       " %lu csum, %lu no proto\n",
 	       ip_seen, ip_delivered, ip_not_ours, ip_bad_header,
 	       ip_bad_checksum, ip_no_handler);
 }

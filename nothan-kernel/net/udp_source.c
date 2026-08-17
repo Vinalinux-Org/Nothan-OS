@@ -46,7 +46,7 @@ static void udp_source_task(void)
 		struct udp_datagram *dg = udp_recv(&source_sock);
 		u8 mac[ETH_ALEN], ip[IP_ALEN];
 		unsigned long count, i, sent = 0, failed = 0;
-		unsigned long start, ms;
+		unsigned long start, ms, idle0;
 		unsigned int size;
 		u16 port;
 
@@ -91,6 +91,7 @@ static void udp_source_task(void)
 		       (unsigned long)ip[2], (unsigned long)ip[3],
 		       (unsigned long)port);
 
+		idle0 = sched_idle_us();
 		start = get_jiffies();
 
 		for (i = 0; i < count; i++) {
@@ -126,12 +127,29 @@ static void udp_source_task(void)
 		 */
 		{
 			unsigned long per_s = (sent * 1000UL) / ms;
+			unsigned long idle  = sched_idle_us() - idle0;
 
 			printk("[SRC] sent %lu in %lu ms = %lu/s,"
 			       " %lu kbit/s on the wire, %lu failed\n",
 			       sent, ms, per_s,
 			       (per_s * (size + 66UL)) / 125UL,
 			       failed);
+
+			/*
+			 * Throughput without this is half a number.  Line rate
+			 * means something different if it leaves most of the
+			 * machine for a decoder than if it leaves none, and the
+			 * box has to do both at once.
+			 *
+			 * Idle microseconds divided by run milliseconds is a
+			 * per-mille figure; dividing by ten gives per cent
+			 * without needing anything wider than 32 bits.
+			 */
+			printk("[SRC] idle %lu ms of %lu = %lu%% free,"
+			       " %lu%% spent on the link\n",
+			       idle / 1000UL, ms,
+			       idle / (ms * 10UL),
+			       100UL - (idle / (ms * 10UL)));
 		}
 	}
 }

@@ -50,7 +50,7 @@ static unsigned long sink_runts;	/* too short to carry a sequence */
 static void udp_sink_task(void)
 {
 	unsigned long expect = 0;
-	unsigned long mark_j = 0, mark_n = 0, mark_b = 0;
+	unsigned long mark_j = 0, mark_n = 0, mark_b = 0, mark_i = 0;
 	int running = 0;
 
 	for (;;) {
@@ -83,6 +83,7 @@ static void udp_sink_task(void)
 			mark_j  = get_jiffies();
 			mark_n  = sink_datagrams;
 			mark_b  = sink_bytes;
+			mark_i  = sched_idle_us();
 		}
 
 		if (seq > expect)
@@ -99,6 +100,7 @@ static void udp_sink_task(void)
 			unsigned long ms  = now - mark_j;
 			unsigned long dn  = sink_datagrams - mark_n;
 			unsigned long db  = sink_bytes - mark_b;
+			unsigned long di  = sched_idle_us() - mark_i;
 
 			if (!ms)
 				ms = 1;
@@ -109,17 +111,31 @@ static void udp_sink_task(void)
 			 * rate this link can reach.  Multiplying bytes by the
 			 * tick rate first would not.
 			 */
-			printk("[SINK] %lu datagrams, %lu kbit/s, %lu/s;"
-			       " %lu gaps (%lu no slot), %lu reordered\n",
+			/*
+			 * Two lines, and the second only when it has news.
+			 * The console is 80 columns and the one-line form was
+			 * losing its last field to the wrap — the CPU figure,
+			 * which was the reason for printing at all.  Silence
+			 * on the second line means nothing was lost, so a
+			 * non-zero one is visible by existing.
+			 */
+			printk("[SINK] %lu in, %lu kbit/s, %lu/s, %lu%% idle\n",
 			       sink_datagrams,
 			       (db * 8UL) / ms,
 			       (dn * 1000UL) / ms,
-			       sink_gaps, sink_sock.rx_dropped,
-			       sink_reordered);
+			       di / (ms * 10UL));
+
+			if (sink_gaps || sink_sock.rx_dropped ||
+			    sink_reordered || sink_runts)
+				printk("[SINK] gaps %lu (%lu no slot),"
+				       " reorder %lu, runt %lu\n",
+				       sink_gaps, sink_sock.rx_dropped,
+				       sink_reordered, sink_runts);
 
 			mark_j = now;
 			mark_n = sink_datagrams;
 			mark_b = sink_bytes;
+			mark_i = sched_idle_us();
 		}
 	}
 }

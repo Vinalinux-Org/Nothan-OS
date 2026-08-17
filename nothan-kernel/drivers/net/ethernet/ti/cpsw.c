@@ -918,8 +918,8 @@ static inline int cpsw_rx_ready(void)
  */
 static void cpsw_report(unsigned long suppressed)
 {
-	printk("[CPSW] %lu frames, %lu malformed, %lu chain;"
-	       " %lu isr, %lu unmask, %lu deepest poll\n",
+	printk("[CPSW] %lu rx, %lu bad, %lu chain; %lu irq, %lu unmask,"
+	       " %lu deep\n",
 	       rx_frames, rx_malformed, rx_chain_broken,
 	       rx_isr_entries, rx_unmasks, rx_poll_max);
 

@@ -242,6 +242,21 @@ void sched_init(void);
 struct task_struct *task_create(void (*fn)(void), int prio, const char *name);
 
 /*
+ * Microseconds the idle task has accumulated.
+ *
+ * Sampled either side of a piece of work, the difference is how much of that
+ * wall time the machine had nothing to do — which is the only honest way to
+ * say what something costs.  Throughput without it is half a number: a link
+ * running at line rate matters differently if it leaves eighty per cent of the
+ * CPU for the decoder or none.
+ *
+ * Wraps with cpu_us, after about 71 minutes of idle.  Differences taken in
+ * unsigned arithmetic stay correct across the wrap, which is why this returns
+ * the raw counter rather than trying to be clever about it.
+ */
+u32 sched_idle_us(void);
+
+/*
  * Take ownership of a deadline-band priority, or panic naming both claimants.
  *
  * The app set is fixed at build time, so a duplicate is a build mistake that
