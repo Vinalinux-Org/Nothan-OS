@@ -4,7 +4,27 @@
 
 set -e
 
-DEVICE=${1:-/dev/sda}
+# No default device.  This script dd's straight to raw sectors, and the name a
+# card gets depends on what else is plugged in — so a default is a bet that the
+# machine looks the same as last time.  Say which device, every time.
+DEVICE=$1
+
+if [ -z "$DEVICE" ]; then
+    echo "Usage: $0 <device>  e.g. $0 /dev/sdb"
+    echo "       check with lsblk first — this writes to raw sectors"
+    exit 1
+fi
+
+if [ ! -b "$DEVICE" ]; then
+    echo "error: $DEVICE is not a block device"
+    exit 1
+fi
+
+if [ "$EUID" -ne 0 ]; then
+    echo "error: run as root (sudo)"
+    exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOPDIR="$(dirname "$SCRIPT_DIR")"
 MLO="$TOPDIR/bootloader/MLO"

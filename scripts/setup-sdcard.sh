@@ -48,9 +48,11 @@ if [ ! -f "$KERNEL" ]; then
 fi
 
 # Unmount any mounted partitions on this device.
-for mp in $(lsblk -lno MOUNTPOINT "${DEVICE}"* 2>/dev/null | grep -v '^$'); do
+# NOTE: mount points can contain spaces, so read line-by-line — never $(...) word-splitting.
+while IFS= read -r mp; do
+    [ -n "$mp" ] || continue
     umount "$mp" && echo "unmounted $mp"
-done
+done < <(lsblk -lno MOUNTPOINT "$DEVICE")
 
 echo "==> partition"
 parted -s "$DEVICE" mklabel msdos
