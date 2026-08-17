@@ -38,8 +38,24 @@
  * and stays correct across the 32-bit wrap by unsigned arithmetic, which is
  * why one slot does not have to be sacrificed to tell full from empty.
  *
+ * Two ways in and two ways out, for two sizes of element.  put/get copy the
+ * whole element and are right for the small ones — a descriptor index, a
+ * character.  reserve/commit and peek/release hand out a pointer to the slot
+ * instead, so a large element is written once where it will live and read
+ * where it lies.  For a 1500 byte datagram that is the difference between
+ * moving it once and moving it three times, and it is also what lets DMA
+ * eventually write straight into the slot: the ring stops caring who filled
+ * it, which is a change of producer rather than a change of design.
+ *
  * NOT safe for two producers or two consumers.  That is the whole contract,
  * and a second producer needs its own ring rather than a lock around this one.
+ *
+ * The producer never touches @tail, which rules out overwrite-the-oldest when
+ * full: that would need the producer to advance the consumer's index, and the
+ * absence of a second writer is the only reason there is no lock here.  A
+ * consumer that wants the freshest data rather than the oldest can drain and
+ * discard, because @tail is its own — the capability is kept, on the side that
+ * already owns the index.
  *
  * Two hand-rolled rings already exist in the tree — the UART receive buffer
  * and the console log — written before this header.  They are deliberately
@@ -79,47 +95,94 @@ static inline unsigned int name##_used(const struct name##_ring *r)	\
 	return r->head - r->tail;					\
 }									\
 									\
-/* Producer side.  Returns 0 if the ring is full — a full ring is an	\
- * error to handle, not a broken assumption, so this reports rather than	\
- * blocking or overwriting.  Which of those the caller wants differs by	\
- * path: a packet may be dropped and counted, a keystroke may not. */	\
-static inline int name##_put(struct name##_ring *r, type v)		\
+/* Producer side, in place.  Returns the slot to fill, or NULL if the	\
+ * ring is full — a full ring is an error to handle, not a broken	\
+ * assumption, so this reports rather than blocking or overwriting.	\
+ * Which of those the caller wants differs by path: a packet may be	\
+ * dropped and counted, a keystroke may not.				\
+ *									\
+ * The slot stays private until name##_commit(), so a producer that	\
+ * reserves and then decides against it simply does not commit.  There	\
+ * is no way to un-reserve because there is nothing to undo. */		\
+static inline type *name##_reserve(struct name##_ring *r)		\
 {									\
 	unsigned int head = r->head;					\
 									\
 	if (head - r->tail >= (1u << (order)))				\
-		return 0;						\
+		return (type *)0;					\
 									\
-	r->buf[head & ((1u << (order)) - 1u)] = v;			\
+	return &r->buf[head & ((1u << (order)) - 1u)];			\
+}									\
 									\
+/* Publish the reserved slot.  Only valid after a name##_reserve() that	\
+ * returned non-NULL. */						\
+static inline void name##_commit(struct name##_ring *r)			\
+{									\
 	/* The element must be visible before the index that publishes	\
 	 * it.  Without this the consumer can read a slot that has not	\
 	 * been written yet, and nothing faults. */			\
 	dmb();								\
 									\
-	r->head = head + 1u;						\
-	return 1;							\
+	r->head = r->head + 1u;						\
 }									\
 									\
-/* Consumer side.  Returns 0 when empty. */				\
-static inline int name##_get(struct name##_ring *r, type *out)		\
+/* Consumer side, in place.  Returns the oldest element, or NULL when	\
+ * empty.  The pointer stays valid until name##_release(): the producer	\
+ * cannot reach this slot again before tail moves past it, which is	\
+ * exactly what release does.						\
+ *									\
+ * This is the half that makes a large element worth having in a ring at	\
+ * all.  Copying a 1500 byte datagram out only to have the reader copy	\
+ * it somewhere else is two traversals of memory to move it once. */	\
+static inline type *name##_peek(struct name##_ring *r)			\
 {									\
 	unsigned int tail = r->tail;					\
 									\
 	if (r->head == tail)						\
-		return 0;						\
+		return (type *)0;					\
 									\
 	/* Read the index before the element, so the element read cannot	\
 	 * be hoisted above the emptiness test. */			\
 	dmb();								\
 									\
-	*out = r->buf[tail & ((1u << (order)) - 1u)];			\
+	return &r->buf[tail & ((1u << (order)) - 1u)];			\
+}									\
 									\
-	/* And release the slot only after it has been copied out, or	\
-	 * the producer may refill it under us. */			\
+/* Give the peeked slot back to the producer.  Nothing may read through	\
+ * the peeked pointer afterwards. */					\
+static inline void name##_release(struct name##_ring *r)		\
+{									\
+	/* Release the slot only after it has been read, or the producer	\
+	 * may refill it under us. */					\
 	dmb();								\
 									\
-	r->tail = tail + 1u;						\
+	r->tail = r->tail + 1u;						\
+}									\
+									\
+/* Copy in.  The whole-element form, for elements small enough that a	\
+ * copy is cheaper than tracking a borrow.  Returns 0 if full. */	\
+static inline int name##_put(struct name##_ring *r, type v)		\
+{									\
+	type *slot = name##_reserve(r);					\
+									\
+	if (!slot)							\
+		return 0;						\
+									\
+	*slot = v;							\
+	name##_commit(r);						\
+	return 1;							\
+}									\
+									\
+/* Copy out.  Returns 0 when empty. */					\
+static inline int name##_get(struct name##_ring *r, type *out)		\
+{									\
+	type *slot = name##_peek(r);					\
+									\
+	if (!slot)							\
+		return 0;						\
+									\
+	*out = *slot;							\
+	name##_release(r);						\
 	return 1;							\
 }									\
 									\

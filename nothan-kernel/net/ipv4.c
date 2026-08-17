@@ -139,6 +139,11 @@ void ipv4_input(struct netdev *dev, const u8 *frame, unsigned int len)
 		icmp_input(dev, frame, ip, ihl, ip + ihl, tot_len - ihl);
 		break;
 
+	case IPPROTO_UDP:
+		ip_delivered++;
+		udp_input(dev, frame, ip, ihl, ip + ihl, tot_len - ihl);
+		break;
+
 	default:
 		ip_no_handler++;
 		break;

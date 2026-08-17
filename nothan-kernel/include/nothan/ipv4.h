@@ -39,6 +39,9 @@ void ipv4_input(struct netdev *dev, const u8 *frame, unsigned int len);
 void icmp_input(struct netdev *dev, const u8 *frame,
 		const u8 *iphdr, unsigned int iphdr_len,
 		const u8 *payload, unsigned int payload_len);
+void udp_input(struct netdev *dev, const u8 *frame,
+	       const u8 *iphdr, unsigned int iphdr_len,
+	       const u8 *payload, unsigned int payload_len);
 
 /*
  * The Internet checksum (RFC 1071): the one's complement of the one's

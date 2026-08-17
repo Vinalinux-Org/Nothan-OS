@@ -100,6 +100,8 @@ OBJS += $(BUILD_DIR)/net/net_core.o
 OBJS += $(BUILD_DIR)/net/arp.o
 OBJS += $(BUILD_DIR)/net/ipv4.o
 OBJS += $(BUILD_DIR)/net/icmp.o
+OBJS += $(BUILD_DIR)/net/udp.o
+OBJS += $(BUILD_DIR)/net/udp_echo.o
 
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 KERNEL_BIN := $(BUILD_DIR)/kernel.bin

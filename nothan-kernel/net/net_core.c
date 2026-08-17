@@ -53,6 +53,7 @@ struct netdev *netdev_get(void)
 void arp_input(struct netdev *dev, const u8 *frame, unsigned int len);
 void arp_dump_stats(void);
 void ipv4_dump_stats(void);
+void udp_dump_stats(void);
 
 void net_dump_stats(void)
 {
@@ -61,6 +62,7 @@ void net_dump_stats(void)
 	       netdev_stats.rx_short, netdev_stats.tx_frames);
 	arp_dump_stats();
 	ipv4_dump_stats();
+	udp_dump_stats();
 }
 
 void netdev_rx(struct netdev *dev, const u8 *frame, unsigned int len)
