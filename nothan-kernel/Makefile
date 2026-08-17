@@ -96,6 +96,8 @@ OBJS += $(BUILD_DIR)/drivers/i2c/i2c-core.o
 OBJS += $(BUILD_DIR)/drivers/i2c/i2c-omap.o
 OBJS += $(BUILD_DIR)/drivers/usb/musb-hcd.o
 OBJS += $(BUILD_DIR)/drivers/net/ethernet/ti/cpsw.o
+OBJS += $(BUILD_DIR)/net/net_core.o
+OBJS += $(BUILD_DIR)/net/arp.o
 
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 KERNEL_BIN := $(BUILD_DIR)/kernel.bin

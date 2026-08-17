@@ -5,14 +5,19 @@
  * configuration this board has — am335x-bone-common.dtsi says slaves = <1>,
  * phy-mode = "mii", phy address 0, and nothing else is wired.
  *
- * This file is the first step only: clocks, pads, reset, and two registers
- * read back whose correct values are known before the board is powered on.
- * No traffic yet.  The order matters — roadmap §0 asks for phases short enough
- * to be flashed and looked at, and a driver that brings up seven blocks at
- * once and then fails tells you nothing about which of the seven.
+ * Built in four steps, each flashed and looked at before the next — roadmap §0
+ * — and each with an answer known before the board was powered on, so a wrong
+ * result was a wrong result rather than something to interpret:
  *
- * Two known answers, so a wrong result is a wrong result rather than a thing
- * to interpret:
+ *   clocks, pads, reset   ALE IDVER matches its documented reset value
+ *   MDIO and PHY          the PHY identifies itself as the one this board has
+ *   link                  speed and duplex agree with the machine at the far end
+ *   traffic               frames arrive, and a real stack answers what is sent
+ *
+ * Frames now leave through the netdev seam (nothan/netdev.h) rather than being
+ * printed here.  Above that line nothing knows this is a wire.
+ *
+ * The two registers with documented reset values:
  *
  *   ALE IDVER   0x00290104   TRM §14.5.1.1, reset value
  *   PHY ID      0x0007 C0Fx  LAN8710A; the low nibble is a silicon revision
@@ -44,6 +49,7 @@
 #include <nothan/wait.h>
 #include <nothan/sched.h>
 #include <nothan/irq.h>
+#include <nothan/netdev.h>
 
 /* ---- PRCM ---------------------------------------------------------- */
 #define CM_PER_BASE		0x44E00000
@@ -246,9 +252,7 @@
 #define RX_BD_VA(i)		(cppi_va + (i) * 16u)
 #define RX_BUF_VA(i)		(cppi_va + 0x100u + (i) * CPSW_BUF_SIZE)
 
-#define ETH_HDR_LEN		14
 #define ETH_MIN_FRAME		60	/* without FCS; the MAC pads nothing */
-#define ETH_P_ARP		0x0806
 
 static u32 cpsw_va;		/* subsystem base, already translated */
 static u32 cppi_va;		/* CPPI RAM, already translated */
@@ -744,7 +748,7 @@ static void cpsw_write_buf(u32 va, const u8 *src, unsigned int len)
  * padding, and a 42-byte ARP frame put on the wire as 42 bytes is a runt that
  * the receiver discards without telling anyone.
  */
-static int __attribute__((unused)) cpsw_tx(const u8 *frame, unsigned int len)
+static int cpsw_tx(const u8 *frame, unsigned int len)
 {
 	unsigned long flags;
 	unsigned int pad;
@@ -778,8 +782,19 @@ static int __attribute__((unused)) cpsw_tx(const u8 *frame, unsigned int len)
 	return 0;
 }
 
+static int cpsw_netdev_tx(struct netdev *dev, const u8 *frame, unsigned int len)
+{
+	(void)dev;
+	return cpsw_tx(frame, len);
+}
+
+static struct netdev cpsw_netdev = {
+	.name = "eth0",
+	.tx   = cpsw_netdev_tx,
+};
+
 /* CPPI RAM is device memory: read it a word at a time, never with a memcpy. */
-static void cpsw_read_hdr(u8 *dst, u32 va, unsigned int len)
+static void cpsw_read_buf(u8 *dst, u32 va, unsigned int len)
 {
 	unsigned int i;
 
@@ -804,7 +819,7 @@ static void cpsw_read_hdr(u8 *dst, u32 va, unsigned int len)
  */
 static void cpsw_rx_task(void)
 {
-	u8 hdr[16];
+	static u8 frame[ETH_FRAME_MAX];
 
 	printk("[CPSW] rx task up, waiting for frames\n");
 
@@ -816,39 +831,35 @@ static void cpsw_rx_task(void)
 		while (rxq_get(&rx_ring, &ev)) {
 			unsigned int len = ev.flags & BD_PKT_LEN_MASK;
 
-			if (len >= ETH_HDR_LEN && len <= CPSW_BUF_SIZE) {
-				cpsw_read_hdr(hdr, RX_BUF_VA(ev.idx), 16);
+			if (len >= ETH_HDR_SIZE && len <= CPSW_BUF_SIZE) {
+				/*
+				 * The whole frame, not just its header, and
+				 * here rather than in the handler.  This is
+				 * the copy §9.2 moved out of interrupt
+				 * context: up to 1536 bytes through strongly
+				 * ordered memory, which is tens of
+				 * microseconds and belongs to a task that can
+				 * be preempted by anything more urgent.
+				 */
+				cpsw_read_buf(frame, RX_BUF_VA(ev.idx),
+					      (len + 3u) & ~3u);
 				rx_frames++;
+				netdev_rx(&cpsw_netdev, frame, len);
 
 				/*
-				 * Every frame for the first sixty-four, then
-				 * one line in sixty-four.
-				 *
-				 * The threshold was eight, and reception
-				 * happened to stop being visible at eight —
-				 * which is either the traffic running out or
-				 * the driver stopping, and the log could not
-				 * say which.  A limit that coincides with a
-				 * plausible failure point is a limit in the
-				 * wrong place.
+				 * A count every so often, because a driver
+				 * that has stopped and a link that is quiet
+				 * look identical otherwise — a distinction
+				 * this bring-up already had to make once.
+				 * Detail belongs to whatever handles the
+				 * frame, not to the driver that carried it.
 				 */
-				if (rx_frames <= 64 || (rx_frames & 63) == 0)
-					printk("[CPSW] rx %lu: %u bytes,"
-					       " %02lx:%02lx:%02lx:%02lx:%02lx:%02lx"
-					       " <- %02lx:%02lx:%02lx:%02lx:%02lx:%02lx"
-					       " type %02lx%02lx\n",
-					       rx_frames, len,
-					       (unsigned long)hdr[0], (unsigned long)hdr[1],
-					       (unsigned long)hdr[2], (unsigned long)hdr[3],
-					       (unsigned long)hdr[4], (unsigned long)hdr[5],
-					       (unsigned long)hdr[6], (unsigned long)hdr[7],
-					       (unsigned long)hdr[8], (unsigned long)hdr[9],
-					       (unsigned long)hdr[10], (unsigned long)hdr[11],
-					       (unsigned long)hdr[12], (unsigned long)hdr[13]);
-
-				if ((rx_frames & 63) == 0 && rx_dropped)
-					printk("[CPSW] %lu frames dropped so far"
-					       " (ring full)\n", rx_dropped);
+				if ((rx_frames & 31) == 0)
+					printk("[CPSW] %lu frames received,"
+					       " %lu unhandled, %lu dropped\n",
+					       rx_frames,
+					       netdev_stats.rx_unknown,
+					       rx_dropped);
 			}
 
 			/*
@@ -1012,6 +1023,10 @@ static int cpsw_probe(struct platform_device *pdev)
 	cpsw_report_link();
 
 	board_get_mac_addr(cpsw_mac);
+	for (int i = 0; i < ETH_ALEN; i++)
+		cpsw_netdev.mac[i] = cpsw_mac[i];
+	netdev_register(&cpsw_netdev);
+
 	cpsw_ale_init();
 	cpsw_port_init();
 	cpsw_cpdma_init();
