@@ -214,7 +214,7 @@ int udp_send(struct udp_sock *s, const u8 *dst_mac, const u8 *dst_ip,
 {
 	struct netdev *dev = netdev_get();
 	unsigned int total, i;
-	u8 *ip, *udp;
+	u8 *frame, *ip, *udp;
 	u16 sum;
 
 	if (!dev)
@@ -225,14 +225,21 @@ int udp_send(struct udp_sock *s, const u8 *dst_mac, const u8 *dst_ip,
 
 	total = ETH_HDR_SIZE + IP_MIN_HDR + UDP_HDR_LEN + len;
 
+	/*
+	 * Claimed here, after everything that could refuse.  From this line to
+	 * the send there is no branch that returns and no call that sleeps —
+	 * the whole body is arithmetic over the frame being built.
+	 */
+	frame = netdev_tx_alloc(dev);
+
 	/* Ethernet: back where it came from, from us. */
 	for (i = 0; i < ETH_ALEN; i++) {
-		s->tx[i]            = dst_mac[i];
-		s->tx[ETH_ALEN + i] = dev->mac[i];
+		frame[i]            = dst_mac[i];
+		frame[ETH_ALEN + i] = dev->mac[i];
 	}
-	put_be16(s->tx + 12, ETH_P_IPV4);
+	put_be16(frame + 12, ETH_P_IPV4);
 
-	ip  = s->tx + ETH_HDR_SIZE;
+	ip  = frame + ETH_HDR_SIZE;
 	udp = ip + IP_MIN_HDR;
 
 	ip[IP_VER_IHL] = 0x45;		/* version 4, no options */
@@ -279,10 +286,9 @@ int udp_send(struct udp_sock *s, const u8 *dst_mac, const u8 *dst_ip,
 	 */
 	put_be16(udp + UDP_CHECKSUM, sum ? sum : 0xFFFFu);
 
-	if (dev->tx(dev, s->tx, total) != 0)
+	if (netdev_tx_send(dev, total) != 0)
 		return -1;
 
-	netdev_stats.tx_frames++;
 	s->tx_datagrams++;
 	return 0;
 }

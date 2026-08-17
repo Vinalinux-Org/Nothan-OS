@@ -19,6 +19,7 @@
 
 #include <stdio.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include <nothan/types.h>
@@ -47,23 +48,76 @@ int printk(const char *fmt, ...)
 unsigned long get_jiffies(void) { return 0; }
 int ratelimit_allow(struct ratelimit *r) { r->last_dropped = 0; return 1; }
 
-static int host_tx(struct netdev *dev, const u8 *frame, unsigned int len)
+/*
+ * The link's transmit buffer, exactly as the driver holds one: the stack builds
+ * its frame here and the "hardware" reads it back out.  @host_tx_held catches
+ * the mistake this seam makes possible — building into a buffer that was never
+ * claimed, or claiming one and never sending it.
+ */
+static u8  host_tx_buf[ETH_FRAME_MAX];
+static int host_tx_held;
+
+static u8 *host_tx_alloc(struct netdev *dev)
+{
+	(void)dev;
+
+	if (host_tx_held) {
+		fprintf(stderr, "harness: tx_alloc while already held\n");
+		abort();
+	}
+	host_tx_held = 1;
+
+	/*
+	 * Poisoned, not cleared.  The buffer is now reused frame after frame,
+	 * so a field the stack forgets to write no longer reads as zero — it
+	 * reads as whatever the last frame left there, which is the kind of bug
+	 * that works perfectly until the second packet.  Filling it with
+	 * something that is obviously not a protocol makes the omission show up
+	 * on the first frame instead of the second.
+	 */
+	memset(host_tx_buf, 0xAA, sizeof(host_tx_buf));
+	return host_tx_buf;
+}
+
+static void host_tx_abort(struct netdev *dev)
+{
+	(void)dev;
+	host_tx_held = 0;
+}
+
+static int host_tx_send(struct netdev *dev, unsigned int len)
 {
 	unsigned int i;
 
 	(void)dev;
+
+	if (!host_tx_held) {
+		fprintf(stderr, "harness: tx_send without tx_alloc\n");
+		abort();
+	}
+
+	/*
+	 * No padding to the Ethernet minimum here, though the driver does it.
+	 * That is the link's job and this harness is judging the stack — what
+	 * gets printed is the frame the protocol layers built, to the length
+	 * they declared.
+	 */
 	printf("TX ");
 	for (i = 0; i < len; i++)
-		printf("%02x", frame[i]);
+		printf("%02x", host_tx_buf[i]);
 	printf("\n");
 	fflush(stdout);
+
+	host_tx_held = 0;
 	return 0;
 }
 
 static struct netdev host_dev = {
-	.name = "test0",
-	.mac  = { 0x88, 0x0c, 0xe0, 0x50, 0x50, 0xd6 },
-	.tx   = host_tx,
+	.name     = "test0",
+	.mac      = { 0x88, 0x0c, 0xe0, 0x50, 0x50, 0xd6 },
+	.tx_alloc = host_tx_alloc,
+	.tx_send  = host_tx_send,
+	.tx_abort = host_tx_abort,
 };
 
 /*

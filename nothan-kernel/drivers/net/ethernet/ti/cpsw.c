@@ -292,17 +292,32 @@ static u8 rx_buf[CPSW_RX_COUNT][CPSW_BUF_SIZE]
 #define RX_BUF_PA(i)		kva_to_phys(rx_buf[i])
 
 /*
- * Descriptors, still in CPPI RAM: the receive chain first, then the one for
- * transmit past the end of it.  Transmit still copies into CPPI RAM, which is
- * the next thing to go — receive is where the frames were being lost.
+ * One transmit buffer, in DDR beside the receive ones and for the same reason.
+ *
+ * It sat in CPPI RAM until the cost of putting it there was measured: device
+ * memory, written a word at a time by the CPU, at 48.6 ns per byte against
+ * 11.0 for everything the receive path does to a byte.  Four fifths of the
+ * transmit cost was the destination, not the work.  Here the CPU writes cached
+ * DDR at full speed and one clean pass hands it to the DMA.
+ *
+ * One, not several.  A second buffer would let the next frame be built while
+ * this one is on the wire, worth about a tenth of the maximum rate — but only
+ * at the maximum rate, and reaching it needs a transmit chain with the same
+ * completion and misqueue handling the receive side needed.  The buffer count
+ * is a number in this driver; the seam above it already has the shape that
+ * stops caring what the number is.
  */
+static u8 tx_buf[CPSW_BUF_SIZE] __attribute__((aligned(DCACHE_LINE_SIZE)));
+
+#define TX_BUF_VA		((unsigned long)tx_buf)
+#define TX_BUF_PA		kva_to_phys(tx_buf)
+
+/* Descriptors stay in CPPI RAM: sixteen bytes each, written once per frame. */
 #define RX_BD_PA(i)		(CPPI_PA + (i) * 16u)
 #define RX_BD_VA(i)		(cppi_va + (i) * 16u)
 
 #define TX_BD_PA		(CPPI_PA + CPSW_RX_COUNT * 16u)
 #define TX_BD_VA		(cppi_va + CPSW_RX_COUNT * 16u)
-#define TX_BUF_PA		(CPPI_PA + 0x1900u)
-#define TX_BUF_VA		(cppi_va + 0x1900u)
 
 #define ETH_MIN_FRAME		60	/* without FCS; the MAC pads nothing */
 
@@ -789,24 +804,8 @@ static void cpsw_tx_isr(unsigned int irq)
 	wake_up(&tx_wait);
 }
 
-/* CPPI RAM is device memory: write it a word at a time, never with a memcpy. */
-static void cpsw_write_buf(u32 va, const u8 *src, unsigned int len)
-{
-	unsigned int i;
-
-	for (i = 0; i < len; i += 4) {
-		u32 w = (u32)src[i]
-		      | ((u32)src[i + 1] << 8)
-		      | ((u32)src[i + 2] << 16)
-		      | ((u32)src[i + 3] << 24);
-
-		mmio_write32(va + i, w);
-	}
-}
-
 /*
- * Send one frame.  Blocks — sleeping, not spinning — while a previous frame is
- * still in flight, because there is exactly one transmit buffer.
+ * Claim the transmit buffer, sleeping until the last frame has left.
  *
  * Sleeping rather than polling matters even though transmits are rare here.  A
  * spin would hold the CPU at whatever priority the caller runs at, and the
@@ -814,17 +813,16 @@ static void cpsw_write_buf(u32 va, const u8 *src, unsigned int len)
  * shape that turned out to cost 10.8 ms in the SD card path (§3.6).  The wait
  * queue costs nothing when the slot is free, which is the normal case.
  *
- * @len is padded to the Ethernet minimum with zeros: a MAC does not invent the
- * padding, and a 42-byte ARP frame put on the wire as 42 bytes is a runt that
- * the receiver discards without telling anyone.
+ * The wait is here rather than in the send because the caller writes the buffer
+ * in between: waiting after the frame was built would mean building it into
+ * memory the DMA was still reading.  That ordering is the entire reason this is
+ * two calls and not one.
  */
-static int cpsw_tx(const u8 *frame, unsigned int len)
+static u8 *cpsw_tx_alloc(struct netdev *dev)
 {
 	unsigned long flags;
-	unsigned int pad;
 
-	if (len > CPSW_BUF_SIZE)
-		return -1;
+	(void)dev;
 
 	flags = local_irq_save();
 	while (tx_busy)
@@ -832,13 +830,48 @@ static int cpsw_tx(const u8 *frame, unsigned int len)
 	tx_busy = 1;
 	local_irq_restore(flags);
 
-	cpsw_write_buf(TX_BUF_VA, frame, (len + 3u) & ~3u);
+	return tx_buf;
+}
 
-	for (pad = (len + 3u) & ~3u; pad < ETH_MIN_FRAME; pad += 4)
-		mmio_write32(TX_BUF_VA + pad, 0);
+static void cpsw_tx_abort(struct netdev *dev)
+{
+	(void)dev;
+
+	tx_busy = 0;
+	wake_up(&tx_wait);
+}
+
+/*
+ * Hand the buffer to the DMA.  @tx_busy stays set until the completion
+ * interrupt clears it — the frame is not gone when this returns, only started.
+ *
+ * @len is padded to the Ethernet minimum with zeros: a MAC does not invent the
+ * padding, and a 42-byte ARP frame put on the wire as 42 bytes is a runt that
+ * the receiver discards without telling anyone.
+ */
+static int cpsw_tx_send(struct netdev *dev, unsigned int len)
+{
+	unsigned int i;
+
+	if (len > CPSW_BUF_SIZE) {
+		cpsw_tx_abort(dev);
+		return -1;
+	}
+
+	for (i = len; i < ETH_MIN_FRAME; i++)
+		tx_buf[i] = 0;
 
 	if (len < ETH_MIN_FRAME)
 		len = ETH_MIN_FRAME;
+
+	/*
+	 * Clean, not clean-and-invalidate: the DMA only reads this buffer, so
+	 * there is nothing it could have written that the cache must be told
+	 * about.  A clean over a partial line is safe in a way an invalidate is
+	 * not — it writes a neighbour's dirty bytes back rather than discarding
+	 * them — so the tail needs no special care here.
+	 */
+	flush_dcache_range(TX_BUF_VA, TX_BUF_VA + len);
 
 	/*
 	 * Directed transmit: with the ALE in bypass there is no forwarding
@@ -852,15 +885,11 @@ static int cpsw_tx(const u8 *frame, unsigned int len)
 	return 0;
 }
 
-static int cpsw_netdev_tx(struct netdev *dev, const u8 *frame, unsigned int len)
-{
-	(void)dev;
-	return cpsw_tx(frame, len);
-}
-
 static struct netdev cpsw_netdev = {
-	.name = "eth0",
-	.tx   = cpsw_netdev_tx,
+	.name     = "eth0",
+	.tx_alloc = cpsw_tx_alloc,
+	.tx_send  = cpsw_tx_send,
+	.tx_abort = cpsw_tx_abort,
 };
 
 /*

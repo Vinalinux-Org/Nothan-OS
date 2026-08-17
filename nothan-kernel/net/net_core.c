@@ -26,7 +26,7 @@ static struct netdev *the_device;
 
 int netdev_register(struct netdev *dev)
 {
-	if (!dev || !dev->tx)
+	if (!dev || !dev->tx_alloc || !dev->tx_send || !dev->tx_abort)
 		return -1;
 
 	if (the_device) {
@@ -48,6 +48,33 @@ int netdev_register(struct netdev *dev)
 struct netdev *netdev_get(void)
 {
 	return the_device;
+}
+
+/*
+ * Transmit, counted once.
+ *
+ * Every protocol used to increment tx_frames itself, right after its own call
+ * to the driver, and every one of them had to remember to do it only on
+ * success.  Four copies of a rule is four chances to break it; the wrapper
+ * costs a call and removes the rule.
+ */
+u8 *netdev_tx_alloc(struct netdev *dev)
+{
+	return dev->tx_alloc(dev);
+}
+
+int netdev_tx_send(struct netdev *dev, unsigned int len)
+{
+	if (dev->tx_send(dev, len) != 0)
+		return -1;
+
+	netdev_stats.tx_frames++;
+	return 0;
+}
+
+void netdev_tx_abort(struct netdev *dev)
+{
+	dev->tx_abort(dev);
 }
 
 void arp_input(struct netdev *dev, const u8 *frame, unsigned int len);

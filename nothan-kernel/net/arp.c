@@ -71,7 +71,7 @@ static u16 be16(const u8 *p)
  */
 static void arp_reply(struct netdev *dev, const u8 *req)
 {
-	u8 frame[ARP_FRAME_LEN];
+	u8 *frame = netdev_tx_alloc(dev);
 	unsigned int i;
 
 	for (i = 0; i < ARP_FRAME_LEN; i++)
@@ -96,10 +96,8 @@ static void arp_reply(struct netdev *dev, const u8 *req)
 		frame[ARP_SENDER_IP + i] = my_ip[i];
 	}
 
-	if (dev->tx(dev, frame, ARP_FRAME_LEN) == 0) {
+	if (netdev_tx_send(dev, ARP_FRAME_LEN) == 0)
 		arp_replies_sent++;
-		netdev_stats.tx_frames++;
-	}
 }
 
 void arp_input(struct netdev *dev, const u8 *frame, unsigned int len)

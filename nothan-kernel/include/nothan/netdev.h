@@ -16,6 +16,16 @@
  * for what arrives.  A driver that needs more than this is usually a driver
  * doing something above the line.
  *
+ * Sending is three calls rather than one because of where the frame is built.
+ * It used to be one — hand over a finished frame and the driver copies it — and
+ * on this chip that copy went into CPPI RAM, which is device memory: 48.6 of
+ * the 59.6 nanoseconds each transmitted byte cost were that one write, against
+ * 11.0 for the whole receive path.  At video rates it was the difference
+ * between spending a third of the machine on transmit and spending a
+ * twentieth.  The copy is not removable while the caller owns the buffer, so
+ * the buffer moved: the driver owns it, in DDR, and the caller builds the frame
+ * where it will be sent from.
+ *
  * One device.  A box with a single port does not need a list, and a list would
  * be the kind of generality that has to be maintained without ever being used.
  * When a second link exists — a radio beside the wire — this grows a lookup,
@@ -38,16 +48,39 @@ struct netdev {
 	u8		mac[ETH_ALEN];
 
 	/*
-	 * Send one complete Ethernet frame, header included.  May block while
-	 * the hardware is busy; must not be called from interrupt context.
-	 * Returns 0 on success.
+	 * Claim the transmit buffer.  Sleeps until one is free, so it must not
+	 * be called from interrupt context.  Returns somewhere to build a frame
+	 * of up to ETH_FRAME_MAX bytes, Ethernet header included.
 	 */
-	int		(*tx)(struct netdev *dev, const u8 *frame,
-			      unsigned int len);
+	u8 *		(*tx_alloc)(struct netdev *dev);
+
+	/*
+	 * Send what was built, @len bytes of it, and give up the buffer.  Pads
+	 * to the Ethernet minimum itself.  Returns 0 on success; on failure the
+	 * buffer is released too, so a caller never has to unwind.
+	 */
+	int		(*tx_send)(struct netdev *dev, unsigned int len);
+
+	/* Changed our mind after claiming.  Releases without sending. */
+	void		(*tx_abort)(struct netdev *dev);
 };
 
 int netdev_register(struct netdev *dev);
 struct netdev *netdev_get(void);
+
+/*
+ * The transmit path, wrapped so the frame counter lives in one place instead of
+ * in every protocol that sends.
+ *
+ * THE RULE, and it is the whole cost of this seam: between alloc and
+ * send-or-abort the caller holds the link's only transmit buffer, and every
+ * other sender is asleep waiting for it.  So claim it once the frame is
+ * decided on, not while still deciding — and never sleep on anything else in
+ * between.  Three callers today; this comment is for the fourth.
+ */
+u8  *netdev_tx_alloc(struct netdev *dev);
+int  netdev_tx_send(struct netdev *dev, unsigned int len);
+void netdev_tx_abort(struct netdev *dev);
 
 /*
  * A frame has arrived.  Called from the driver's receive *task*, never from

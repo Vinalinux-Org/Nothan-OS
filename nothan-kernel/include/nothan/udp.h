@@ -98,15 +98,13 @@ struct udp_sock {
 	struct udp_sock		*next;
 
 	/*
-	 * Scratch for udp_reply(), per socket rather than one shared buffer.
-	 * netdev tx serialises its callers, but the frame handed to it does
-	 * not: two owner tasks replying at once through one static buffer
-	 * would interleave two datagrams into one frame.  A socket has a
-	 * single owner by the same contract that makes @rx lock free, so
-	 * putting the buffer here inherits that and needs no lock.
+	 * There was a 1536-byte send buffer here, one per socket, because two
+	 * owner tasks building replies through one shared buffer would
+	 * interleave two datagrams into one frame.  The link now hands out the
+	 * buffer it will send from, and hands out one at a time, so the
+	 * exclusion that made a per-socket copy necessary is the same exclusion
+	 * that makes it redundant.
 	 */
-	u8			tx[ETH_FRAME_MAX];
-
 	unsigned long		rx_datagrams;
 	unsigned long		rx_dropped;	/* no free slot */
 	unsigned long		tx_datagrams;

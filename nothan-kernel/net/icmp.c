@@ -52,9 +52,8 @@ void icmp_input(struct netdev *dev, const u8 *frame,
 		const u8 *iphdr, unsigned int iphdr_len,
 		const u8 *payload, unsigned int payload_len)
 {
-	static u8 reply[ETH_FRAME_MAX];
 	unsigned int total, i;
-	u8 *rip, *ricmp;
+	u8 *reply, *rip, *ricmp;
 
 	if (payload_len < ICMP_MIN_LEN)
 		return;
@@ -63,8 +62,28 @@ void icmp_input(struct netdev *dev, const u8 *frame,
 		return;			/* replies and errors have no reader */
 
 	total = ETH_HDR_SIZE + iphdr_len + payload_len;
-	if (total > sizeof(reply))
+	if (total > ETH_FRAME_MAX)
 		return;
+
+	icmp_echoes++;
+
+	/*
+	 * Said before the buffer is claimed, not after.  Holding the link's one
+	 * transmit buffer across a console write would put every other sender
+	 * behind the UART, which is the slowest thing on the board by three
+	 * orders of magnitude.
+	 */
+	if (icmp_echoes <= 4 || ratelimit_allow(&icmp_rl))
+		printk("[ICMP] echo %lu from %lu.%lu.%lu.%lu,"
+		       " %u bytes — replying\n",
+		       icmp_echoes,
+		       (unsigned long)iphdr[IP_SRC + 0],
+		       (unsigned long)iphdr[IP_SRC + 1],
+		       (unsigned long)iphdr[IP_SRC + 2],
+		       (unsigned long)iphdr[IP_SRC + 3],
+		       payload_len);
+
+	reply = netdev_tx_alloc(dev);
 
 	/* Ethernet: back to the sender of this frame, from us. */
 	for (i = 0; i < ETH_ALEN; i++) {
@@ -114,18 +133,5 @@ void icmp_input(struct netdev *dev, const u8 *frame,
 		ricmp[ICMP_CHECKSUM + 1] = (u8)sum;
 	}
 
-	icmp_echoes++;
-
-	if (icmp_echoes <= 4 || ratelimit_allow(&icmp_rl))
-		printk("[ICMP] echo %lu from %lu.%lu.%lu.%lu,"
-		       " %u bytes — replying\n",
-		       icmp_echoes,
-		       (unsigned long)iphdr[IP_SRC + 0],
-		       (unsigned long)iphdr[IP_SRC + 1],
-		       (unsigned long)iphdr[IP_SRC + 2],
-		       (unsigned long)iphdr[IP_SRC + 3],
-		       payload_len);
-
-	if (dev->tx(dev, reply, total) == 0)
-		netdev_stats.tx_frames++;
+	netdev_tx_send(dev, total);
 }
