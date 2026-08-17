@@ -22,6 +22,24 @@ typedef unsigned int gfp_t;
 #define PHYS_OFFSET		0x80000000UL
 #define phys_to_kva(pa)		((void *)((unsigned long)(pa) + (PAGE_OFFSET - PHYS_OFFSET)))
 
+/*
+ * The other direction, for handing a kernel buffer to a device.
+ *
+ * Valid only for the direct map — a kernel address that came from the linear
+ * window above, which is where static data and the page allocator both live.
+ * A user address or an ioremapped device window is not covered and the answer
+ * would be silently wrong rather than a fault, so the rule is not "check the
+ * result" but "only ask about addresses you know are kernel direct-map".
+ *
+ * Here rather than in whichever driver needs it first: an address arithmetic
+ * expression copied into a driver is a second definition of where memory is,
+ * which is the shape this tree has now paid for often enough.
+ */
+static inline unsigned long kva_to_phys(const void *kva)
+{
+	return (unsigned long)kva - (PAGE_OFFSET - PHYS_OFFSET);
+}
+
 /* User image base — must match userspace/lib/user.lds and mmu_map_user(). */
 #define USER_CODE_VA		0x00010000UL
 

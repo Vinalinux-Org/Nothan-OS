@@ -185,6 +185,28 @@
 #define MAC_FULLDUPLEX		(1u << 0)
 #define MAC_GMII_EN		(1u << 5)
 
+/*
+ * The MAC's own counters, at subsystem + 0x900 on this CPSW version.
+ *
+ * Worth reading because software counters cannot see the frames software never
+ * heard about.  A burst that lost sixty per cent of small datagrams showed
+ * "17024 frames in, 16992 out" — the board answered nearly everything it saw,
+ * and everything it did not see was invisible.  Rx DMA Overruns is precisely
+ * the frames the MAC had nowhere to put: no free descriptor at the start or in
+ * the middle of reception (TRM §14.3.2.20.1.13).  It is the difference between
+ * "this board dropped it" and "the other end never sent it".
+ */
+#define CPSW_STATS		0x0900
+#define STATS_RX_GOOD		(CPSW_STATS + 0x00)
+#define STATS_RX_CRC		(CPSW_STATS + 0x10)
+#define STATS_RX_SOF_OVERRUN	(CPSW_STATS + 0x84)
+#define STATS_RX_MOF_OVERRUN	(CPSW_STATS + 0x88)
+#define STATS_RX_DMA_OVERRUN	(CPSW_STATS + 0x8C)
+
+/* Statistics are off out of reset and count nothing until this is set. */
+#define SS_STAT_PORT_EN		(CPSW_SS + 0x0C)
+#define STAT_EN_ALL		0x7
+
 #define ALE_CONTROL		(CPSW_ALE + 0x08)
 #define ALE_PORTCTL(n)		(CPSW_ALE + 0x40 + (n) * 4)
 #define ALE_CTL_ENABLE		(1u << 31)
@@ -239,18 +261,48 @@
  * those two up produces a DMA that writes somewhere else entirely.
  */
 #define CPPI_PA			0x4A102000u
-#define CPSW_RX_COUNT		4
-#define CPSW_BUF_SIZE		1536
+#define CPPI_SIZE		0x2000u		/* 8 KB, and all of it descriptors */
+#define CPSW_BUF_SIZE		1536		/* 24 cache lines exactly */
 
-#define TX_BD_PA		(CPPI_PA + 0x40u)
-#define TX_BD_VA		(cppi_va + 0x40u)
+/*
+ * Sixty-four receive buffers, in DDR.
+ *
+ * They used to be four, in CPPI RAM, and the two facts were the same fact:
+ * four buffers of 1536 bytes plus one for transmit filled 7680 of the 8192
+ * bytes there is, so a fifth was not a decision anyone could make.  Four
+ * buffers is 484 microseconds of slack at line rate, and a burst measured 990
+ * datagrams dropped against 605 delivered.
+ *
+ * Nothing ever required the buffers to be there.  The CPDMA reads and writes
+ * ordinary memory; only the descriptors have to live in CPPI RAM, and they are
+ * sixteen bytes each, so moving the buffers out leaves room for 512 of them
+ * where there was room for four.  Sixty-four buffers is 96 KB of a 512 MB
+ * machine and about 7.7 milliseconds of slack.
+ *
+ * The alignment is not decoration.  Invalidating a cache line that is only
+ * partly ours throws away whatever else shares it, so a DMA buffer owns whole
+ * lines start to finish: aligned to 64, and a size that is a multiple of it.
+ */
+#define CPSW_RX_COUNT		64
+
+static u8 rx_buf[CPSW_RX_COUNT][CPSW_BUF_SIZE]
+	__attribute__((aligned(DCACHE_LINE_SIZE)));
+
+#define RX_BUF_VA(i)		((unsigned long)rx_buf[i])
+#define RX_BUF_PA(i)		kva_to_phys(rx_buf[i])
+
+/*
+ * Descriptors, still in CPPI RAM: the receive chain first, then the one for
+ * transmit past the end of it.  Transmit still copies into CPPI RAM, which is
+ * the next thing to go — receive is where the frames were being lost.
+ */
+#define RX_BD_PA(i)		(CPPI_PA + (i) * 16u)
+#define RX_BD_VA(i)		(cppi_va + (i) * 16u)
+
+#define TX_BD_PA		(CPPI_PA + CPSW_RX_COUNT * 16u)
+#define TX_BD_VA		(cppi_va + CPSW_RX_COUNT * 16u)
 #define TX_BUF_PA		(CPPI_PA + 0x1900u)
 #define TX_BUF_VA		(cppi_va + 0x1900u)
-
-#define RX_BD_PA(i)		(CPPI_PA + (i) * 16u)
-#define RX_BUF_PA(i)		(CPPI_PA + 0x100u + (i) * CPSW_BUF_SIZE)
-#define RX_BD_VA(i)		(cppi_va + (i) * 16u)
-#define RX_BUF_VA(i)		(cppi_va + 0x100u + (i) * CPSW_BUF_SIZE)
 
 #define ETH_MIN_FRAME		60	/* without FCS; the MAC pads nothing */
 
@@ -296,6 +348,10 @@ static unsigned long rx_malformed;	/* length outside what a frame can be */
 static unsigned long rx_isr_entries;
 static unsigned long rx_unmasks;
 static unsigned long rx_poll_max;
+static unsigned long rx_chain_broken;
+
+/* At most one report every two seconds, whatever the load. */
+DEFINE_RATELIMIT(rx_stat_rl, 2000, 1);
 
 static DEFINE_WAIT_QUEUE(tx_wait);
 static volatile int tx_busy;		/* one buffer, so one frame in flight */
@@ -582,6 +638,9 @@ static void cpsw_ale_init(void)
 {
 	int i;
 
+	/* Counters are off out of reset; turn them on before any frame. */
+	wr(SS_STAT_PORT_EN, STAT_EN_ALL);
+
 	wr(ALE_CONTROL, ALE_CTL_ENABLE | ALE_CTL_CLEAR_TBL | ALE_CTL_BYPASS);
 	for (i = 0; i < 3; i++)
 		wr(ALE_PORTCTL(i), ALE_PORT_FORWARD);
@@ -629,6 +688,17 @@ static void cpsw_rx_ring_init(void)
 
 	for (i = 0; i < CPSW_RX_COUNT; i++) {
 		u32 next = (i < CPSW_RX_COUNT - 1) ? RX_BD_PA(i + 1) : 0;
+
+		/*
+		 * Drop any cached copy before the DMA is allowed to write
+		 * here.  A line still sitting in the cache would be read in
+		 * preference to what the engine puts in memory, and a line
+		 * that happened to be dirty would later be written back over
+		 * it.  Neither faults; both produce a frame that is wrong in
+		 * the middle.
+		 */
+		invalidate_dcache_range(RX_BUF_VA(i),
+					RX_BUF_VA(i) + CPSW_BUF_SIZE);
 
 		cpsw_bd_write(RX_BD_VA(i), next, RX_BUF_PA(i),
 			      CPSW_BUF_SIZE, BD_OWNER);
@@ -793,20 +863,12 @@ static struct netdev cpsw_netdev = {
 	.tx   = cpsw_netdev_tx,
 };
 
-/* CPPI RAM is device memory: read it a word at a time, never with a memcpy. */
-static void cpsw_read_buf(u8 *dst, u32 va, unsigned int len)
-{
-	unsigned int i;
-
-	for (i = 0; i < len; i += 4) {
-		u32 w = mmio_read32(va + i);
-
-		dst[i]     = (u8)w;
-		dst[i + 1] = (u8)(w >> 8);
-		dst[i + 2] = (u8)(w >> 16);
-		dst[i + 3] = (u8)(w >> 24);
-	}
-}
+/*
+ * The matching reader is gone.  Receive buffers are ordinary memory now, so
+ * there is nothing to read a word at a time out of — the frame is already
+ * where the protocol layer wants it.  Only transmit still copies into CPPI
+ * RAM, and only until it moves out too.
+ */
 
 /*
  * The receive task: NET band, woken by the handler, does the work the handler
@@ -817,16 +879,62 @@ static void cpsw_read_buf(u8 *dst, u32 va, unsigned int len)
  * the first ones should be the machine at the other end of the cable, which is
  * an answer that can be checked rather than admired.
  */
-/* Which of the four a descriptor address names.  The inverse of RX_BD_PA(). */
+/*
+ * Which descriptor an address names.  The inverse of RX_BD_PA().
+ *
+ * Bounded, because the next pointer is read back out of a descriptor the DMA
+ * also writes, and the value it yields indexes an array of buffers.  A chain
+ * that has come apart would otherwise be a read outside rx_buf[] — and the
+ * descriptor immediately past the receive chain is the transmit one, so the
+ * first address out of range is a plausible-looking one.  CPSW_RX_COUNT is
+ * returned for anything else, which every caller reads as "no successor".
+ */
 static inline unsigned int rx_bd_index(u32 pa)
 {
-	return (pa - CPPI_PA) / 16u;
+	unsigned int i;
+
+	if (pa < CPPI_PA)
+		return CPSW_RX_COUNT;
+
+	i = (pa - CPPI_PA) / 16u;
+	return i < CPSW_RX_COUNT ? i : CPSW_RX_COUNT;
 }
 
 /* Is there a completed descriptor waiting?  Also the poller's wait condition. */
 static inline int cpsw_rx_ready(void)
 {
 	return !(mmio_read32(RX_BD_VA(rx_head) + 12) & BD_OWNER);
+}
+
+/*
+ * Everything worth knowing about the link in one place, software counters and
+ * the MAC's own side by side.
+ *
+ * The hardware ones are what make a loss attributable.  "Frames in" counts
+ * what reached this driver; Rx DMA Overruns counts what the MAC threw away
+ * before it could, because no descriptor was free.  Without the second, a
+ * burst that lost most of its datagrams could be blamed on this board, on the
+ * sender, or on the receiver's socket buffer, and there was no way to choose.
+ */
+static void cpsw_report(unsigned long suppressed)
+{
+	printk("[CPSW] %lu frames, %lu malformed, %lu chain;"
+	       " %lu isr, %lu unmask, %lu deepest poll\n",
+	       rx_frames, rx_malformed, rx_chain_broken,
+	       rx_isr_entries, rx_unmasks, rx_poll_max);
+
+	printk("[CPSW] mac: %lu good, %lu crc, overruns %lu sof / %lu mof"
+	       " / %lu dma\n",
+	       (unsigned long)rd(STATS_RX_GOOD),
+	       (unsigned long)rd(STATS_RX_CRC),
+	       (unsigned long)rd(STATS_RX_SOF_OVERRUN),
+	       (unsigned long)rd(STATS_RX_MOF_OVERRUN),
+	       (unsigned long)rd(STATS_RX_DMA_OVERRUN));
+
+	net_dump_stats();
+
+	if (suppressed)
+		printk("[CPSW] (%lu reports suppressed)\n", suppressed);
 }
 
 /*
@@ -845,7 +953,6 @@ static inline int cpsw_rx_ready(void)
  */
 static int cpsw_rx_poll(int budget)
 {
-	static u8 frame[ETH_FRAME_MAX];
 	int done = 0;
 
 	while (done < budget) {
@@ -861,14 +968,22 @@ static int cpsw_rx_poll(int budget)
 		next_pa = mmio_read32(bd + 0);
 		len     = flags & BD_PKT_LEN_MASK;
 
-		/*
-		 * The whole frame, not just its header.  Up to 1536 bytes
-		 * through strongly ordered memory is tens of microseconds, and
-		 * §9.2 puts that in a task that can be preempted rather than in
-		 * a handler that cannot.
-		 */
 		if (len >= ETH_HDR_SIZE && len <= CPSW_BUF_SIZE) {
-			cpsw_read_buf(frame, RX_BUF_VA(cur), (len + 3u) & ~3u);
+			/*
+			 * Nothing is copied out.  The frame was written to
+			 * ordinary memory by the engine, so the protocol layer
+			 * reads it where it lies; all that is needed first is
+			 * to drop whatever the cache may have speculated into
+			 * these lines while the DMA was writing them.
+			 *
+			 * This is the copy that used to cost 92 nanoseconds a
+			 * byte, because it came out of CPPI RAM one strongly
+			 * ordered word at a time — about 139 microseconds for
+			 * a full frame, in each direction.  It is not smaller
+			 * now, it is gone.
+			 */
+			invalidate_dcache_range(RX_BUF_VA(cur),
+						RX_BUF_VA(cur) + len);
 			rx_frames++;
 		} else {
 			rx_malformed++;
@@ -883,10 +998,34 @@ static int cpsw_rx_poll(int budget)
 		 */
 		wr(SR_RX0_CP, RX_BD_PA(cur));
 
-		/* The chain continues where this descriptor pointed. */
-		rx_head = next_pa ? rx_bd_index(next_pa) : cur;
+		/*
+		 * The chain continues where this descriptor pointed.  No
+		 * successor — either a zero pointer or one that does not name
+		 * a receive descriptor — means this buffer, once re-armed
+		 * below, is the whole of what is queued.
+		 */
+		rx_head = next_pa ? rx_bd_index(next_pa) : CPSW_RX_COUNT;
+		if (rx_head >= CPSW_RX_COUNT) {
+			if (next_pa)
+				rx_chain_broken++;
+			rx_head = cur;
+		}
 
-		/* Hand the buffer back and put it on the end of the chain. */
+		/*
+		 * Hand the frame up before handing the buffer back, and not
+		 * the other way round.  Re-arming makes the buffer the DMA's
+		 * again, and the engine will fill it with the next frame off
+		 * the wire — while the protocol layer is still reading the
+		 * previous one out of it.  When the copy stood in between,
+		 * the order did not matter; without it, it is the difference
+		 * between a stack and a race.
+		 */
+		if (len)
+			netdev_rx(&cpsw_netdev, (const u8 *)RX_BUF_VA(cur), len);
+
+		invalidate_dcache_range(RX_BUF_VA(cur),
+					RX_BUF_VA(cur) + CPSW_BUF_SIZE);
+
 		cpsw_bd_write(bd, 0, RX_BUF_PA(cur), CPSW_BUF_SIZE, BD_OWNER);
 
 		if (rx_tail != cur) {
@@ -903,23 +1042,19 @@ static int cpsw_rx_poll(int budget)
 		if (flags & BD_EOQ)
 			wr(SR_RX0_HDP, RX_BD_PA(rx_head));
 
-		if (len)
-			netdev_rx(&cpsw_netdev, frame, len);
-
 		done++;
 
 		/*
 		 * A count every so often, because a driver that has stopped
 		 * and a link that is quiet look identical otherwise — a
 		 * distinction this bring-up already had to make once.
+		 *
+		 * Limited in time, not in frames: see nothan/printk.h.  The
+		 * previous "every 32 frames" produced five hundred summaries
+		 * during one burst and tore the console apart printing them.
 		 */
-		if (len && (rx_frames & 31) == 0) {
-			printk("[CPSW] %lu frames, %lu malformed; %lu isr,"
-			       " %lu unmask, %lu deepest poll\n",
-			       rx_frames, rx_malformed, rx_isr_entries,
-			       rx_unmasks, rx_poll_max);
-			net_dump_stats();
-		}
+		if (len && ratelimit_allow(&rx_stat_rl))
+			cpsw_report(rx_stat_rl.last_dropped);
 	}
 
 	if ((unsigned long)done > rx_poll_max)
@@ -1112,7 +1247,7 @@ static int cpsw_probe(struct platform_device *pdev)
 	intc_enable_irq(pdev->irq + 1);
 
 	printk("[CPSW] rx on irq %d, tx on irq %d;"
-	       " %d rx buffers of %d bytes in CPPI RAM\n",
+	       " %d rx buffers of %d bytes in DDR, descriptors in CPPI RAM\n",
 	       pdev->irq, pdev->irq + 1, CPSW_RX_COUNT, CPSW_BUF_SIZE);
 
 #if CONFIG_NET_ARP_PROBE

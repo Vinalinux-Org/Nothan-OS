@@ -186,11 +186,6 @@ static inline u32 *pgd_kva(void)
 #define PTE_USER_CODE	(L2_ATTR_MEM | L2_USER_RW)			/* RW + exec */
 #define PTE_USER_DATA	(PTE_SMALL_XN | L2_ATTR_MEM | L2_USER_RW)	/* RW + XN  */
 
-static inline unsigned long kva_to_phys(void *kva)
-{
-	return (unsigned long)kva - MMU_OFFSET;
-}
-
 /* Clean a page-table region to PoC so the MMU table walker sees writes. */
 static inline void pt_clean(void *addr, unsigned int size)
 {
