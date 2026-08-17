@@ -260,31 +260,42 @@ static u8  cpsw_mac[6];
 static int link_full_duplex;
 
 /*
- * What the interrupt hands to the task: which descriptor completed, and the
- * flags it completed with.  Nothing else — the frame itself stays in CPPI RAM
- * until a task can copy it, because copying 1536 bytes through strongly
- * ordered memory is exactly the work kernel-roadmap.md §9.2 forbids a handler
- * from doing, and the driver this one is derived from did it anyway.
+ * How many frames one pass of the poller will take before it goes round again.
  *
- * Sixteen slots against four descriptors, so the ring cannot fill: the DMA
- * cannot complete a fifth buffer while four are still held. The full path is
- * still written and counted, because "cannot happen" is a claim about today's
- * buffer count and not a property of the code.
+ * It is a bound on time, not on the ring: with four buffers it can never be
+ * reached, and that is the intent — a backstop, not a routine limit.  Sizing
+ * it to today's buffer count would put a number that has nothing to do with
+ * buffers into a constant named after them, and would be wrong the day the
+ * buffers move to DDR and stop being four.
+ *
+ * Sixty-four MTU frames is about nine milliseconds of copying, which sounds
+ * long until one remembers where it runs: the poller is a task in the NET
+ * band, so audio preempts it.  That is the entire reason the work was moved
+ * out of the interrupt.
  */
-struct rx_event {
-	u32	flags;
-	u32	idx;
-};
+#define CPSW_RX_BUDGET		64
 
-DEFINE_RING(rxq, struct rx_event, 4);
-
-static struct rxq_ring		rx_ring;
 static DEFINE_WAIT_QUEUE(rx_wait);
 
-static unsigned int rx_isr_idx;		/* ISR side: next descriptor to inspect */
-static unsigned int rx_tail;		/* task side: last descriptor in the chain */
-static unsigned long rx_frames;		/* task side: frames handed up */
-static unsigned long rx_dropped;	/* ring was full — see above */
+static unsigned int rx_head;		/* next descriptor the DMA will finish */
+static unsigned int rx_tail;		/* last descriptor in the chain */
+static unsigned long rx_frames;		/* frames handed up */
+static unsigned long rx_malformed;	/* length outside what a frame can be */
+
+/*
+ * Evidence, not decoration.
+ *
+ * @rx_isr_entries against @rx_frames is the ratio that says whether the
+ * interrupt is behaving: one entry per burst is the masking working, one entry
+ * per frame is it not.  @rx_poll_max says how close the budget ever came to
+ * mattering.  Both exist because the failure that produced this code — a board
+ * that stopped answering anything, shell included — was diagnosed by argument
+ * rather than by measurement, and an argument cannot be checked on the next
+ * board.
+ */
+static unsigned long rx_isr_entries;
+static unsigned long rx_unmasks;
+static unsigned long rx_poll_max;
 
 static DEFINE_WAIT_QUEUE(tx_wait);
 static volatile int tx_busy;		/* one buffer, so one frame in flight */
@@ -623,7 +634,7 @@ static void cpsw_rx_ring_init(void)
 			      CPSW_BUF_SIZE, BD_OWNER);
 	}
 
-	rx_isr_idx = 0;
+	rx_head = 0;
 	rx_tail = CPSW_RX_COUNT - 1;
 	wr(SR_RX0_HDP, RX_BD_PA(0));
 }
@@ -665,43 +676,32 @@ static void cpsw_cpdma_init(void)
  */
 static void cpsw_rx_isr(unsigned int irq)
 {
-	int woke = 0;
-
 	(void)irq;
 
-	for (;;) {
-		u32 flags = mmio_read32(RX_BD_VA(rx_isr_idx) + 12);
-		struct rx_event ev;
-
-		if (flags & BD_OWNER)
-			break;		/* still the DMA's — nothing new */
-
-		ev.flags = flags;
-		ev.idx   = rx_isr_idx;
-
-		if (rxq_put(&rx_ring, ev)) {
-			woke = 1;
-		} else {
-			/*
-			 * Unreachable while there are more ring slots than
-			 * descriptors, but a full ring must still leave the
-			 * hardware in a working state: hand the buffer back
-			 * rather than stranding it, and count the loss.
-			 */
-			rx_dropped++;
-			cpsw_bd_write(RX_BD_VA(rx_isr_idx), 0,
-				      RX_BUF_PA(rx_isr_idx),
-				      CPSW_BUF_SIZE, BD_OWNER);
-		}
-
-		wr(SR_RX0_CP, RX_BD_PA(rx_isr_idx));
-		rx_isr_idx = (rx_isr_idx + 1) % CPSW_RX_COUNT;
-	}
-
+	/*
+	 * Mask the source, acknowledge, wake the poller.  No descriptor is
+	 * read here and none is acknowledged, and that is the whole design.
+	 *
+	 * §14 of the TRM: the receive interrupt is a level, and it deasserts
+	 * only when the host writes RX0_CP with the address of the descriptor
+	 * the port itself last completed.  Anything else leaves it asserted.
+	 * A handler that drains descriptors is therefore racing to satisfy a
+	 * condition the hardware keeps re-arming, and under sustained input it
+	 * loses: the handler that this replaced re-armed buffers from inside
+	 * its own loop, the DMA refilled them at line rate, and the loop fed
+	 * itself.  The CPU never left interrupt context, so no task ran again
+	 * — the board stopped answering ARP, ICMP, UDP and its own console at
+	 * the same instant, with no exception to show for it.
+	 *
+	 * Masking makes the level harmless.  It stays asserted, it stays
+	 * unserviced, and it cannot re-enter.  The poller lifts the mask when
+	 * it has actually caught up and not before.
+	 */
+	wr(WR_C0_RX_EN, 0);
 	wr(CPDMA_EOI_VECTOR, CPDMA_EOI_RX);
 
-	if (woke)
-		wake_up(&rx_wait);
+	rx_isr_entries++;
+	wake_up(&rx_wait);
 }
 
 /*
@@ -817,79 +817,137 @@ static void cpsw_read_buf(u8 *dst, u32 va, unsigned int len)
  * the first ones should be the machine at the other end of the cable, which is
  * an answer that can be checked rather than admired.
  */
-static void cpsw_rx_task(void)
+/* Which of the four a descriptor address names.  The inverse of RX_BD_PA(). */
+static inline unsigned int rx_bd_index(u32 pa)
+{
+	return (pa - CPPI_PA) / 16u;
+}
+
+/* Is there a completed descriptor waiting?  Also the poller's wait condition. */
+static inline int cpsw_rx_ready(void)
+{
+	return !(mmio_read32(RX_BD_VA(rx_head) + 12) & BD_OWNER);
+}
+
+/*
+ * Take up to @budget completed frames off the chain.
+ *
+ * The chain is walked by reading each descriptor's next pointer, never by
+ * stepping an index.  Stepping an index assumes descriptors complete in the
+ * order they are numbered, which is true only until something reorders the
+ * chain — and the EOQ restart below reorders it by design.  Once the two
+ * disagree, RX0_CP is written with the address of a descriptor the port did
+ * not complete, the interrupt never deasserts, and the failure that follows
+ * looks nothing like the line of code that caused it.
+ *
+ * Returns the number of frames taken.  Fewer than @budget means the chain was
+ * drained, which is the only thing that lets the interrupt back in.
+ */
+static int cpsw_rx_poll(int budget)
 {
 	static u8 frame[ETH_FRAME_MAX];
+	int done = 0;
 
+	while (done < budget) {
+		unsigned int cur = rx_head;
+		u32 bd = RX_BD_VA(cur);
+		u32 flags, next_pa;
+		unsigned int len;
+
+		flags = mmio_read32(bd + 12);
+		if (flags & BD_OWNER)
+			break;			/* still the DMA's */
+
+		next_pa = mmio_read32(bd + 0);
+		len     = flags & BD_PKT_LEN_MASK;
+
+		/*
+		 * The whole frame, not just its header.  Up to 1536 bytes
+		 * through strongly ordered memory is tens of microseconds, and
+		 * §9.2 puts that in a task that can be preempted rather than in
+		 * a handler that cannot.
+		 */
+		if (len >= ETH_HDR_SIZE && len <= CPSW_BUF_SIZE) {
+			cpsw_read_buf(frame, RX_BUF_VA(cur), (len + 3u) & ~3u);
+			rx_frames++;
+		} else {
+			rx_malformed++;
+			len = 0;
+		}
+
+		/*
+		 * Acknowledge this descriptor by its own address, before it is
+		 * re-armed.  This is the write the hardware compares against
+		 * what it last completed, and it is the only thing that lowers
+		 * the interrupt.
+		 */
+		wr(SR_RX0_CP, RX_BD_PA(cur));
+
+		/* The chain continues where this descriptor pointed. */
+		rx_head = next_pa ? rx_bd_index(next_pa) : cur;
+
+		/* Hand the buffer back and put it on the end of the chain. */
+		cpsw_bd_write(bd, 0, RX_BUF_PA(cur), CPSW_BUF_SIZE, BD_OWNER);
+
+		if (rx_tail != cur) {
+			mmio_write32(RX_BD_VA(rx_tail) + 0, RX_BD_PA(cur));
+			rx_tail = cur;
+		}
+
+		/*
+		 * EOQ says the engine reached a descriptor with no successor
+		 * and stopped.  Restart it at the front of what is queued now,
+		 * which after the re-arm above is never empty — and restart
+		 * only on EOQ, so a queue still being walked is left alone.
+		 */
+		if (flags & BD_EOQ)
+			wr(SR_RX0_HDP, RX_BD_PA(rx_head));
+
+		if (len)
+			netdev_rx(&cpsw_netdev, frame, len);
+
+		done++;
+
+		/*
+		 * A count every so often, because a driver that has stopped
+		 * and a link that is quiet look identical otherwise — a
+		 * distinction this bring-up already had to make once.
+		 */
+		if (len && (rx_frames & 31) == 0) {
+			printk("[CPSW] %lu frames, %lu malformed; %lu isr,"
+			       " %lu unmask, %lu deepest poll\n",
+			       rx_frames, rx_malformed, rx_isr_entries,
+			       rx_unmasks, rx_poll_max);
+			net_dump_stats();
+		}
+	}
+
+	if ((unsigned long)done > rx_poll_max)
+		rx_poll_max = (unsigned long)done;
+
+	return done;
+}
+
+static void cpsw_rx_task(void)
+{
 	printk("[CPSW] rx task up, waiting for frames\n");
 
 	for (;;) {
-		struct rx_event ev;
+		/*
+		 * Hitting the budget means there is probably more, so go round
+		 * again and stay masked.  Only a short pass proves the chain is
+		 * drained, and only then is it safe to let the level back in.
+		 *
+		 * Sleeping is done after unmasking and never after a full pass:
+		 * a task that slept with the interrupt still masked would never
+		 * be woken by anything, which is the one way this arrangement
+		 * can deadlock and the reason the order is not interchangeable.
+		 */
+		if (cpsw_rx_poll(CPSW_RX_BUDGET) < CPSW_RX_BUDGET) {
+			wr(WR_C0_RX_EN, 1);
+			rx_unmasks++;
 
-		wait_event_cond(&rx_wait, rxq_used(&rx_ring) != 0);
-
-		while (rxq_get(&rx_ring, &ev)) {
-			unsigned int len = ev.flags & BD_PKT_LEN_MASK;
-
-			if (len >= ETH_HDR_SIZE && len <= CPSW_BUF_SIZE) {
-				/*
-				 * The whole frame, not just its header, and
-				 * here rather than in the handler.  This is
-				 * the copy §9.2 moved out of interrupt
-				 * context: up to 1536 bytes through strongly
-				 * ordered memory, which is tens of
-				 * microseconds and belongs to a task that can
-				 * be preempted by anything more urgent.
-				 */
-				cpsw_read_buf(frame, RX_BUF_VA(ev.idx),
-					      (len + 3u) & ~3u);
-				rx_frames++;
-				netdev_rx(&cpsw_netdev, frame, len);
-
-				/*
-				 * A count every so often, because a driver
-				 * that has stopped and a link that is quiet
-				 * look identical otherwise — a distinction
-				 * this bring-up already had to make once.
-				 * Detail belongs to whatever handles the
-				 * frame, not to the driver that carried it.
-				 */
-				if ((rx_frames & 31) == 0) {
-					printk("[CPSW] %lu frames received,"
-					       " %lu dropped\n",
-					       rx_frames, rx_dropped);
-					net_dump_stats();
-				}
-			}
-
-			/*
-			 * Hand the buffer back, now that it has been read, and
-			 * put it on the end of the chain the DMA is walking.
-			 *
-			 * The link is the part that is easy to leave out.  A
-			 * descriptor is armed with next = 0, which means "end
-			 * of queue"; arming all four that way and stopping
-			 * there leaves the engine with nowhere to go after the
-			 * first, and reception halts after exactly as many
-			 * frames as there are buffers.  It has to be appended
-			 * to the tail as well, which is what makes the four
-			 * descriptors a queue rather than four dead ends.
-			 */
-			cpsw_bd_write(RX_BD_VA(ev.idx), 0, RX_BUF_PA(ev.idx),
-				      CPSW_BUF_SIZE, BD_OWNER);
-
-			mmio_write32(RX_BD_VA(rx_tail) + 0, RX_BD_PA(ev.idx));
-			rx_tail = ev.idx;
-
-			/*
-			 * EOQ says the engine reached the end and stopped, so
-			 * the append above came too late for it to notice.
-			 * Restarting it is the only way back, and doing so
-			 * only on EOQ is what keeps a rewrite from interrupting
-			 * a queue that is still being walked.
-			 */
-			if (ev.flags & BD_EOQ)
-				wr(SR_RX0_HDP, RX_BD_PA(ev.idx));
+			wait_event_cond(&rx_wait, cpsw_rx_ready());
 		}
 	}
 }
