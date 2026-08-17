@@ -13,6 +13,7 @@
 #include <nothan/types.h>
 #include <nothan/netdev.h>
 #include <nothan/printk.h>
+#include <nothan/ipv4.h>
 
 struct netdev_stats netdev_stats;
 
@@ -50,6 +51,17 @@ struct netdev *netdev_get(void)
 }
 
 void arp_input(struct netdev *dev, const u8 *frame, unsigned int len);
+void arp_dump_stats(void);
+void ipv4_dump_stats(void);
+
+void net_dump_stats(void)
+{
+	printk("[NET] %lu frames in, %lu unhandled, %lu runt, %lu out\n",
+	       netdev_stats.rx_frames, netdev_stats.rx_unknown,
+	       netdev_stats.rx_short, netdev_stats.tx_frames);
+	arp_dump_stats();
+	ipv4_dump_stats();
+}
 
 void netdev_rx(struct netdev *dev, const u8 *frame, unsigned int len)
 {
@@ -67,6 +79,10 @@ void netdev_rx(struct netdev *dev, const u8 *frame, unsigned int len)
 	switch (type) {
 	case ETH_P_ARP:
 		arp_input(dev, frame, len);
+		break;
+
+	case ETH_P_IPV4:
+		ipv4_input(dev, frame, len);
 		break;
 
 	/*

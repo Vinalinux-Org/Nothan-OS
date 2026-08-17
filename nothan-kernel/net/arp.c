@@ -16,6 +16,7 @@
 #include <nothan/types.h>
 #include <nothan/netdev.h>
 #include <nothan/printk.h>
+#include <nothan/ipv4.h>
 
 #define ARP_HDR_LEN		28
 #define ARP_FRAME_LEN		(ETH_HDR_SIZE + ARP_HDR_LEN)
@@ -36,19 +37,14 @@
 #define ARP_TARGET_IP		38
 
 /*
- * This board's address, for now.
+ * The address lives in the IP layer, not here.
  *
- * Where an address really comes from is undecided and is not a networking
- * question: a box in a meeting room might be handed one by DHCP, might carry a
- * fixed one from its own settings, or might need neither if it only ever talks
- * to its pair.  Deciding that belongs with the box's configuration model, not
- * with the first protocol that happens to need four bytes.
- *
- * So this is a constant, stated as one, on the subnet the development laptop
- * uses.  Anything that pretended to be more than a constant would be inventing
- * a design nobody has agreed to.
+ * It was defined in this file when ARP was the only protocol that needed it,
+ * and IP needing it too is exactly the moment a second copy would have been
+ * made — which is the shape that has cost this project six separate bugs in a
+ * week.  One definition, in nothan/ipv4.h, and everything asks it.
  */
-static const u8 my_ip[4] = { 10, 42, 0, 2 };
+#define my_ip	ipv4_addr()
 
 static unsigned long arp_requests;
 static unsigned long arp_replies_sent;

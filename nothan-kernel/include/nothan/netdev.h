@@ -66,4 +66,16 @@ struct netdev_stats {
 
 extern struct netdev_stats netdev_stats;
 
+/*
+ * Print what every layer above the link has counted.
+ *
+ * One call rather than one per protocol, because a counter nothing prints is a
+ * counter nobody reads: every protocol here keeps its own tally of what it
+ * refused and why, and those are the numbers that tell a silent link apart from
+ * a link full of packets being dropped for a reason.  net_core.c owns this for
+ * the same reason it owns the demultiplex — it is the one file that knows which
+ * protocols exist.
+ */
+void net_dump_stats(void);
+
 #endif /* _NOTHAN_NETDEV_H */

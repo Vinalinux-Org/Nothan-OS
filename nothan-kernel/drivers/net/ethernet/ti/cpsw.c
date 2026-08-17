@@ -854,12 +854,12 @@ static void cpsw_rx_task(void)
 				 * Detail belongs to whatever handles the
 				 * frame, not to the driver that carried it.
 				 */
-				if ((rx_frames & 31) == 0)
+				if ((rx_frames & 31) == 0) {
 					printk("[CPSW] %lu frames received,"
-					       " %lu unhandled, %lu dropped\n",
-					       rx_frames,
-					       netdev_stats.rx_unknown,
-					       rx_dropped);
+					       " %lu dropped\n",
+					       rx_frames, rx_dropped);
+					net_dump_stats();
+				}
 			}
 
 			/*
