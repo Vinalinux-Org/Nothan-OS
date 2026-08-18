@@ -45,6 +45,24 @@ PORT_RX = 5005          # board's inbound stream
 stop = threading.Event()
 
 
+def gui_works():
+    """
+    Whether this build of OpenCV can open a window.
+
+    Worth asking rather than assuming: a headless build raises from inside
+    imshow, and the traceback names cmake flags, which is a long way from
+    "there is no display backend".  It is also not a reason to stop — what this
+    script is really for is the counters on the board, and those do not need a
+    window.
+    """
+    try:
+        cv2.namedWindow("__probe", cv2.WINDOW_AUTOSIZE)
+        cv2.destroyWindow("__probe")
+        return True
+    except cv2.error:
+        return False
+
+
 def to_rgb565(bgr):
     """OpenCV BGR888 to the RGB565 the panel scans out, little endian."""
     b = bgr[:, :, 0].astype(np.uint16) >> 3
@@ -153,7 +171,19 @@ def main():
     ap.add_argument("--fps", type=float, default=30.0)
     ap.add_argument("--no-send", action="store_true")
     ap.add_argument("--pattern", action="store_true")
+    ap.add_argument("--secs", type=float, default=0.0,
+                    help="stop after this long (0 = until interrupted)")
+    ap.add_argument("--snap", default=None,
+                    help="write the newest received frame here as PNG, "
+                         "once a second — for a build with no window")
     args = ap.parse_args()
+
+    show = gui_works()
+    if not show:
+        print("no window: this OpenCV build has no GUI backend "
+              "(pip uninstall opencv-python-headless brings it back).",
+              file=sys.stderr)
+        print("running anyway — the numbers are what matter.", file=sys.stderr)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 8 << 20)
@@ -163,7 +193,8 @@ def main():
     # Subscribing is how the board learns where to send; the reply address is
     # this socket's, so nothing here has to know its own IP.
     sock.sendto(b"VSUB", (args.board, PORT_TX))
-    print(f"calling {args.board} — window closes on q or Esc")
+    print(f"calling {args.board} — "
+          + ("q or Esc to hang up" if show else "Ctrl-C to hang up"))
 
     stats = {"tx_frames": 0, "tx_fail": 0, "rx_frames": 0, "rx_whole": 0}
     frames = []
@@ -179,21 +210,34 @@ def main():
 
     t0 = time.monotonic()
     last = t0
+    snapped = t0
     try:
         while True:
+            now = time.monotonic()
+
             if frames:
                 w, h, data = frames[-1]
-                cv2.imshow("board", from_rgb565(data, w, h))
-            if cv2.waitKey(10) & 0xFF in (ord("q"), 27):
-                break
+                if show:
+                    cv2.imshow("board", from_rgb565(data, w, h))
+                elif args.snap and now - snapped >= 1.0:
+                    cv2.imwrite(args.snap, from_rgb565(data, w, h))
+                    snapped = now
 
-            now = time.monotonic()
+            if show:
+                if cv2.waitKey(10) & 0xFF in (ord("q"), 27):
+                    break
+            else:
+                time.sleep(0.05)
+
             if now - last >= 2.0:
                 el = now - t0
                 print(f"sent {stats['tx_frames']/el:5.1f}/s  "
                       f"recv {stats['rx_frames']/el:5.1f}/s  "
                       f"({stats['rx_whole']} whole of {stats['rx_frames']})")
                 last = now
+
+            if args.secs and now - t0 >= args.secs:
+                break
     except KeyboardInterrupt:
         pass
     finally:
@@ -201,8 +245,13 @@ def main():
         sock.sendto(b"VSTP", (args.board, PORT_TX))
         for t in threads:
             t.join(timeout=1.0)
-        cv2.destroyAllWindows()
+        if show:
+            cv2.destroyAllWindows()
 
+    el = time.monotonic() - t0
+    print(f"\nsent {stats['tx_frames']} frames ({stats['tx_fail']} failed), "
+          f"received {stats['rx_frames']} ({stats['rx_whole']} whole) "
+          f"in {el:.1f}s")
     return 0
 
 
