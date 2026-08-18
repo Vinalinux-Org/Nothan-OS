@@ -672,6 +672,21 @@ static void cpsw_ale_init(void)
  * fail loudly — it collides, retries, and loses frames in a pattern that
  * looks like a bad cable, which is a long way from the line that hard-coded
  * it.  The driver this is derived from wrote MAC_FULLDUPLEX unconditionally.
+ *
+ * KNOWN LIMITATION: read once, here, and never looked at again.  Boot with the
+ * cable out and the link comes up later as full duplex while this MAC stays
+ * half, and the half-duplex receiver is gated off for the whole time the port
+ * is transmitting.  Measured, because it happened: a bidirectional video call
+ * lost 79% of what arrived — 28 of every 132 datagrams — while transmit stayed
+ * perfect and every counter in the machine read clean.  0 CRC errors, 0 DMA
+ * overruns, 0 dropped by any ring: the frames were refused by the MAC before
+ * anything here could count them.  Plugging the cable in first and rebooting
+ * took the same test to 132 of 132.
+ *
+ * A box that gets its cable plugged in after it is switched on is an ordinary
+ * box, so this wants link-change detection and a MAC reconfigured when the
+ * PHY renegotiates.  Until then the failure is silent, and this comment is the
+ * only place that says what it looks like.
  */
 static void cpsw_port_init(void)
 {
