@@ -28,12 +28,21 @@
 /*
  * Video stack: LCDC controller, framebuffer, TDA19988 HDMI framer.
  *
- * Off during kernel foundation work, and not only to skip drawing: LCDC raises
- * a frame-done interrupt continuously, while Phase 3 measures wakeup-to-run
- * latency in microseconds.  A periodic interrupt landing in the middle of those
- * measurements is exactly what makes a result unreproducible.
+ * Off through the kernel foundation work, and not only to skip drawing: LCDC
+ * raises a frame-done interrupt continuously, while Phase 3 measures
+ * wakeup-to-run latency in microseconds.  A periodic interrupt landing in the
+ * middle of those measurements is exactly what makes a result unreproducible.
+ *
+ * On now, because the receiving half of a call has to put its frames somewhere.
+ * That brings back the interrupt this comment warns about, and adds a raster
+ * DMA reading 768 KB out of DDR sixty times a second, both of them landing on
+ * a network path that has never run beside either.  Nothing has measured that
+ * yet; the sink's two independent counters and the CPSW overrun registers are
+ * what will say whether it costs anything.
+ *
+ * Turn it off to get the old measurement conditions back.
  */
-#define CONFIG_VIDEO		0
+#define CONFIG_VIDEO		1
 
 /* LVGL GUI (userspace).  Needs the video stack. */
 #define CONFIG_GUI		0

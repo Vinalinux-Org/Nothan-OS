@@ -25,7 +25,16 @@
 
 #include <nothan/types.h>
 
+/*
+ * Two ports, one per direction, and that is a requirement rather than tidiness.
+ *
+ * ring.h is lock free on the strength of one producer and one consumer per
+ * ring, and a socket has one ring.  The sender's task and the receiver's task
+ * are two consumers, so they cannot share a socket — the alternative is a lock
+ * on the path every video datagram takes.
+ */
 #define VIDEO_PORT		5004	/* control in, stream out */
+#define VIDEO_PORT_RX		5005	/* the far end's stream, coming in */
 
 #define VIDEO_MAGIC		0x4E56u	/* 'N','V' */
 #define VIDEO_VERSION		1

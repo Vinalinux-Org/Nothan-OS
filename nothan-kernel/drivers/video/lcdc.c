@@ -270,6 +270,39 @@ static void lcdc_flush(int x1, int y1, int x2, int y2,
 	}
 }
 
+/*
+ * Hand out the scanout buffer to a writer inside the kernel.
+ *
+ * The palette sits in the first 32 bytes of the allocation and is not part of
+ * the image, which is why the pointer is offset and lcdc_flush() offsets the
+ * same way.  Handing out fb_va itself would put a writer's first row on top of
+ * the palette and turn the whole frame into the wrong colours.
+ */
+static int lcdc_get_surface(struct fb_surface *s)
+{
+	if (!fb_va)
+		return -1;
+
+	s->pixels = (u16 *)((u8 *)fb_va + PALETTE_SZ);
+	s->width  = FB_W;
+	s->height = FB_H;
+	return 0;
+}
+
+/*
+ * Push the CPU's writes out to where the raster DMA reads them.
+ *
+ * Not optional and not an optimisation: the framebuffer is ordinary cached
+ * kernel memory, the DMA reads DDR directly, and without this the panel scans
+ * out whatever was in DRAM before the writes — which is last frame, or at boot,
+ * nothing at all.
+ */
+static void lcdc_sync(void)
+{
+	clean_dcache_range((unsigned long)fb_va,
+			   (unsigned long)fb_va + FB_SZ);
+}
+
 static void lcdc_flip(void)
 {
 	/*
@@ -278,9 +311,14 @@ static void lcdc_flip(void)
 	 * many times/sec raced the raster scan and rolled the whole image. Here we
 	 * just push the CPU's writes to DRAM and pace to the frame boundary to
 	 * limit tearing.
+	 *
+	 * The pacing half is why the video path calls fb_sync() instead of this:
+	 * wait_eof() spins, and a task doing that thirty times a second on a 60 Hz
+	 * panel burns about a quarter of the machine waiting.  Whether the tearing
+	 * that costs is worth paying for is a question for the panel, not for an
+	 * argument — see the note in net/video_rx.c.
 	 */
-	clean_dcache_range((unsigned long)fb_va,
-			   (unsigned long)fb_va + FB_SZ);
+	lcdc_sync();
 	wait_eof();
 }
 
@@ -309,8 +347,10 @@ void lcdc_shutdown(void)
 }
 
 static struct fb_ops lcdc_fb_ops = {
-	.flush = lcdc_flush,
-	.flip  = lcdc_flip,
+	.flush       = lcdc_flush,
+	.flip        = lcdc_flip,
+	.get_surface = lcdc_get_surface,
+	.sync        = lcdc_sync,
 };
 
 static int __init lcdc_init(void)

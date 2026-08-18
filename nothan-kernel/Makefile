@@ -107,6 +107,7 @@ OBJS += $(BUILD_DIR)/net/udp_echo.o
 OBJS += $(BUILD_DIR)/net/udp_sink.o
 OBJS += $(BUILD_DIR)/net/udp_source.o
 OBJS += $(BUILD_DIR)/net/video_tx.o
+OBJS += $(BUILD_DIR)/net/video_rx.o
 
 KERNEL_ELF := $(BUILD_DIR)/kernel.elf
 KERNEL_BIN := $(BUILD_DIR)/kernel.bin

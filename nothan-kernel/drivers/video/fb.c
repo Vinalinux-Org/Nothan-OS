@@ -25,6 +25,23 @@ void fb_register_ops(struct fb_ops *ops)
 	printk("[FB] display backend registered\n");
 }
 
+int fb_get_surface(struct fb_surface *s)
+{
+	if (!registered_ops || !registered_ops->get_surface)
+		return -1;
+
+	return registered_ops->get_surface(s);
+}
+
+int fb_sync(void)
+{
+	if (!registered_ops || !registered_ops->sync)
+		return -1;
+
+	registered_ops->sync();
+	return 0;
+}
+
 /*
  * Report the framebuffer's RAW scanout geometry — the native landscape surface
  * the LCDC actually drives (matches FB_W/FB_H and the flush bounds in lcdc.c).
