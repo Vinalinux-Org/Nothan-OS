@@ -106,6 +106,17 @@
 #define CONFIG_VIDEO_STREAM	1
 
 /*
+ * The generated stand-in for the camera.
+ *
+ * It existed so the whole path downstream of the capture seam could be built
+ * and measured before a webcam existed, and that job is done: a real UVC
+ * camera registers through the same seam now.  Only one source may register,
+ * so the two cannot both be on — turn this back on to run the sending half
+ * with no camera plugged in.
+ */
+#define CONFIG_VIDEO_TESTSRC	0
+
+/*
  * The throughput benchmarks: the discard sink on port 9, the blaster on
  * port 19, the echo on port 7.
  *

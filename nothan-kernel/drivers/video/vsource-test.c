@@ -29,6 +29,7 @@
 #include <nothan/time.h>
 #include <nothan/delay.h>
 #include <nothan/printk.h>
+#include <nothan/config.h>
 
 /*
  * 400x240 is half of the 800x480 panel in each direction, which means it
@@ -142,6 +143,9 @@ static struct video_source vsrc_test = {
 
 static int __init vsrc_test_init(void)
 {
+	if (!CONFIG_VIDEO_TESTSRC)
+		return 0;
+
 	return video_source_register(&vsrc_test);
 }
 device_initcall(vsrc_test_init);

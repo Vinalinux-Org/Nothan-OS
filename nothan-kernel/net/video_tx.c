@@ -30,6 +30,7 @@
 #include <nothan/sched.h>
 #include <nothan/init.h>
 #include <nothan/time.h>
+#include <nothan/delay.h>
 #include <nothan/printk.h>
 
 #if CONFIG_VIDEO_STREAM
@@ -157,15 +158,23 @@ static void vtx_send_frame(const struct video_frame *f, unsigned int bytes)
 
 static void video_tx_task(void)
 {
-	struct video_source *src = video_source_get();
+	struct video_source *src;
 	unsigned int bytes, dgrams;
 	unsigned long wire;
 	unsigned long mark_j = 0, mark_f = 0, mark_i = 0;
 
-	if (!src) {
-		printk("[VTX] no camera registered; not streaming\n");
-		return;
-	}
+	/*
+	 * Wait for a camera rather than deciding at startup that there is none.
+	 *
+	 * A generated source registers during initcalls, before this task first
+	 * runs, and checking once was right while that was the only kind.  A
+	 * USB camera registers when it has been plugged in, enumerated and
+	 * negotiated with — seconds later, and possibly not until someone
+	 * plugs it in tomorrow.  Giving up at boot would mean a box that has to
+	 * be restarted after connecting its camera.
+	 */
+	while ((src = video_source_get()) == (void *)0)
+		msleep(200);
 
 	bytes  = video_frame_bytes(src);
 	dgrams = (bytes + VIDEO_CHUNK - 1) / VIDEO_CHUNK;

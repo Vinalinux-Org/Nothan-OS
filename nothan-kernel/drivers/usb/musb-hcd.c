@@ -37,6 +37,8 @@
 #include <nothan/sched.h>
 #include <nothan/completion.h>
 #include <nothan/input.h>
+#include <nothan/video.h>
+#include <nothan/wait.h>
 
 /* ---- PRCM: clocks (L4_WKUP window) ----------------------------------
  * The USB functional clock is CLKDCOLDO (960 MHz) from the PER DPLL, gated
@@ -1321,9 +1323,128 @@ static int iso_maxp;
 
 #define ISO_FRAME_MAX		(UVC_WANT_W * UVC_WANT_H * 2)
 
-static u8 iso_frame[ISO_FRAME_MAX];
+/*
+ * Two buffers on each side of the conversion, and the reason is a deadline.
+ *
+ * The drain has 125 microseconds to service each packet, and turning 76,800
+ * YUY2 pixels into RGB565 takes a couple of milliseconds — sixteen packet
+ * slots.  So the drain never converts: it fills one buffer, and when a frame
+ * ends it hands that one over and starts the other.  The task converts the
+ * handed-over buffer while packets keep landing in the fresh one.
+ *
+ * The same again on the output side, because a frame being read by the sender
+ * must not be the frame being written.  Four buffers of 150 KB is 600 KB out
+ * of 506 MB, which is not a number worth being clever about.
+ */
+static u8 iso_frame[2][ISO_FRAME_MAX];
+static int iso_wr;			/* which YUY2 buffer the drain fills */
+static volatile int iso_full = -1;	/* which one is waiting to convert */
 static unsigned int iso_fill;		/* bytes of the current frame so far */
 static int iso_fid = -1;		/* FID of the frame being assembled */
+
+static u8 cam_rgb[2][ISO_FRAME_MAX];
+static int cam_wr;			/* which RGB buffer is being written */
+static struct video_frame cam_frame;
+static DEFINE_WAIT_QUEUE(cam_wait);
+static volatile u32 cam_seq;		/* published frames; readers watch it */
+static unsigned long cam_dropped;	/* converted slower than they arrived */
+
+/*
+ * A frame has ended.  Count it, and hand it over if it is worth converting.
+ *
+ * Only whole frames are published.  A short frame is a picture with a band of
+ * the previous one in it, and unlike a lost datagram on the network — where
+ * the hole lasts 33 ms and is gone — this one would be converted, sent, and
+ * drawn.  There is a whole frame along in a thirtieth of a second; the wire
+ * does not need this one.
+ */
+static void iso_finish(void)
+{
+	iso_frames++;
+
+	if (iso_fill == ISO_FRAME_MAX) {
+		iso_whole++;
+
+		if (iso_full >= 0)
+			cam_dropped++;	/* the task has not caught up */
+
+		iso_full = iso_wr;
+		iso_wr ^= 1;
+		wake_up(&cam_wait);
+	}
+
+	iso_fill = 0;
+}
+
+/*
+ * YUY2 to RGB565.
+ *
+ * Four bytes carry two pixels: two luma samples and one chroma pair shared
+ * between them, which is what makes the format half the size of RGB888 and
+ * why converting it costs arithmetic rather than a copy.  Integer
+ * coefficients scaled by 256, from the usual BT.601 matrix; the machine has no
+ * floating point and does not want any on a path that runs 2.3 million pixels
+ * a second.
+ */
+static inline int clamp255(int v)
+{
+	if (v < 0)
+		return 0;
+	if (v > 255)
+		return 255;
+	return v;
+}
+
+static void yuy2_to_rgb565(const u8 *src, u8 *dst, unsigned int pixels)
+{
+	u16 *out = (u16 *)dst;
+	unsigned int i;
+
+	for (i = 0; i < pixels; i += 2) {
+		int y0 = src[0], u = src[1] - 128;
+		int y1 = src[2], v = src[3] - 128;
+		int ruv = (359 * v) >> 8;
+		int guv = (88 * u + 183 * v) >> 8;
+		int buv = (454 * u) >> 8;
+		int r, g, b;
+
+		r = clamp255(y0 + ruv);
+		g = clamp255(y0 - guv);
+		b = clamp255(y0 + buv);
+		*out++ = (u16)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+
+		r = clamp255(y1 + ruv);
+		g = clamp255(y1 - guv);
+		b = clamp255(y1 + buv);
+		*out++ = (u16)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+
+		src += 4;
+	}
+}
+
+/* ---- the capture seam: this camera is the video source ---------------- */
+
+static struct video_frame *cam_capture(struct video_source *src)
+{
+	u32 seen = cam_seq;
+
+	(void)src;
+	wait_event_cond(&cam_wait, cam_seq != seen);
+	return &cam_frame;
+}
+
+static void cam_release(struct video_source *src)
+{
+	(void)src;	/* the published buffer is not reused until the next swap */
+}
+
+static struct video_source cam_source = {
+	.name    = "uvc",
+	.width   = UVC_WANT_W,
+	.height  = UVC_WANT_H,
+	.capture = cam_capture,
+	.release = cam_release,
+};
 
 /*
  * Point hardware endpoint 1 at the camera's isochronous IN endpoint.
@@ -1451,10 +1572,7 @@ static int uvc_drain(int budget)
 
 			/* FID toggling means the previous frame is over. */
 			if (fid != iso_fid) {
-				iso_frames++;
-				if (iso_fill == ISO_FRAME_MAX)
-					iso_whole++;
-				iso_fill = 0;
+				iso_finish();
 				iso_fid = fid;
 			}
 
@@ -1462,11 +1580,11 @@ static int uvc_drain(int budget)
 				iso_errors++;
 			} else if (dlen) {
 				if (iso_fill + dlen <= ISO_FRAME_MAX) {
+					u8 *dst = iso_frame[iso_wr] + iso_fill;
 					unsigned int k;
 
 					for (k = 0; k < dlen; k++)
-						iso_frame[iso_fill + k] =
-							packet[hlen + k];
+						dst[k] = packet[hlen + k];
 					iso_fill += dlen;
 				} else {
 					iso_oversize++;
@@ -1474,10 +1592,7 @@ static int uvc_drain(int budget)
 			}
 
 			if (packet[UVC_PH_INFO] & UVC_PH_EOF) {
-				iso_frames++;
-				if (iso_fill == ISO_FRAME_MAX)
-					iso_whole++;
-				iso_fill = 0;
+				iso_finish();
 				iso_fid = -1;
 			}
 		}
@@ -1526,6 +1641,27 @@ static void uvc_capture_task(void)
 			wait_event_cond(&iso_wait, uvc_iso_ready());
 		}
 
+		/*
+		 * Convert outside the drain, between packets.  Two
+		 * milliseconds of arithmetic inside it would miss sixteen
+		 * isochronous slots, and those cannot be asked for again.
+		 */
+		if (iso_full >= 0) {
+			int done = iso_full;
+
+			yuy2_to_rgb565(iso_frame[done], cam_rgb[cam_wr],
+				       UVC_WANT_W * UVC_WANT_H);
+			iso_full = -1;
+
+			cam_frame.pixels = cam_rgb[cam_wr];
+			cam_frame.width  = UVC_WANT_W;
+			cam_frame.height = UVC_WANT_H;
+			cam_frame.seq    = cam_seq;
+			cam_wr ^= 1;
+			cam_seq++;
+			wake_up(&cam_wait);
+		}
+
 		if (!ratelimit_allow(&uvc_rl))
 			continue;
 
@@ -1565,10 +1701,10 @@ static void uvc_capture_task(void)
 			       ((iso_frames - mark_f) * 10000UL / ms) % 10UL,
 			       di / (ms * 10UL));
 
-			printk("[UVC] %lu frames, %lu whole, %lu empty,"
-			       " %lu err, %lu big\n",
-			       iso_frames, iso_whole, iso_zero, iso_errors,
-			       iso_oversize);
+			printk("[UVC] %lu frames, %lu whole, %lu published,"
+			       " %lu late, %lu err\n",
+			       iso_frames, iso_whole, (unsigned long)cam_seq,
+			       cam_dropped, iso_errors);
 
 			mark_f = iso_frames;
 
@@ -1648,6 +1784,14 @@ static int uvc_start(void)
 
 	printk("[UVC] streaming %dx%d YUY2 from ep 0x%02x\n",
 	       vs.frame_w, vs.frame_h, vs.ep);
+
+	/*
+	 * Registered only now, with packets about to flow.  The seam hands out
+	 * a pointer that must be valid the moment it is taken, and a source
+	 * announced before its first frame exists is a source whose first
+	 * caller reads uninitialised memory.
+	 */
+	video_source_register(&cam_source);
 
 	/*
 	 * Say what the endpoint is actually doing a moment after being told to
