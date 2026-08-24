@@ -139,7 +139,13 @@ static struct platform_device bbb_devices[] = {
 	{ .name = "omap_gpio",  .base = GPIO1_BASE,   .irq = 0  },
 	{ .name = "omap_gpio",  .base = GPIO2_BASE,   .irq = 0  },
 	{ .name = "omap_gpio",  .base = GPIO3_BASE,   .irq = 0  },
-#if CONFIG_USB_TOUCH
+	/*
+	 * The Type-A host port, present whatever is plugged into it.  It hung
+	 * off CONFIG_USB_TOUCH until a camera was plugged in, which meant the
+	 * host controller existed only when a touchscreen driver was wanted —
+	 * a connector is board data and the thing on the end of it is not.
+	 */
+#if CONFIG_USB_HOST
 	{ .name = "musb_hcd",   .base = USBSS_BASE,   .irq = USB1_IRQ },
 #endif
 #if CONFIG_ETHERNET

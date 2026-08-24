@@ -365,8 +365,23 @@ static unsigned long rx_unmasks;
 static unsigned long rx_poll_max;
 static unsigned long rx_chain_broken;
 
-/* At most one report every two seconds, whatever the load. */
-DEFINE_RATELIMIT(rx_stat_rl, 2000, 1);
+/*
+ * One report every thirty seconds, whatever the load.
+ *
+ * It was every two, which was right while the link was the thing being
+ * debugged and wrong ever since.  Eleven lines every two seconds is a console
+ * that is always busy, and this console is the only instrument the board has:
+ * the enumeration of a USB camera — two thousand bytes of descriptors, printed
+ * once at boot and not repeatable without a reboot — was cut in half by these
+ * counters arriving in the middle of it.
+ *
+ * That is the fourth measurement this log has destroyed.  The first two were
+ * volume and line width, both fixed here; this one is a subsystem printing
+ * over another subsystem, which no amount of rate limiting inside one file can
+ * prevent.  Thirty seconds keeps it useful as a background heartbeat and out
+ * of the way of anything that only happens once.
+ */
+DEFINE_RATELIMIT(rx_stat_rl, 30000, 1);
 
 static DEFINE_WAIT_QUEUE(tx_wait);
 static volatile int tx_busy;		/* one buffer, so one frame in flight */

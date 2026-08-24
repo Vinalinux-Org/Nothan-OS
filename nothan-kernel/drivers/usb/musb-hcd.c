@@ -464,6 +464,331 @@ static void musb_dump_hex(const u8 *b, int n)
 	}
 }
 
+/* =====================================================================
+ * Descriptor walk
+ *
+ * A configuration descriptor is a chain of variable-length records, each
+ * starting with its own length and type, and the only way to read one is to
+ * walk it.  Printed rather than dumped: a webcam's configuration runs to a
+ * couple of thousand bytes, which is twenty seconds of hex at 115200 baud and
+ * unreadable when it arrives.  The console is the only instrument this board
+ * has, so what it prints has to be the answer and not the raw material.
+ *
+ * What the answer has to contain, because the whole design downstream turns on
+ * it: whether the device speaks high speed, whether it offers an uncompressed
+ * format or only MJPEG, which frame sizes exist, and what each alternate
+ * setting costs in isochronous bandwidth.  Everything else is noise.
+ * ===================================================================== */
+
+#define DT_DEVICE		0x01
+#define DT_CONFIG		0x02
+#define DT_STRING		0x03
+#define DT_INTERFACE		0x04
+#define DT_ENDPOINT		0x05
+#define DT_IAD			0x0B
+#define DT_CS_INTERFACE		0x24
+#define DT_CS_ENDPOINT		0x25
+
+/* UVC VideoStreaming class-specific subtypes (UVC 1.5 spec table A-6). */
+#define VS_INPUT_HEADER		0x01
+#define VS_FORMAT_UNCOMPRESSED	0x04
+#define VS_FRAME_UNCOMPRESSED	0x05
+#define VS_FORMAT_MJPEG		0x06
+#define VS_FRAME_MJPEG		0x07
+
+#define USB_CLASS_VIDEO		0x0E
+#define SC_VIDEOCONTROL		0x01
+#define SC_VIDEOSTREAMING	0x02
+
+static u16 le16(const u8 *p) { return (u16)(p[0] | (p[1] << 8)); }
+
+static u32 le32(const u8 *p)
+{
+	return (u32)p[0] | ((u32)p[1] << 8) | ((u32)p[2] << 16) | ((u32)p[3] << 24);
+}
+
+/*
+ * A frame interval is in 100 ns units, so frames per second is ten million
+ * over it.  Reported to one decimal because the common rates are not whole
+ * numbers — 333333 is 30.0, but 400000 is 25.0 and 666666 is 15.0, and a
+ * camera that is actually running at 29.97 should not read as 29.
+ */
+static void print_fps(const char *label, u32 interval)
+{
+	unsigned long f10;
+
+	if (!interval) {
+		printk("%s?", label);
+		return;
+	}
+	f10 = 100000000UL / interval;
+	printk("%s%lu.%lu", label, f10 / 10UL, f10 % 10UL);
+}
+
+/*
+ * Uncompressed formats are named by a GUID whose first four bytes are a FourCC.
+ * Only the FourCC is printed: the remaining twelve are the same fixed suffix
+ * for every format in the class, so they would be twelve bytes of noise on a
+ * console that is already the bottleneck.
+ */
+static void print_fourcc(const u8 *guid)
+{
+	int i;
+
+	for (i = 0; i < 4; i++)
+		printk("%c", (guid[i] >= 0x20 && guid[i] < 0x7F) ? guid[i] : '?');
+}
+
+/*
+ * What the walk concluded, kept for the code that has to act on it.
+ *
+ * A dump is not an answer.  The alternate settings of a video streaming
+ * interface are the numbers the whole design turns on — one of them has to be
+ * chosen at runtime, by bandwidth, against what UVC negotiation asks for — and
+ * reading them off a console by eye works exactly until the console is busy.
+ * It already failed once that way: a camera's descriptors arrive once at boot,
+ * and half of them were lost under another subsystem's counters.
+ */
+#define VS_MAX_ALT	16
+
+struct vs_info {
+	int	interface;		/* video streaming interface, -1 if none */
+	int	ep;			/* isochronous IN endpoint address */
+	int	nalt;			/* alternate settings seen */
+	u16	alt_bytes[VS_MAX_ALT];	/* bytes per microframe, per alt */
+	int	has_yuy2;
+	int	has_mjpeg;
+};
+
+static struct vs_info vs;
+
+static void musb_dump_descriptors(const u8 *d, int len)
+{
+	int i = 0;
+	int cur_class = 0, cur_subclass = 0;	/* of the interface being walked */
+	int cur_alt = -1;			/* alt setting being walked */
+	int nframe = 0;				/* frames printed on this line */
+
+	vs.interface = -1;
+	vs.ep = 0;
+	vs.nalt = 0;
+	vs.has_yuy2 = 0;
+	vs.has_mjpeg = 0;
+	for (i = 0; i < VS_MAX_ALT; i++)
+		vs.alt_bytes[i] = 0;
+	i = 0;
+
+	while (i + 2 <= len) {
+		int blen = d[i];
+		int type = d[i + 1];
+		const u8 *p = d + i;
+
+		/*
+		 * A zero or over-long length would walk off the end or spin.
+		 * The raw bytes come out here and only here: once the walk has
+		 * lost its place, the parsed view is worthless and the hex is
+		 * the only thing that can say why.
+		 */
+		if (blen < 2 || i + blen > len) {
+			printk("[MUSB]   bad descriptor at %d: len=%d type=0x%02x"
+			       " — raw follows\n", i, blen, type);
+			musb_dump_hex(d, len);
+			break;
+		}
+
+		switch (type) {
+		case DT_CONFIG:
+			printk("[MUSB] config: %d interfaces, %d mA, attr 0x%02x\n",
+			       p[4], p[8] * 2, p[7]);
+			break;
+
+		case DT_IAD:
+			printk("[MUSB] function: interfaces %d..%d, class %d/%d\n",
+			       p[2], p[2] + p[3] - 1, p[4], p[5]);
+			break;
+
+		case DT_INTERFACE:
+			/*
+			 * Close any run of frame sizes first.  They are printed
+			 * several to a line with no trailing newline, so the
+			 * next descriptor would otherwise begin in the middle
+			 * of one — which it did, and read as a corrupt line
+			 * rather than a missing one.
+			 */
+			if (nframe) {
+				printk("\n");
+				nframe = 0;
+			}
+			cur_class    = p[5];
+			cur_subclass = p[6];
+			cur_alt      = p[3];
+			if (cur_class == USB_CLASS_VIDEO &&
+			    cur_subclass == SC_VIDEOSTREAMING) {
+				vs.interface = p[2];
+				if (cur_alt + 1 > vs.nalt && cur_alt < VS_MAX_ALT)
+					vs.nalt = cur_alt + 1;
+			}
+			printk("[MUSB] if %d alt %d: %d endpoints,"
+			       " class %d/%d/%d%s\n",
+			       p[2], p[3], p[4], p[5], p[6], p[7],
+			       (p[5] == USB_CLASS_VIDEO &&
+				p[6] == SC_VIDEOSTREAMING) ? "  <- video stream"
+							   : "");
+			break;
+
+		case DT_ENDPOINT: {
+			static const char *const kind[4] = {
+				"control", "iso", "bulk", "interrupt"
+			};
+			u16 mp = le16(p + 4);
+			/*
+			 * On high speed, bits 12:11 of wMaxPacketSize are one
+			 * less than the number of transactions per microframe.
+			 * Ignoring them understates an isochronous endpoint's
+			 * bandwidth by up to three times, which is exactly the
+			 * number that decides whether a format fits.
+			 */
+			int mult = ((mp >> 11) & 3) + 1;
+			int bytes = (mp & 0x7FF) * mult;
+
+			if (cur_class == USB_CLASS_VIDEO &&
+			    cur_subclass == SC_VIDEOSTREAMING &&
+			    (p[3] & 3) == 1 && (p[2] & 0x80) &&
+			    cur_alt >= 0 && cur_alt < VS_MAX_ALT) {
+				vs.alt_bytes[cur_alt] = (u16)bytes;
+				vs.ep = p[2];
+			}
+
+			printk("[MUSB]   ep 0x%02x %s %s, %d B/uframe"
+			       " (%d x %d), interval %d\n",
+			       p[2], (p[2] & 0x80) ? "IN " : "OUT",
+			       kind[p[3] & 3], bytes, mult, mp & 0x7FF, p[6]);
+			break;
+		}
+
+		case DT_CS_INTERFACE:
+			if (cur_class != USB_CLASS_VIDEO ||
+			    cur_subclass != SC_VIDEOSTREAMING || blen < 3)
+				break;		/* control-interface units: not the question */
+
+			switch (p[2]) {
+			case VS_FORMAT_UNCOMPRESSED:
+				/*
+				 * YUY2 by its FourCC, which is the one thing
+				 * that decides whether this box needs a JPEG
+				 * decoder or not.
+				 */
+				if (p[5] == 'Y' && p[6] == 'U' &&
+				    p[7] == 'Y' && p[8] == '2')
+					vs.has_yuy2 = 1;
+				printk("\n[MUSB]   format %d: uncompressed ", p[3]);
+				print_fourcc(p + 5);
+				printk(", %d bpp, %d sizes:", p[21], p[4]);
+				nframe = 0;
+				break;
+
+			case VS_FORMAT_MJPEG:
+				vs.has_mjpeg = 1;
+				printk("\n[MUSB]   format %d: MJPEG,"
+				       " %d sizes:", p[3], p[4]);
+				nframe = 0;
+				break;
+
+			case VS_FRAME_UNCOMPRESSED:
+			case VS_FRAME_MJPEG:
+				/*
+				 * Several to a line, and only the size and the
+				 * fastest rate each one offers.
+				 *
+				 * It was a line per frame with the buffer size
+				 * and every interval on it, and that is what
+				 * cost the alternate-setting table: eighteen
+				 * frame sizes in two formats is thirty-six
+				 * lines of about seventy characters, and the
+				 * console ring holds four thousand and ninety
+				 * six bytes total.  The rest of the dump was
+				 * dropped — silently, because the drop notice
+				 * only exists on the boot-time polling path.
+				 *
+				 * The slower intervals are not lost so much as
+				 * not worth the room: a camera that offers a
+				 * size at all offers it at its own maximum, and
+				 * the rate actually used comes back from UVC
+				 * negotiation rather than from this list.
+				 */
+				if ((nframe++ & 3) == 0)
+					printk("\n[MUSB]    ");
+				printk(" %dx%d", le16(p + 5), le16(p + 7));
+				print_fps("@", le32(p + 21));
+				break;
+
+			case VS_INPUT_HEADER:
+				printk("[MUSB]   stream: %d formats,"
+				       " endpoint 0x%02x\n", p[3], p[6]);
+				break;
+
+			default:
+				break;
+			}
+			break;
+
+		default:
+			break;
+		}
+
+		i += blen;
+	}
+
+	if (nframe)
+		printk("\n");	/* close the last run of frame sizes */
+
+	if (vs.interface < 0) {
+		printk("[MUSB] no video streaming interface\n");
+		return;
+	}
+
+	/*
+	 * The conclusion, on two lines, because the thirty above them are the
+	 * working and these are the answer.  Short enough to survive another
+	 * subsystem printing over the middle of the dump, which is how the
+	 * alternate settings were lost the first time this ran.
+	 */
+	printk("[MUSB] video: if %d, ep 0x%02x, %s%s%d alts B/uframe:",
+	       vs.interface, vs.ep,
+	       vs.has_yuy2 ? "YUY2 " : "", vs.has_mjpeg ? "MJPEG " : "",
+	       vs.nalt);
+	for (i = 0; i < vs.nalt; i++)
+		printk(" %d", vs.alt_bytes[i]);
+	printk("\n");
+
+	/*
+	 * 320x240 in YUY2 at thirty frames is 4.6 MB/s, and high speed divides
+	 * a second into 8000 microframes, so it needs 576 bytes in each one.
+	 * Saying whether that fits, here, turns the table above into a verdict:
+	 * the alternate setting eventually chosen has to be the smallest one
+	 * that clears the figure UVC negotiation asks for, and this is the same
+	 * arithmetic done once by hand.
+	 */
+	{
+		int need = (320 * 240 * 2 * 30) / 8000;
+		int best = -1;
+
+		for (i = 0; i < vs.nalt; i++)
+			if (vs.alt_bytes[i] >= need) {
+				best = i;
+				break;
+			}
+
+		if (best >= 0)
+			printk("[MUSB] 320x240 YUY2 30fps needs %d B/uframe:"
+			       " alt %d has %d\n",
+			       need, best, vs.alt_bytes[best]);
+		else
+			printk("[MUSB] 320x240 YUY2 30fps needs %d B/uframe:"
+			       " NO alt is big enough\n", need);
+	}
+}
+
 static int musb_enumerate(void)
 {
 	static const u8 GET_DEV8[8]  = {0x80,0x06,0x00,0x01,0,0,0x08,0};
@@ -471,11 +796,32 @@ static int musb_enumerate(void)
 	static const u8 GET_DEV18[8] = {0x80,0x06,0x00,0x01,0,0,0x12,0};
 	static const u8 GET_CFG9[8]  = {0x80,0x06,0x00,0x02,0,0,0x09,0};
 	u8 desc[18];
-	u8 cfg[256];
+	/*
+	 * Static, and four kilobytes of it.  It was 256 on the stack, which was
+	 * enough for a touchscreen and is not enough for a camera: a webcam
+	 * describes every format at every frame size at every rate, and the
+	 * configuration descriptor runs to one or two thousand bytes.  A short
+	 * buffer would not fail loudly either — the read would simply stop, and
+	 * the formats that did not fit would look like formats the camera does
+	 * not have.  Static because a kernel task has one page of stack.
+	 */
+	static u8 cfg[4096];
 	int r;
 
 	ep0_mps = 8;
 	musb_port_reset();
+
+	/*
+	 * Speed first, because it decides what is possible rather than merely
+	 * how fast.  Full speed carries 12 Mbit/s in total and less than that
+	 * for isochronous, against 36.9 Mbit/s for 320x240 uncompressed at
+	 * thirty frames — so a camera that comes up full speed cannot stream
+	 * uncompressed video at all, whatever the rest of its descriptors say.
+	 */
+	printk("[MUSB] enum: device is %s speed (power=0x%02x devctl=0x%02x)\n",
+	       (CRD8(MC_POWER) & POWER_HSMODE) ? "HIGH" :
+	       (CRD8(MC_DEVCTL) & DEVCTL_LSDEV) ? "low" : "full",
+	       (unsigned int)CRD8(MC_POWER), (unsigned int)CRD8(MC_DEVCTL));
 
 	/* 1. First 8 bytes of the device descriptor (learn bMaxPacketSize0). */
 	r = ep0_xfer(0, GET_DEV8, desc, 8);
@@ -522,16 +868,24 @@ static int musb_enumerate(void)
 	printk("[MUSB] enum: config wTotalLength=%d read=%d cfgVal=%d nIf=%d\n",
 	       wtotal, r, cfg[5], cfg[4]);
 	if (r > 0)
-		musb_dump_hex(cfg, r);
+		musb_dump_descriptors(cfg, r < wtotal ? r : wtotal);
 
 	/* 6. Select the configuration. */
 	u8 set_cfg[8] = {0x00,0x09,cfg[5],0x00,0,0,0x00,0};
 	ep0_xfer(1, set_cfg, 0, 0);
 	printk("[MUSB] enum: SET_CONFIGURATION(%d) done\n", cfg[5]);
 
-	/* HID SET_IDLE(0): report only on change. Optional — ignore a STALL. */
-	static const u8 SET_IDLE[8] = {0x21,0x0A,0x00,0x00,0x00,0x00,0x00,0x00};
-	ep0_xfer(1, SET_IDLE, 0, 0);
+	/*
+	 * HID SET_IDLE, and only for a HID device.  It was sent unconditionally
+	 * while the touchscreen was the only thing that could be plugged in; a
+	 * camera answers it with a STALL, which is harmless but is also a line
+	 * of log saying something failed when nothing did.
+	 */
+	if (CONFIG_USB_TOUCH && desc[4] == 3) {
+		static const u8 SET_IDLE[8] = {0x21,0x0A,0,0,0,0,0,0};
+
+		ep0_xfer(1, SET_IDLE, 0, 0);
+	}
 	return 0;
 }
 
@@ -606,6 +960,14 @@ static void musb_enum_thread(void)
 		wait_for_completion(&musb_connect_event);
 		msleep(100);	/* let the device settle after connect */
 
+		/*
+		 * Taken before enumerating, not after: a device unplugged during
+		 * the attempt bumps the generation, and comparing against a
+		 * value read afterwards would wait for a device that has
+		 * already gone.
+		 */
+		unsigned int gen = musb_generation;
+
 		/* eGalax + BBB MUSB is flaky (VBUS/babble/renumber) — retry. */
 		int ok = 0;
 		for (int attempt = 1; attempt <= 4 && !ok; attempt++) {
@@ -615,9 +977,24 @@ static void musb_enum_thread(void)
 				msleep(150);
 		}
 
-		if (ok) {
+		if (!ok)
+			continue;
+
+		/*
+		 * The touch path assumes one device — its endpoint number, its
+		 * packet size, its report layout, all constants at the top of
+		 * this file.  Running it against a camera would poll an
+		 * endpoint that is not there and read reports that are not
+		 * reports.  Enumeration by itself is the whole of what a new
+		 * device gets until something knows what it is.
+		 */
+		if (CONFIG_USB_TOUCH) {
 			musb_touch_setup();
-			musb_touch_loop(musb_generation);	/* returns when generation changes */
+			musb_touch_loop(musb_generation);
+		} else {
+			printk("[MUSB] enumerated; no class driver for it yet\n");
+			while (musb_generation == gen)
+				msleep(200);
 		}
 	}
 }
@@ -740,8 +1117,8 @@ static struct platform_driver musb_hcd_driver = {
 
 static int __init musb_hcd_init(void)
 {
-	/* See nothan/config.h — no USB touchscreen attached. */
-	if (!CONFIG_USB_TOUCH)
+	/* See nothan/config.h. */
+	if (!CONFIG_USB_HOST)
 		return 0;
 
 	return platform_driver_register(&musb_hcd_driver);

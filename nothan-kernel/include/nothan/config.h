@@ -53,7 +53,22 @@
  */
 #define CONFIG_MODEM		0
 
-/* USB host controller (MUSB) and the touchscreen input device behind it. */
+/*
+ * USB host controller (MUSB on usb1, the Type-A connector).
+ *
+ * Split from CONFIG_USB_TOUCH because the host is not a touchscreen driver.
+ * One switch for both was accurate while a touch panel was the only thing that
+ * had ever been plugged in, and stopped being so the moment a camera was: a
+ * webcam needs the controller, enumeration and the descriptor dump, and none
+ * of the HID code.
+ */
+#define CONFIG_USB_HOST		1
+
+/*
+ * The eGalax touchscreen behind it: HID SET_IDLE, the report endpoint, and the
+ * polling loop that turns reports into /dev/input0 events.  All of it assumes
+ * that one device.  Needs CONFIG_USB_HOST.
+ */
 #define CONFIG_USB_TOUCH	0
 
 /* Interactive shell on the console UART.  Needs no peripheral. */
@@ -284,6 +299,10 @@
 
 #if CONFIG_VIDEO_STREAM && !CONFIG_ETHERNET
 #error "CONFIG_VIDEO_STREAM requires CONFIG_ETHERNET"
+#endif
+
+#if CONFIG_USB_TOUCH && !CONFIG_USB_HOST
+#error "CONFIG_USB_TOUCH requires CONFIG_USB_HOST"
 #endif
 
 #endif /* _NOTHAN_CONFIG_H */
