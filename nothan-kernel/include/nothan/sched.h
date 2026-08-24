@@ -80,6 +80,23 @@
  * That fills the band.  Whichever of these two pairs is next to want a third
  * task is the one that has to argue for a wider band or a shared level.
  */
+/*
+ * Draining the camera's isochronous endpoint.
+ *
+ * Above both network halves in the band, and that ordering is forced rather
+ * than chosen: an isochronous packet arrives every 125 microseconds into a
+ * FIFO that holds two of them, so a capture that is late by a quarter of a
+ * millisecond has lost data that no protocol can ask for again.  A frame
+ * waiting to be sent is only late.
+ *
+ * It takes the level the benchmarks held.  sched.h said the day one of these
+ * pairs wanted a third task was the day it had to argue for the band, and this
+ * is that day: CONFIG_NET_BENCH turns the blaster and the sink off, and their
+ * levels come here.  Both cannot run at once, which the boot-time collision
+ * check enforces by refusing to start.
+ */
+#define PRIO_VIDEO_CAPTURE	(PRIO_VIDEO + 2)
+
 #define PRIO_NETBENCH_RX	(PRIO_VIDEO + 2)
 #define PRIO_NETBENCH_TX	(PRIO_VIDEO + 3)
 

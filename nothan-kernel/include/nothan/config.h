@@ -115,7 +115,7 @@
  * the day the video path wants those levels, taking them is one line rather
  * than an argument.
  */
-#define CONFIG_NET_BENCH	1
+#define CONFIG_NET_BENCH	0
 
 /*
  * Send ARP requests at boot, to check that a transmitted frame is well formed.

@@ -103,6 +103,8 @@
 #  define POWER_HSENAB		0x20
 #  define POWER_HSMODE		0x10	/* RO: HS handshake succeeded */
 #  define POWER_RESET		0x08	/* drive bus reset while set */
+#define MC_INTRRX		(USB1_MC_OFF + 0x04)	/* 16-bit, RX EP pending */
+#define MC_INTRRXE		(USB1_MC_OFF + 0x08)	/* 16-bit, RX EP enable  */
 #define MC_INTRUSB		(USB1_MC_OFF + 0x0A)	/* 8-bit */
 #define MC_INTRUSBE		(USB1_MC_OFF + 0x0B)	/* 8-bit */
 #  define INTR_RESET		0x04
@@ -167,9 +169,27 @@
 #  define RXCSR_H_REQPKT	0x0020
 #  define RXCSR_H_RXSTALL	0x0040
 #  define RXCSR_CLRDATATOG	0x0080
+/*
+ * There is no auto-request in PIO.  Bit 14 reads like an AUTOREQ in some MUSB
+ * documentation, but on this part the feature lives in a separate wrapper
+ * register (USB_CTRL_AUTOREQ) and only functions with CPPI 4.1 DMA driving the
+ * endpoint.  Setting it here bought exactly one packet: the kick issued at
+ * setup was honoured, nothing re-armed, and the endpoint went quiet with
+ * REQPKT clear.  Software issues every token.
+ */
 /* RXTYPE/RXINTERVAL TYPE field: speed[7:6], protocol[5:4], remote ep[3:0]. */
+#  define TYPE_SPEED_HIGH	(1 << 6)
 #  define TYPE_SPEED_FULL	(2 << 6)
+#  define TYPE_PROTO_ISO	(1 << 4)
 #  define TYPE_PROTO_INTR	(3 << 4)
+/*
+ * RXINTERVAL means two different things in the same register.  For an
+ * interrupt endpoint at full speed it is a linear frame count — the touch
+ * panel's 3 is three milliseconds.  For isochronous it is always logarithmic:
+ * the value n means one packet every 2^(n-1) microframes, so the camera's
+ * bInterval of 1 is written as 1 and yields a packet every 125 us.  Writing
+ * a linear value there would ask for a rate 2^(n-1) times wrong.
+ */
 
 /* Driver state (single instance — only usb1 is wired as host). */
 static u32 usbss_va;		/* VA of USBSS base (PA 0x47400000) */
@@ -428,6 +448,49 @@ static int ep0_xfer(u8 addr, const u8 *setup, u8 *data, int data_len)
 		if (rc < 0)
 			printk("[MUSB] ep0(req=0x%02x) STATUS-OUT rc=%d csr=%04x\n",
 			       setup[1], rc, (unsigned int)CSR0_RD());
+	} else if (wlen) {
+		/*
+		 * OUT data stage.
+		 *
+		 * Missing entirely until now, and nothing noticed because a
+		 * touchscreen is only ever asked questions.  UVC is the first
+		 * thing here that has to be *told* something — the format and
+		 * frame rate it should stream are written to it with SET_CUR —
+		 * and a control transfer whose data stage silently does not
+		 * happen looks to the device like a malformed request.
+		 */
+		while (actual < wlen) {
+			int n = wlen - actual;
+
+			if (n > ep0_mps)
+				n = ep0_mps;
+
+			musb_fifo_write(EP0_FIFO, data + actual, n);
+			CSR0_WR(CSR0_TXPKTRDY);
+			rc = ep0_poll_clear(CSR0_TXPKTRDY);
+			if (rc < 0) {
+				printk("[MUSB] ep0(req=0x%02x) OUT fail rc=%d"
+				       " csr=%04x sent=%d\n",
+				       setup[1], rc, (unsigned int)CSR0_RD(),
+				       actual);
+				return -30;
+			}
+			actual += n;
+		}
+
+		/* STATUS IN, the same handshake the no-data case ends with. */
+		CSR0_WR(CSR0_H_STATUSPKT | CSR0_H_REQPKT | CSR0_H_DIS_PING);
+		rc = ep0_poll_clear(CSR0_H_REQPKT);
+		if (rc < 0)
+			printk("[MUSB] ep0(req=0x%02x) OUT STATUS rc=%d"
+			       " csr=%04x\n",
+			       setup[1], rc, (unsigned int)CSR0_RD());
+		{
+			u16 c = CSR0_RD();
+
+			c &= ~(CSR0_RXPKTRDY | CSR0_H_STATUSPKT);
+			CSR0_WR(c);
+		}
 	} else {
 		/* No-data control: STATUS IN. Wait for REQPKT to clear (the IN
 		 * transaction finished), then clear RXPKTRDY+STATUSPKT — matches
@@ -558,7 +621,21 @@ struct vs_info {
 	u16	alt_bytes[VS_MAX_ALT];	/* bytes per microframe, per alt */
 	int	has_yuy2;
 	int	has_mjpeg;
+
+	/*
+	 * The one format and frame this box will ask for, found while walking
+	 * rather than looked up afterwards: UVC identifies them by index, and
+	 * an index only means something in the order the descriptors arrived.
+	 */
+	int	fmt_index;		/* bFormatIndex of the YUY2 format */
+	int	frame_index;		/* bFrameIndex of the chosen size */
+	int	frame_w, frame_h;
+	u32	frame_interval;		/* 100 ns units */
 };
+
+/* What to ask the camera for.  See the note in vsource-test.c on why 320x240. */
+#define UVC_WANT_W	320
+#define UVC_WANT_H	240
 
 static struct vs_info vs;
 
@@ -568,12 +645,15 @@ static void musb_dump_descriptors(const u8 *d, int len)
 	int cur_class = 0, cur_subclass = 0;	/* of the interface being walked */
 	int cur_alt = -1;			/* alt setting being walked */
 	int nframe = 0;				/* frames printed on this line */
+	int cur_fmt_yuy2 = 0;			/* frames below belong to YUY2 */
 
 	vs.interface = -1;
 	vs.ep = 0;
 	vs.nalt = 0;
 	vs.has_yuy2 = 0;
 	vs.has_mjpeg = 0;
+	vs.fmt_index = 0;
+	vs.frame_index = 0;
 	for (i = 0; i < VS_MAX_ALT; i++)
 		vs.alt_bytes[i] = 0;
 	i = 0;
@@ -679,8 +759,13 @@ static void musb_dump_descriptors(const u8 *d, int len)
 				 * decoder or not.
 				 */
 				if (p[5] == 'Y' && p[6] == 'U' &&
-				    p[7] == 'Y' && p[8] == '2')
+				    p[7] == 'Y' && p[8] == '2') {
 					vs.has_yuy2 = 1;
+					vs.fmt_index = p[3];
+					cur_fmt_yuy2 = 1;
+				} else {
+					cur_fmt_yuy2 = 0;
+				}
 				printk("\n[MUSB]   format %d: uncompressed ", p[3]);
 				print_fourcc(p + 5);
 				printk(", %d bpp, %d sizes:", p[21], p[4]);
@@ -696,6 +781,20 @@ static void musb_dump_descriptors(const u8 *d, int len)
 
 			case VS_FRAME_UNCOMPRESSED:
 			case VS_FRAME_MJPEG:
+				/*
+				 * Remember the one wanted, and only from the
+				 * uncompressed format: both formats offer the
+				 * same eighteen sizes, and an index taken from
+				 * the MJPEG list would name a JPEG stream.
+				 */
+				if (cur_fmt_yuy2 &&
+				    le16(p + 5) == UVC_WANT_W &&
+				    le16(p + 7) == UVC_WANT_H) {
+					vs.frame_index    = p[3];
+					vs.frame_w        = le16(p + 5);
+					vs.frame_h        = le16(p + 7);
+					vs.frame_interval = le32(p + 21);
+				}
 				/*
 				 * Several to a line, and only the size and the
 				 * fastest rate each one offers.
@@ -954,6 +1053,621 @@ static void musb_touch_loop(unsigned int gen)
 	touch_seq++;
 }
 
+/* =====================================================================
+ * UVC: ask the camera for a format, then take the stream
+ *
+ * A camera sends nothing until it has been told what to send.  The exchange is
+ * fixed by the class: write a proposal to the PROBE control, read back what the
+ * camera will actually do — it may lower the rate, and it fills in how large a
+ * packet it intends to use — write that same answer to COMMIT, and only then
+ * select an alternate setting whose isochronous bandwidth covers it.  Selecting
+ * the setting is what turns the endpoint on; everything before it is talk.
+ *
+ * The negotiation is why ep0_xfer grew an OUT data stage.  Nothing here had
+ * ever had to tell a device anything before.
+ *
+ * This lives in the host controller's file rather than in a uvc.c of its own,
+ * for the reason netdev.h gives about lists: there is one class driver, and a
+ * seam between it and the controller would have exactly one user.  The second
+ * class driver is the moment to draw it — and the camera's own microphone,
+ * which is USB Audio on the same device, is probably that moment.
+ * ===================================================================== */
+
+#define UVC_SET_CUR		0x01
+#define UVC_GET_CUR		0x81
+#define UVC_VS_PROBE		0x01
+#define UVC_VS_COMMIT		0x02
+#define UVC_PROBE_LEN		26	/* UVC 1.0 */
+
+/* Byte offsets inside the probe/commit control. */
+#define PC_HINT			0
+#define PC_FORMAT_INDEX		2
+#define PC_FRAME_INDEX		3
+#define PC_FRAME_INTERVAL	4
+#define PC_MAX_FRAME_SIZE	18
+#define PC_MAX_PAYLOAD		22
+
+static u8 uvc_probe[UVC_PROBE_LEN];
+
+static void put_le16(u8 *p, u16 v) { p[0] = (u8)v; p[1] = (u8)(v >> 8); }
+
+static void put_le32(u8 *p, u32 v)
+{
+	p[0] = (u8)v;
+	p[1] = (u8)(v >> 8);
+	p[2] = (u8)(v >> 16);
+	p[3] = (u8)(v >> 24);
+}
+
+/* One class request to the video streaming interface. */
+static int uvc_ctrl(int is_set, int selector, u8 *data, int len)
+{
+	u8 setup[8];
+
+	setup[0] = is_set ? 0x21 : 0xA1;	/* class, interface, direction */
+	setup[1] = is_set ? UVC_SET_CUR : UVC_GET_CUR;
+	setup[2] = 0;
+	setup[3] = (u8)selector;
+	setup[4] = (u8)vs.interface;
+	setup[5] = 0;
+	setup[6] = (u8)len;
+	setup[7] = (u8)(len >> 8);
+
+	return ep0_xfer(1, setup, data, len);
+}
+
+static int uvc_set_interface(int alt)
+{
+	u8 setup[8] = { 0x01, 0x0B, (u8)alt, 0, (u8)vs.interface, 0, 0, 0 };
+
+	return ep0_xfer(1, setup, 0, 0);
+}
+
+/*
+ * Propose a format, accept the camera's answer, commit to it.
+ *
+ * The camera is allowed to change what it was asked for — a slower interval, a
+ * different payload size — and what comes back from the second GET_CUR is what
+ * it will actually do.  Committing the proposal rather than the answer is the
+ * classic way to end up with a stream that does not match the buffers waiting
+ * for it, so the answer is written back verbatim.
+ *
+ * Returns the payload size the camera intends to use, or -1.
+ */
+static int uvc_negotiate(void)
+{
+	int i, r;
+	u32 payload;
+
+	for (i = 0; i < UVC_PROBE_LEN; i++)
+		uvc_probe[i] = 0;
+
+	put_le16(uvc_probe + PC_HINT, 1);	/* keep dwFrameInterval fixed */
+	uvc_probe[PC_FORMAT_INDEX] = (u8)vs.fmt_index;
+	uvc_probe[PC_FRAME_INDEX]  = (u8)vs.frame_index;
+	put_le32(uvc_probe + PC_FRAME_INTERVAL, vs.frame_interval);
+
+	r = uvc_ctrl(1, UVC_VS_PROBE, uvc_probe, UVC_PROBE_LEN);
+	if (r < 0) {
+		printk("[UVC] PROBE set failed r=%d\n", r);
+		return -1;
+	}
+
+	r = uvc_ctrl(0, UVC_VS_PROBE, uvc_probe, UVC_PROBE_LEN);
+	if (r < UVC_PROBE_LEN) {
+		printk("[UVC] PROBE get failed r=%d\n", r);
+		return -1;
+	}
+
+	payload = le32(uvc_probe + PC_MAX_PAYLOAD);
+
+	printk("[UVC] camera agrees: fmt %d frame %d, %lu B/frame,"
+	       " %lu B/packet\n",
+	       uvc_probe[PC_FORMAT_INDEX], uvc_probe[PC_FRAME_INDEX],
+	       (unsigned long)le32(uvc_probe + PC_MAX_FRAME_SIZE),
+	       (unsigned long)payload);
+	print_fps("[UVC] interval gives ", le32(uvc_probe + PC_FRAME_INTERVAL));
+	printk(" fps\n");
+
+	/*
+	 * Ask for less, because what came back is not a requirement.
+	 *
+	 * dwMaxPayloadTransferSize is what the camera would *like*, and this
+	 * one answers 3060 whatever it is asked to stream — three
+	 * transactions of 1020 in every microframe, which is 24.5 MB/s of bus
+	 * reserved for a 4.6 MB/s picture.  Believing it selected the largest
+	 * alternate setting on the device, and three consequences followed at
+	 * once: RXMAXP is eleven bits of size and two of multiplier, so 3060
+	 * written whole becomes a nonsense endpoint; the FIFO such a packet
+	 * needs is the entire 4096 bytes the controller has; and the stream
+	 * would be high-bandwidth isochronous, which this driver does not do.
+	 *
+	 * The real figure is arithmetic and was known before the camera was
+	 * asked: bytes in a frame, times frames a second, over the 8000
+	 * microframes a second high speed provides.  Plus one packet header
+	 * per packet, which is the only part the camera's answer is needed
+	 * for.  Written back into the probe and re-negotiated — a camera that
+	 * honours it says so in the next GET_CUR, and one that does not has
+	 * told us to walk away rather than misconfigure its endpoint.
+	 */
+	{
+		u32 frame_bytes = le32(uvc_probe + PC_MAX_FRAME_SIZE);
+		u32 fps = 10000000UL / (le32(uvc_probe + PC_FRAME_INTERVAL) ?
+					le32(uvc_probe + PC_FRAME_INTERVAL) : 1);
+		u32 want = (frame_bytes * fps) / 8000UL;
+
+		want += want / 16UL + 32UL;	/* payload headers and slack */
+
+		if ((u32)payload > want) {
+			put_le32(uvc_probe + PC_MAX_PAYLOAD, want);
+
+			r = uvc_ctrl(1, UVC_VS_PROBE, uvc_probe, UVC_PROBE_LEN);
+			if (r >= 0)
+				r = uvc_ctrl(0, UVC_VS_PROBE, uvc_probe,
+					     UVC_PROBE_LEN);
+			if (r < UVC_PROBE_LEN) {
+				printk("[UVC] re-probe failed r=%d\n", r);
+				return -1;
+			}
+
+			printk("[UVC] asked for %lu B/packet, camera still"
+			       " says %lu — using ours\n",
+			       (unsigned long)want,
+			       (unsigned long)le32(uvc_probe + PC_MAX_PAYLOAD));
+
+			/*
+			 * Re-read the interval, because the camera is allowed
+			 * to answer a smaller payload by slowing down and this
+			 * one does.  Printing the rate from the first probe
+			 * and streaming at the rate from the second is how a
+			 * log comes to say 30 fps over a 15 fps picture.
+			 */
+			print_fps("[UVC] after re-probe: ",
+				  le32(uvc_probe + PC_FRAME_INTERVAL));
+			printk(" fps\n");
+
+			/*
+			 * Overruled.  This camera answers 3060 whatever it is
+			 * asked for, and that behaviour is common enough that
+			 * upstream keeps a per-device quirk which throws the
+			 * answer away and computes the figure exactly as it is
+			 * computed above.  So the value goes into the control
+			 * before COMMIT and the alternate setting is chosen
+			 * from it, not from what came back.
+			 *
+			 * What makes this safe rather than hopeful: the
+			 * alternate setting is what sizes the endpoint on the
+			 * wire.  A camera on a 640-byte endpoint cannot emit a
+			 * 3060-byte transaction — USB does not allow it — so it
+			 * fragments, which is what an isochronous stream does
+			 * anyway.  dwMaxPayloadTransferSize is a preference;
+			 * wMaxPacketSize is the rule.
+			 *
+			 * Upstream also floors its estimate at 1024, calling it
+			 * too low for many cameras.  On this device that floor
+			 * lands on alt 7, which is 2 x 640 — back to the
+			 * high-bandwidth transfers this driver cannot do.  So
+			 * the floor is not taken and the estimate is tested
+			 * instead: if frames arrive with holes, the next
+			 * settings up are 800 and 944, and the counters will
+			 * say which is needed.
+			 */
+			payload = (int)want;
+			put_le32(uvc_probe + PC_MAX_PAYLOAD, want);
+		}
+	}
+
+	r = uvc_ctrl(1, UVC_VS_COMMIT, uvc_probe, UVC_PROBE_LEN);
+	if (r < 0) {
+		printk("[UVC] COMMIT failed r=%d\n", r);
+		return -1;
+	}
+
+	return (int)payload;
+}
+
+/* =====================================================================
+ * The isochronous endpoint
+ * ===================================================================== */
+
+#define EP1_RX_IRQ_BIT		(1u << 17)	/* epintr: RX bits start at 17 */
+#define UVC_EP_HW		1		/* hardware EP used for the stream */
+
+/*
+ * How many packets one pass of the drain will take before going round again.
+ *
+ * A bound on time, not on the FIFO: the same reasoning as the receive budget
+ * in cpsw.c.  Sixteen packets of 640 bytes is about 10 KB of PIO, and the task
+ * runs in the video band, so audio still preempts it.
+ */
+#define UVC_DRAIN_BUDGET	16
+
+/*
+ * The largest packet this driver will accept, which is the largest a single
+ * isochronous transaction can carry.  Above it the endpoint needs the
+ * multiplier field of RXMAXP and a FIFO to match, and the controller has only
+ * 4096 bytes of FIFO RAM in total.
+ */
+#define ISO_MAX_PKT		1024
+
+static DEFINE_WAIT_QUEUE(iso_wait);
+
+static unsigned long iso_packets;
+static unsigned long iso_bytes;
+static unsigned long iso_zero;		/* the camera had nothing to send */
+static unsigned long iso_errors;
+static unsigned long iso_irqs;
+static unsigned long iso_deepest;
+static unsigned long iso_frames;	/* frames finished, whole or holed */
+static unsigned long iso_whole;		/* finished with every byte present */
+static unsigned long iso_oversize;	/* more data than a frame can hold */
+
+static int iso_maxp;
+
+/*
+ * The frame being assembled.
+ *
+ * Every isochronous packet begins with a payload header whose bmHeaderInfo
+ * carries two bits that matter here: FID, which toggles between one frame and
+ * the next, and EOF, which marks the last packet of a frame.  Neither is a
+ * length, so the only way to know a frame is whole is to count what arrived
+ * against what the format says it should be.
+ */
+#define UVC_PH_LENGTH		0	/* bHeaderLength */
+#define UVC_PH_INFO		1	/* bmHeaderInfo */
+#  define UVC_PH_FID		0x01
+#  define UVC_PH_EOF		0x02
+#  define UVC_PH_ERR		0x40
+
+#define ISO_FRAME_MAX		(UVC_WANT_W * UVC_WANT_H * 2)
+
+static u8 iso_frame[ISO_FRAME_MAX];
+static unsigned int iso_fill;		/* bytes of the current frame so far */
+static int iso_fid = -1;		/* FID of the frame being assembled */
+
+/*
+ * Point hardware endpoint 1 at the camera's isochronous IN endpoint.
+ *
+ * The FIFO is double buffered and that is the whole reason this can work with
+ * PIO: a packet lands every 125 microseconds, and with one buffer the CPU
+ * would have to be inside the drain when each one arrived.  With two, it may
+ * be a full packet time late and lose nothing.  FIFO RAM on this controller is
+ * 4096 bytes total (the device tree says ram-bits 12), so two 1024-byte halves
+ * is a quarter of it — affordable, and there is nothing else asking.
+ */
+static void uvc_iso_setup(int remote_ep, int maxp)
+{
+	if (maxp > ISO_MAX_PKT)
+		maxp = ISO_MAX_PKT;	/* uvc_start refuses first; belt and braces */
+
+	iso_maxp = maxp;
+
+	CWR8(MC_INDEX, UVC_EP_HW);
+
+	/*
+	 * Size field is log2(bytes) - 3, so 1024 bytes is 7; bit 4 asks for
+	 * double buffering, which doubles the RAM actually consumed.  The
+	 * address is a byte offset into FIFO RAM shifted right by three, and it
+	 * starts past EP0's reserved 64.
+	 */
+	CWR8(MC_RXFIFOSZ, 7 | 0x10);
+	mmio_write16(usbss_va + MC_RXFIFOADD, 64 >> 3);
+
+	CWR8(EP1_RXFUNCADDR, 1);
+	CWR8(EP1_RXHUBADDR, 0);
+	CWR8(EP1_RXHUBPORT, 0);
+
+	/* Logarithmic for isochronous: 1 means every microframe. */
+	CWR8(EP1_RXINTERVAL, 1);
+	CWR8(EP1_RXTYPE, TYPE_SPEED_HIGH | TYPE_PROTO_ISO | (remote_ep & 0xF));
+	mmio_write16(usbss_va + EP1_RXMAXP, (u16)maxp);
+
+	mmio_write16(usbss_va + EP1_RXCSR,
+		     RXCSR_FLUSHFIFO | RXCSR_CLRDATATOG);
+
+	/*
+	 * Ask for the first packet.  Every one after it is asked for again in
+	 * the drain, because nothing on this controller will do it unprompted
+	 * without DMA — which puts a 125 microsecond deadline on the drain that
+	 * only the double-buffered FIFO makes survivable.  Whether it is
+	 * survived is what the packet rate measures.
+	 */
+	mmio_write16(usbss_va + EP1_RXCSR, RXCSR_H_REQPKT);
+
+	/*
+	 * Two enables, not one.
+	 *
+	 * The wrapper's epintr can only report what the core raises, and the
+	 * core gates every endpoint behind INTRRXE.  Nothing here had ever
+	 * written it, because the only endpoint this driver had used before was
+	 * polled — so the wrapper bit was set, the register read back correct,
+	 * and no interrupt ever arrived.  Silence from a correctly configured
+	 * endpoint and silence from a masked one look exactly the same.
+	 */
+	mmio_write16(usbss_va + MC_INTRRXE,
+		     mmio_read16(usbss_va + MC_INTRRXE) | (1u << UVC_EP_HW));
+	WR(USB1_IRQENSET0, EP1_RX_IRQ_BIT);
+}
+
+static int uvc_iso_ready(void)
+{
+	CWR8(MC_INDEX, UVC_EP_HW);
+	return (mmio_read16(usbss_va + EP1_RXCSR) & RXCSR_RXPKTRDY) != 0;
+}
+
+/*
+ * Take up to @budget packets out of the FIFO.  Returns how many.
+ *
+ * This milestone counts rather than keeps: whether isochronous transfers run
+ * at all, and at what rate, is the risky unknown.  Assembling frames and
+ * converting YUY2 to RGB565 is ordinary code that cannot fail in an
+ * interesting way, and adding it before the transport is proven would mean
+ * debugging both at once.
+ */
+static int uvc_drain(int budget)
+{
+	static u8 packet[1024];
+	int n = 0;
+
+	CWR8(MC_INDEX, UVC_EP_HW);
+
+	while (n < budget) {
+		u16 csr = mmio_read16(usbss_va + EP1_RXCSR);
+		unsigned int cnt;
+
+		if (csr & (RXCSR_H_ERROR | RXCSR_DATAERROR)) {
+			iso_errors++;
+			mmio_write16(usbss_va + EP1_RXCSR, RXCSR_H_REQPKT);
+			break;
+		}
+
+		if (!(csr & RXCSR_RXPKTRDY))
+			break;
+
+		cnt = mmio_read16(usbss_va + EP1_RXCOUNT);
+		if (cnt > sizeof(packet))
+			cnt = sizeof(packet);
+
+		if (cnt)
+			musb_fifo_read(EP1_FIFO, packet, cnt);
+		else
+			iso_zero++;
+
+		/*
+		 * Assemble.  A packet shorter than its own declared header, or
+		 * one claiming a header longer than the packet, is refused
+		 * rather than trusted — this is data off a wire that nobody
+		 * here wrote, and the same rule the network path lives by
+		 * applies to it.
+		 */
+		if (cnt >= 2 && packet[UVC_PH_LENGTH] >= 2 &&
+		    packet[UVC_PH_LENGTH] <= cnt) {
+			unsigned int hlen = packet[UVC_PH_LENGTH];
+			unsigned int dlen = cnt - hlen;
+			int fid = packet[UVC_PH_INFO] & UVC_PH_FID;
+
+			if (iso_fid < 0)
+				iso_fid = fid;
+
+			/* FID toggling means the previous frame is over. */
+			if (fid != iso_fid) {
+				iso_frames++;
+				if (iso_fill == ISO_FRAME_MAX)
+					iso_whole++;
+				iso_fill = 0;
+				iso_fid = fid;
+			}
+
+			if (packet[UVC_PH_INFO] & UVC_PH_ERR) {
+				iso_errors++;
+			} else if (dlen) {
+				if (iso_fill + dlen <= ISO_FRAME_MAX) {
+					unsigned int k;
+
+					for (k = 0; k < dlen; k++)
+						iso_frame[iso_fill + k] =
+							packet[hlen + k];
+					iso_fill += dlen;
+				} else {
+					iso_oversize++;
+				}
+			}
+
+			if (packet[UVC_PH_INFO] & UVC_PH_EOF) {
+				iso_frames++;
+				if (iso_fill == ISO_FRAME_MAX)
+					iso_whole++;
+				iso_fill = 0;
+				iso_fid = -1;
+			}
+		}
+
+		/*
+		 * One write does both: RXPKTRDY is cleared by writing zero to
+		 * it, which hands the buffer back, and REQPKT asks for the next
+		 * packet.  Writing the bit on its own rather than the whole
+		 * word on purpose — the stall and error bits are cleared by
+		 * writing one, and reading them back into the register would
+		 * acknowledge errors this loop has not looked at yet.
+		 */
+		mmio_write16(usbss_va + EP1_RXCSR, RXCSR_H_REQPKT);
+
+		iso_packets++;
+		iso_bytes += cnt;
+		n++;
+	}
+
+	if ((unsigned long)n > iso_deepest)
+		iso_deepest = n;
+
+	return n;
+}
+
+DEFINE_RATELIMIT(uvc_rl, 2000, 1);
+
+/*
+ * Drain until the FIFO is empty, then unmask and sleep.
+ *
+ * The same shape as cpsw_rx_poll(), and for the same reason: the endpoint
+ * interrupt is a level, so a handler that does the work with the source still
+ * enabled re-enters itself for as long as data keeps arriving.  That is the
+ * failure that once wedged this board so thoroughly the console stopped
+ * answering, and at eight thousand packets a second there is more than enough
+ * traffic to reproduce it.  The interrupt masks itself and wakes this; this
+ * unmasks only once there is nothing left to take.
+ */
+static void uvc_capture_task(void)
+{
+	unsigned long mark_j = 0, mark_p = 0, mark_b = 0, mark_i = 0, mark_f = 0;
+
+	for (;;) {
+		if (uvc_drain(UVC_DRAIN_BUDGET) < UVC_DRAIN_BUDGET) {
+			WR(USB1_IRQENSET0, EP1_RX_IRQ_BIT);
+			wait_event_cond(&iso_wait, uvc_iso_ready());
+		}
+
+		if (!ratelimit_allow(&uvc_rl))
+			continue;
+
+		{
+			unsigned long now = get_jiffies();
+			unsigned long ms, dp, db, di;
+
+			if (!mark_j) {
+				mark_j = now;
+				mark_p = iso_packets;
+				mark_b = iso_bytes;
+				mark_f = iso_frames;
+				mark_i = sched_idle_us();
+				continue;
+			}
+
+			ms = now - mark_j;
+			dp = iso_packets - mark_p;
+			db = iso_bytes - mark_b;
+			di = sched_idle_us() - mark_i;
+			if (!ms)
+				ms = 1;
+
+			/*
+			 * Packets per second against 8000 is the whole verdict:
+			 * the camera is given one microframe each, so anything
+			 * far below means slots are being missed rather than
+			 * the camera being quiet.  Empty packets are counted
+			 * separately because a camera with nothing to send
+			 * still answers every token, and those are not loss.
+			 */
+			printk("[UVC] %lu pkt/s, %lu KB/s, %lu.%lu fps,"
+			       " %lu%% idle\n",
+			       (dp * 1000UL) / ms,
+			       (db / 1024UL * 1000UL) / ms,
+			       ((iso_frames - mark_f) * 10000UL / ms) / 10UL,
+			       ((iso_frames - mark_f) * 10000UL / ms) % 10UL,
+			       di / (ms * 10UL));
+
+			printk("[UVC] %lu frames, %lu whole, %lu empty,"
+			       " %lu err, %lu big\n",
+			       iso_frames, iso_whole, iso_zero, iso_errors,
+			       iso_oversize);
+
+			mark_f = iso_frames;
+
+			mark_j = now;
+			mark_p = iso_packets;
+			mark_b = iso_bytes;
+			mark_i = sched_idle_us();
+		}
+	}
+}
+
+/*
+ * Everything between "a device is enumerated" and "packets are arriving".
+ * Returns 0 once the stream is running.
+ */
+static int uvc_start(void)
+{
+	int payload, alt, i;
+	struct task_struct *t;
+
+	if (vs.interface < 0 || !vs.has_yuy2 || !vs.frame_index) {
+		printk("[UVC] no YUY2 %dx%d on this camera\n",
+		       UVC_WANT_W, UVC_WANT_H);
+		return -1;
+	}
+
+	/* Alt 0 first: zero bandwidth, which is where negotiation must happen. */
+	if (uvc_set_interface(0) < 0)
+		return -1;
+
+	payload = uvc_negotiate();
+	if (payload <= 0)
+		return -1;
+
+	/*
+	 * The smallest setting that fits, and never one that needs more than a
+	 * single transaction per microframe.
+	 *
+	 * Smallest, because every byte reserved here is a byte no other device
+	 * on the bus can have and a camera given more does not go faster.
+	 * Single-transaction, because RXMAXP carries the multiplier in bits
+	 * 12:11 and the FIFO would have to hold a whole 3 KB burst — neither
+	 * of which this driver does.  Refusing is the honest answer: a
+	 * misconfigured endpoint is silent in exactly the same way as one that
+	 * was never set up, which cost an entire flash cycle to tell apart.
+	 */
+	alt = -1;
+	for (i = 1; i < vs.nalt; i++)
+		if (vs.alt_bytes[i] >= payload && vs.alt_bytes[i] <= ISO_MAX_PKT) {
+			alt = i;
+			break;
+		}
+
+	if (alt < 0) {
+		printk("[UVC] no single-transaction alt carries %d B/uframe"
+		       " (largest usable is %d)\n", payload, ISO_MAX_PKT);
+		return -1;
+	}
+
+	printk("[UVC] alt %d (%d B/uframe) for a %d byte payload\n",
+	       alt, vs.alt_bytes[alt], payload);
+
+	uvc_iso_setup(vs.ep & 0xF, payload);
+
+	/* Selecting the setting is what turns the endpoint on. */
+	if (uvc_set_interface(alt) < 0) {
+		printk("[UVC] SET_INTERFACE(%d) failed\n", alt);
+		return -1;
+	}
+
+	t = task_create(uvc_capture_task, PRIO_VIDEO_CAPTURE, "uvc-capture");
+	if (!t) {
+		printk("[UVC] could not create the capture task\n");
+		return -1;
+	}
+	enqueue_task(&runqueue, t);
+
+	printk("[UVC] streaming %dx%d YUY2 from ep 0x%02x\n",
+	       vs.frame_w, vs.frame_h, vs.ep);
+
+	/*
+	 * Say what the endpoint is actually doing a moment after being told to
+	 * start.  A stream that never begins produces no statistics line at
+	 * all, and an absent line is the least informative thing a log can do —
+	 * it reads the same whether the endpoint is misconfigured, the camera
+	 * is silent, or the reporting itself is broken.  These registers
+	 * separate the three.
+	 */
+	msleep(200);
+	CWR8(MC_INDEX, UVC_EP_HW);
+	printk("[UVC] after 200 ms: %lu packets, rxcsr=%04x intrrx=%04x"
+	       " intrrxe=%04x\n",
+	       iso_packets,
+	       (unsigned int)mmio_read16(usbss_va + EP1_RXCSR),
+	       (unsigned int)mmio_read16(usbss_va + MC_INTRRX),
+	       (unsigned int)mmio_read16(usbss_va + MC_INTRRXE));
+	return 0;
+}
+
 static void musb_enum_thread(void)
 {
 	for (;;) {
@@ -991,6 +1705,11 @@ static void musb_enum_thread(void)
 		if (CONFIG_USB_TOUCH) {
 			musb_touch_setup();
 			musb_touch_loop(musb_generation);
+		} else if (vs.interface >= 0 && vs.has_yuy2) {
+			if (uvc_start() != 0)
+				printk("[UVC] stream did not start\n");
+			while (musb_generation == gen)
+				msleep(200);
 		} else {
 			printk("[MUSB] enumerated; no class driver for it yet\n");
 			while (musb_generation == gen)
@@ -1010,6 +1729,18 @@ static void musb_irq_handler(unsigned int irq)
 		WR(USB1_IRQSTAT0, epintr);
 	if (coreintr)
 		WR(USB1_IRQSTAT1, coreintr);
+
+	if (epintr & EP1_RX_IRQ_BIT) {
+		/*
+		 * Mask and defer.  The endpoint interrupt is a level, so doing
+		 * the work here with the source still enabled re-enters this
+		 * handler for as long as packets keep coming — which at one
+		 * every 125 microseconds is indefinitely.
+		 */
+		WR(USB1_IRQENCLR0, EP1_RX_IRQ_BIT);
+		iso_irqs++;
+		wake_up(&iso_wait);
+	}
 
 	u32 usbintr = coreintr & WRAP_USB_BITMAP;
 
