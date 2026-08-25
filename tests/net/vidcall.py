@@ -5,12 +5,23 @@ tests/net/vidcall.py - the laptop's end of a call with the board.
 Both directions at once:
 
   laptop webcam ──► 400x240 RGB565 ──► board:5005 ──► HDMI panel, doubled
-  board camera  ──► 400x240 RGB565 ──► this window
+  board camera  ──► 320x240 RGB565 ──► http://localhost:8080
 
-  ./vidcall.py                    webcam both ways
+  ./vidcall.py                    a call, both directions
   ./vidcall.py --no-send          only watch what the board sends
   ./vidcall.py --pattern          send a generated pattern instead of the webcam
   ./vidcall.py --board 10.42.0.2
+
+The picture is watched in a browser rather than in a window of its own.  A
+window needs a GUI build of OpenCV, and the headless package — which another
+tool on this machine depends on — installs over it; that is a viewer which
+breaks for reasons that have nothing to do with this project.  Every browser
+already plays multipart/x-mixed-replace, so the viewer is something the
+machine has anyway, and it works from a phone on the same network too.
+
+The JPEG exists only between here and the browser.  Nothing compressed goes
+anywhere near the board: the wire carries raw RGB565, which is the design
+being demonstrated.
 
 Sending and receiving run on separate threads because they are paced by
 different clocks — the webcam's and the board's — and tying them together
@@ -28,6 +39,7 @@ import struct
 import sys
 import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import cv2
 import numpy as np
@@ -45,24 +57,6 @@ PORT_RX = 5005          # board's inbound stream
 stop = threading.Event()
 
 
-def gui_works():
-    """
-    Whether this build of OpenCV can open a window.
-
-    Worth asking rather than assuming: a headless build raises from inside
-    imshow, and the traceback names cmake flags, which is a long way from
-    "there is no display backend".  It is also not a reason to stop — what this
-    script is really for is the counters on the board, and those do not need a
-    window.
-    """
-    try:
-        cv2.namedWindow("__probe", cv2.WINDOW_AUTOSIZE)
-        cv2.destroyWindow("__probe")
-        return True
-    except cv2.error:
-        return False
-
-
 def to_rgb565(bgr):
     """OpenCV BGR888 to the RGB565 the panel scans out, little endian."""
     b = bgr[:, :, 0].astype(np.uint16) >> 3
@@ -77,6 +71,63 @@ def from_rgb565(buf, w, h):
     g = (((p >> 5) & 0x3F) << 2).astype(np.uint8)
     r = (((p >> 11) & 0x1F) << 3).astype(np.uint8)
     return np.dstack((b, g, r))
+
+
+PAGE = b"""<!doctype html><title>NothanOS camera</title>
+<style>body{background:#111;margin:0;display:grid;place-items:center;height:100vh}
+img{image-rendering:pixelated;width:min(96vw,960px)}</style>
+<img src="/stream">"""
+
+
+def serve_http(port, frames, stats):
+    """
+    Show the stream in a browser instead of a window.
+
+    cv2.imshow needs a GUI build of OpenCV, and the headless package shadows
+    the one installed here.  Encoding to JPEG does not need a GUI, and every
+    browser already knows how to play multipart/x-mixed-replace — so the
+    viewer is something the machine already has.  It also means the picture
+    can be watched from a phone on the same network, which a window cannot do.
+
+    JPEG is for the screen only.  Nothing compressed goes near the board: the
+    wire format is still raw RGB565, which is the whole point of the design.
+    """
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass                        # one line per frame is not a log
+
+        def do_GET(self):
+            if self.path != "/stream":
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(PAGE)
+                return
+
+            self.send_response(200)
+            self.send_header("Content-Type",
+                             "multipart/x-mixed-replace; boundary=f")
+            self.end_headers()
+            last = -1
+            try:
+                while not stop.is_set():
+                    if not frames or stats["rx_frames"] == last:
+                        time.sleep(0.005)
+                        continue
+                    last = stats["rx_frames"]
+                    w, h, data = frames[-1]
+                    ok, jpg = cv2.imencode(".jpg", from_rgb565(data, w, h),
+                                           [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    if not ok:
+                        continue
+                    self.wfile.write(b"--f\r\nContent-Type: image/jpeg\r\n"
+                                     b"Content-Length: %d\r\n\r\n" % len(jpg))
+                    self.wfile.write(jpg.tobytes())
+                    self.wfile.write(b"\r\n")
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
+    ThreadingHTTPServer(("", port), Handler).serve_forever(poll_interval=0.2)
 
 
 def sender(sock, board, use_pattern, fps, stats):
@@ -173,17 +224,12 @@ def main():
     ap.add_argument("--pattern", action="store_true")
     ap.add_argument("--secs", type=float, default=0.0,
                     help="stop after this long (0 = until interrupted)")
+    ap.add_argument("--http", type=int, default=8080,
+                    help="port the browser watches on (default 8080)")
     ap.add_argument("--snap", default=None,
-                    help="write the newest received frame here as PNG, "
-                         "once a second — for a build with no window")
+                    help="also write the newest frame here as a PNG, once a "
+                         "second, for something to keep")
     args = ap.parse_args()
-
-    show = gui_works()
-    if not show:
-        print("no window: this OpenCV build has no GUI backend "
-              "(pip uninstall opencv-python-headless brings it back).",
-              file=sys.stderr)
-        print("running anyway — the numbers are what matter.", file=sys.stderr)
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 8 << 20)
@@ -193,14 +239,16 @@ def main():
     # Subscribing is how the board learns where to send; the reply address is
     # this socket's, so nothing here has to know its own IP.
     sock.sendto(b"VSUB", (args.board, PORT_TX))
-    print(f"calling {args.board} — "
-          + ("q or Esc to hang up" if show else "Ctrl-C to hang up"))
+    print(f"calling {args.board} — Ctrl-C to hang up")
+    print(f"watch it at http://localhost:{args.http}")
 
     stats = {"tx_frames": 0, "tx_fail": 0, "rx_frames": 0, "rx_whole": 0}
     frames = []
 
     threads = [threading.Thread(target=receiver, args=(sock, stats, frames),
-                                daemon=True)]
+                                daemon=True),
+               threading.Thread(target=serve_http,
+                                args=(args.http, frames, stats), daemon=True)]
     if not args.no_send:
         threads.append(threading.Thread(
             target=sender, args=(sock, args.board, args.pattern, args.fps, stats),
@@ -215,19 +263,12 @@ def main():
         while True:
             now = time.monotonic()
 
-            if frames:
+            if frames and args.snap and now - snapped >= 1.0:
                 w, h, data = frames[-1]
-                if show:
-                    cv2.imshow("board", from_rgb565(data, w, h))
-                elif args.snap and now - snapped >= 1.0:
-                    cv2.imwrite(args.snap, from_rgb565(data, w, h))
-                    snapped = now
+                cv2.imwrite(args.snap, from_rgb565(data, w, h))
+                snapped = now
 
-            if show:
-                if cv2.waitKey(10) & 0xFF in (ord("q"), 27):
-                    break
-            else:
-                time.sleep(0.05)
+            time.sleep(0.05)
 
             if now - last >= 2.0:
                 el = now - t0
@@ -245,8 +286,6 @@ def main():
         sock.sendto(b"VSTP", (args.board, PORT_TX))
         for t in threads:
             t.join(timeout=1.0)
-        if show:
-            cv2.destroyAllWindows()
 
     el = time.monotonic() - t0
     print(f"\nsent {stats['tx_frames']} frames ({stats['tx_fail']} failed), "
