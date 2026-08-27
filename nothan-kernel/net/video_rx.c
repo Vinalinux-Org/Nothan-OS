@@ -40,6 +40,8 @@
 #include <nothan/time.h>
 #include <nothan/printk.h>
 
+void uvc_dump_state(void);
+
 #if CONFIG_VIDEO_STREAM
 
 /*
@@ -129,6 +131,48 @@ static void vrx_finish(const struct fb_surface *fb, unsigned int w,
 	fb_sync();
 }
 
+/*
+ * Paint something before any frame arrives.
+ *
+ * A panel showing black is the same picture whether the display path is
+ * broken, the network is silent, or the framebuffer was simply never written —
+ * and an allocated framebuffer is zeroed, which in RGB565 is black.  Three
+ * causes, one symptom, and no way to tell them apart by looking.
+ *
+ * So the receiver signs its work on startup.  What it draws is chosen to be
+ * read rather than admired: a white frame around the panel says the geometry
+ * and stride are right, and four colour bars say the pixel format is — red
+ * appearing where blue is expected means the RGB565 byte order is reversed,
+ * which is otherwise a thing one discovers much later and blames on the
+ * camera.
+ */
+static void vrx_splash(const struct fb_surface *fb)
+{
+	static const u16 bar[4] = {
+		0xF800,		/* red   */
+		0x07E0,		/* green */
+		0x001F,		/* blue  */
+		0xFFFF,		/* white */
+	};
+	unsigned int x, y;
+
+	for (y = 0; y < fb->height; y++) {
+		u16 *row = fb->pixels + y * fb->width;
+		int edge_y = (y < 2 || y >= fb->height - 2);
+
+		for (x = 0; x < fb->width; x++) {
+			if (edge_y || x < 2 || x >= fb->width - 2)
+				row[x] = 0xFFFF;
+			else if (y > fb->height / 3 && y < fb->height * 2 / 3)
+				row[x] = bar[(x * 4) / fb->width];
+			else
+				row[x] = 0x2104;	/* dark grey, not black */
+		}
+	}
+
+	fb_sync();
+}
+
 static void video_rx_task(void)
 {
 	struct fb_surface fb;
@@ -141,6 +185,8 @@ static void video_rx_task(void)
 		printk("[VRX] no display registered; not receiving\n");
 		return;
 	}
+
+	vrx_splash(&fb);
 
 	printk("[VRX] port %lu, panel %lux%lu, up to %lux%lu doubled\n",
 	       (unsigned long)VIDEO_PORT_RX,
@@ -264,6 +310,9 @@ static void video_rx_task(void)
 			       " %lu%% idle\n",
 			       vrx_frames, fps10 / 10UL, fps10 % 10UL,
 			       vrx_complete, di / (ms * 10UL));
+
+			/* Temporary: see uvc_dump_state(). Goes with the bug. */
+			uvc_dump_state();
 
 			if (vrx_bad || vrx_late || vrx_sock.rx_dropped)
 				printk("[VRX] bad %lu, late %lu, no slot %lu\n",

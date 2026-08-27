@@ -59,46 +59,60 @@
 #define PRIO_GUI		(PRIO_UI + 1)	/* redraw: long, so below the shell */
 
 /*
- * A call sends and receives at once, so the video band holds two tasks, and
- * the band being four levels wide is what lets it.  Receiving is the more
- * urgent of the two and not by preference: an arriving frame that is not taken
- * out of its slot is overwritten and gone, while one waiting to be sent is
- * only late.  Loss that cannot be undone outranks delay that can.
+ * Ordered by how long each may be late before something is lost, which is not
+ * the order they were written in.
+ *
+ * Capture is first because its deadline is the tightest in the machine by two
+ * orders of magnitude: an isochronous packet lands every 125 microseconds into
+ * a FIFO holding two, so 250 microseconds late is data gone for good.  Receive
+ * is next — a datagram not taken out of the socket's eight slots is
+ * overwritten, which at 3200 datagrams a second is two and a half milliseconds
+ * of grace.  Transmit last, because a frame waiting to be sent is only late.
+ *
+ * They were the other way round, with capture below both, and the comment here
+ * claimed it was above.  The code won: the moment transmit started pushing a
+ * hundred datagrams a frame, each waking on its own completion every 123
+ * microseconds, it preempted capture at exactly the rate capture needed to run.
+ * The whole video path stopped with the machine 91% idle.
  */
 #define PRIO_VIDEO_RX		(PRIO_VIDEO + 0)	/* arrives, assembles, draws */
-#define PRIO_VIDEO_TX		(PRIO_VIDEO + 1)	/* captures, sends */
+#define PRIO_VIDEO_TX		(PRIO_VIDEO + 1)	/* sends; only ever late */
 
 /*
- * The throughput benchmarks, one level below each of the two they stand in for.
+ * Draining the camera, and last on purpose — which is the opposite of what its
+ * deadline deserves.
  *
- * They held VIDEO_RX and VIDEO_TX while they were the only things in the band,
- * which was accurate then and stopped being so the moment a real capture task
- * existed: a level is a claim about a deadline, and a task that exists to
- * saturate a link has no deadline to miss.  Below the real pair, so a
- * measurement running beside a call cannot delay the call it is measuring.
+ * The endpoint has 125 microseconds of slack and the interrupt that should
+ * announce it does not arrive, so the drain polls.  A polling task cannot have
+ * its deadline protected by priority: it holds the deadline by not being
+ * preempted, and nothing in a system with other work can promise that.  Put it
+ * above the network halves and it spins while transmit never runs; put it below
+ * and transmit interrupts it every 123 microseconds.  Both were measured, and
+ * both fail.
  *
- * That fills the band.  Whichever of these two pairs is next to want a third
- * task is the one that has to argue for a wider band or a shared level.
- */
-/*
- * Draining the camera's isochronous endpoint.
- *
- * Above both network halves in the band, and that ordering is forced rather
- * than chosen: an isochronous packet arrives every 125 microseconds into a
- * FIFO that holds two of them, so a capture that is late by a quarter of a
- * millisecond has lost data that no protocol can ask for again.  A frame
- * waiting to be sent is only late.
- *
- * It takes the level the benchmarks held.  sched.h said the day one of these
- * pairs wanted a third task was the day it had to argue for the band, and this
- * is that day: CONFIG_NET_BENCH turns the blaster and the sink off, and their
- * levels come here.  Both cannot run at once, which the boot-time collision
- * check enforces by refusing to start.
+ * So it goes where its spinning does least harm, and keeps up on whatever the
+ * machine is not otherwise using — which is most of it.  That is enough for
+ * one direction and is not enough for a call, and no arrangement of these
+ * three numbers makes it enough.  CPPI 4.1 DMA is what removes the deadline
+ * from software altogether; this level is what the box does until then.
  */
 #define PRIO_VIDEO_CAPTURE	(PRIO_VIDEO + 2)
 
-#define PRIO_NETBENCH_RX	(PRIO_VIDEO + 2)
-#define PRIO_NETBENCH_TX	(PRIO_VIDEO + 3)
+/*
+ * The throughput benchmarks, out of the deadline bands entirely.
+ *
+ * They held two video levels while they were the only things in the band, and
+ * a level is a claim about a deadline: a task whose whole purpose is to
+ * saturate a link has none to miss.  Three real video tasks now want three of
+ * the four levels, and putting a blaster on the fourth would let a measurement
+ * delay the call it is measuring.
+ *
+ * BG is where things without deadlines belong, and it is shared, so the two of
+ * them may sit on one level and take turns — which is also why they no longer
+ * need a level each.
+ */
+#define PRIO_NETBENCH_RX	PRIO_BG
+#define PRIO_NETBENCH_TX	PRIO_BG
 
 /*
  * True for levels where several tasks may share a priority and take turns.

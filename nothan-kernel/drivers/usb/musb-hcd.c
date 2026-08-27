@@ -36,6 +36,7 @@
 #include <nothan/init.h>
 #include <nothan/sched.h>
 #include <nothan/completion.h>
+#include <nothan/wait.h>
 #include <nothan/input.h>
 #include <nothan/video.h>
 #include <nothan/wait.h>
@@ -1299,6 +1300,26 @@ static unsigned long iso_bytes;
 static unsigned long iso_zero;		/* the camera had nothing to send */
 static unsigned long iso_errors;
 static unsigned long iso_irqs;
+static unsigned long iso_unmasks;
+static unsigned long iso_timeouts;	/* times the watchdog had to step in */
+
+static void uvc_watchdog(void);		/* defined below, called from the enum thread */
+
+/*
+ * Where the capture loop last was.
+ *
+ * A task that blocks disappears from ps — the runqueue only lists what can
+ * run — so a hung one leaves no trace at all beyond the work it stopped doing.
+ * Two hypotheses about this loop have already been wrong, and both cost a
+ * flash to disprove; a breadcrumb costs one store per phase and disproves them
+ * from the log.
+ */
+static volatile int iso_where;
+#define ISO_AT_DRAIN	1
+#define ISO_AT_UNMASK	2
+#define ISO_AT_SLEEP	3
+#define ISO_AT_CONVERT	4
+#define ISO_AT_REPORT	5
 static unsigned long iso_deepest;
 static unsigned long iso_frames;	/* frames finished, whole or holed */
 static unsigned long iso_whole;		/* finished with every byte present */
@@ -1542,8 +1563,28 @@ static int uvc_drain(int budget)
 			break;
 		}
 
-		if (!(csr & RXCSR_RXPKTRDY))
+		if (!(csr & RXCSR_RXPKTRDY)) {
+			/*
+			 * Nothing waiting — but leaving with no token outstanding
+			 * ends the stream for good.  There is no auto-request in
+			 * PIO, so every IN is asked for by software: the usual
+			 * chain is that unloading a packet asks for the next one,
+			 * and if that chain is ever broken — a missed slot, an
+			 * error path, a drain that arrived to find the FIFO
+			 * already empty — nobody asks again.  No packet, no
+			 * interrupt, and this task sleeps forever on a wakeup
+			 * that cannot come.
+			 *
+			 * That is exactly how the whole video path stopped with
+			 * the machine 91% idle: capture asleep waiting for a
+			 * packet it had not requested, and the sender asleep
+			 * waiting for a frame capture would never produce.
+			 */
+			if (!(csr & RXCSR_H_REQPKT))
+				mmio_write16(usbss_va + EP1_RXCSR,
+					     RXCSR_H_REQPKT);
 			break;
+		}
 
 		cnt = mmio_read16(usbss_va + EP1_RXCOUNT);
 		if (cnt > sizeof(packet))
@@ -1636,8 +1677,50 @@ static void uvc_capture_task(void)
 	unsigned long mark_j = 0, mark_p = 0, mark_b = 0, mark_i = 0, mark_f = 0;
 
 	for (;;) {
-		if (uvc_drain(UVC_DRAIN_BUDGET) < UVC_DRAIN_BUDGET) {
+		iso_where = ISO_AT_DRAIN;
+		if (uvc_drain(UVC_DRAIN_BUDGET) < UVC_DRAIN_BUDGET && !iso_maxp) {
+			/*
+			 * Only ever sleeps when there is no stream at all.
+			 *
+			 * While one is running this loop polls, because the
+			 * endpoint interrupt does not arrive: three
+			 * measurements, one rate each, and the rate is a
+			 * function of how often the software looks rather than
+			 * of how often a packet lands.  Polling gave 8000
+			 * packets a second; waiting up to 5 ms gave 400;
+			 * waiting on the interrupt with a 200 ms watchdog gave
+			 * 7.
+			 *
+			 * Sleeping cannot be made to work here.  The tick is
+			 * one millisecond and the deadline is 125
+			 * microseconds, so the shortest sleep this kernel can
+			 * take is already eight times too long.  That is not a
+			 * bug to fix but an arithmetic fact, and it is the
+			 * argument for CPPI 4.1 DMA — which is also why
+			 * AUTOREQ only exists alongside it.
+			 */
+			iso_where = ISO_AT_UNMASK;
 			WR(USB1_IRQENSET0, EP1_RX_IRQ_BIT);
+			iso_unmasks++;
+			iso_where = ISO_AT_SLEEP;
+
+			/*
+			 * A plain wait, with the safety net somewhere cheaper.
+			 *
+			 * This was a five millisecond timed wait, which is the
+			 * right shape for a hardware condition and the wrong
+			 * place for it: arming a timer costs a sorted insert
+			 * with interrupts masked, and this loop sleeps eight
+			 * thousand times a second.  Sixteen thousand masked
+			 * list walks a second delayed the very interrupt being
+			 * waited for, and the packet rate fell from 8000 to
+			 * 400 with the machine 98% idle — a safety net heavier
+			 * than the fall it was catching.
+			 *
+			 * The net moved to uvc_watchdog(), which runs five
+			 * times a second from a thread that was sleeping
+			 * anyway.  Per-packet cost: none.
+			 */
 			wait_event_cond(&iso_wait, uvc_iso_ready());
 		}
 
@@ -1648,6 +1731,8 @@ static void uvc_capture_task(void)
 		 */
 		if (iso_full >= 0) {
 			int done = iso_full;
+
+			iso_where = ISO_AT_CONVERT;
 
 			yuy2_to_rgb565(iso_frame[done], cam_rgb[cam_wr],
 				       UVC_WANT_W * UVC_WANT_H);
@@ -1662,6 +1747,7 @@ static void uvc_capture_task(void)
 			wake_up(&cam_wait);
 		}
 
+		iso_where = ISO_AT_REPORT;
 		if (!ratelimit_allow(&uvc_rl))
 			continue;
 
@@ -1801,14 +1887,26 @@ static int uvc_start(void)
 	 * is silent, or the reporting itself is broken.  These registers
 	 * separate the three.
 	 */
-	msleep(200);
-	CWR8(MC_INDEX, UVC_EP_HW);
-	printk("[UVC] after 200 ms: %lu packets, rxcsr=%04x intrrx=%04x"
-	       " intrrxe=%04x\n",
-	       iso_packets,
-	       (unsigned int)mmio_read16(usbss_va + EP1_RXCSR),
-	       (unsigned int)mmio_read16(usbss_va + MC_INTRRX),
-	       (unsigned int)mmio_read16(usbss_va + MC_INTRRXE));
+	/*
+	 * Twice, because the interesting question is not the state at any one
+	 * moment but whether the endpoint interrupt fires at all.
+	 *
+	 * @iso_irqs against @iso_packets is the whole of it.  If packets arrive
+	 * in their thousands and the interrupt count stays near zero, then the
+	 * drain has only ever been polling — it kept up because it was always
+	 * behind, and the first time it caught up and slept, nothing woke it.
+	 * That reads exactly like a driver that works until it is given enough
+	 * priority to finish its work, which is not a sentence anyone would
+	 * arrive at by reasoning.
+	 */
+	for (i = 0; i < 2; i++) {
+		msleep(i ? 1800 : 200);
+		CWR8(MC_INDEX, UVC_EP_HW);
+		printk("[UVC] +%d ms: %lu pkt, %lu irq, %lu unmask,"
+		       " rxcsr=%04x\n",
+		       i ? 2000 : 200, iso_packets, iso_irqs, iso_unmasks,
+		       (unsigned int)mmio_read16(usbss_va + EP1_RXCSR));
+	}
 	return 0;
 }
 
@@ -1852,8 +1950,10 @@ static void musb_enum_thread(void)
 		} else if (vs.interface >= 0 && vs.has_yuy2) {
 			if (uvc_start() != 0)
 				printk("[UVC] stream did not start\n");
-			while (musb_generation == gen)
+			while (musb_generation == gen) {
 				msleep(200);
+				uvc_watchdog();
+			}
 		} else {
 			printk("[MUSB] enumerated; no class driver for it yet\n");
 			while (musb_generation == gen)
@@ -1875,6 +1975,25 @@ static void musb_irq_handler(unsigned int irq)
 		WR(USB1_IRQSTAT1, coreintr);
 
 	if (epintr & EP1_RX_IRQ_BIT) {
+		/*
+		 * Read the core's own pending register, which nothing here
+		 * had ever done.
+		 *
+		 * INTRRX is read-to-clear.  Acknowledging the wrapper leaves
+		 * the core bit set, so the signal the wrapper latches on never
+		 * falls, and a wrapper that latches an edge has no edge to
+		 * latch for the next packet.  It works for as long as draining
+		 * happens to clear RXPKTRDY at the right moment — which is
+		 * most of the time, and stops being most of the time once the
+		 * FIFO is double buffered and the second packet raises
+		 * RXPKTRDY again the instant the first is taken.
+		 *
+		 * That matches what the hang looked like: thousands of
+		 * interrupts, then one that never came, with a packet sitting
+		 * ready.
+		 */
+		(void)mmio_read16(usbss_va + MC_INTRRX);
+
 		/*
 		 * Mask and defer.  The endpoint interrupt is a level, so doing
 		 * the work here with the source still enabled re-enters this
@@ -1999,3 +2118,61 @@ static int __init musb_hcd_init(void)
 	return platform_driver_register(&musb_hcd_driver);
 }
 device_initcall(musb_hcd_init);
+
+/*
+ * What the capture loop is doing, printed by somebody who is still running.
+ *
+ * Layering is broken on purpose and only here: the point of this is to be
+ * called from a task that demonstrably still works when the USB one does not,
+ * and video_rx is the only one that qualifies.  It goes when the bug does.
+ */
+/*
+ * Kick the endpoint if the stream has stopped moving.
+ *
+ * The cheap half of what a timed wait would do, at a rate that costs nothing:
+ * a lost interrupt leaves the task asleep with a packet ready, and one
+ * comparison against the packet count a fifth of a second later is enough to
+ * notice.  Recovery is to make sure a token is outstanding and then wake the
+ * task, which re-checks the FIFO for itself.
+ *
+ * Called from the enumeration thread, which sits in a sleep loop for the life
+ * of the device and had nothing else to do.
+ */
+static void uvc_watchdog(void)
+{
+	static unsigned long last_seen;
+	u16 csr;
+
+	if (iso_packets != last_seen) {
+		last_seen = iso_packets;
+		return;
+	}
+
+	if (!iso_maxp)
+		return;			/* not streaming */
+
+	CWR8(MC_INDEX, UVC_EP_HW);
+	csr = mmio_read16(usbss_va + EP1_RXCSR);
+
+	if (!(csr & (RXCSR_RXPKTRDY | RXCSR_H_REQPKT)))
+		mmio_write16(usbss_va + EP1_RXCSR, RXCSR_H_REQPKT);
+
+	WR(USB1_IRQENSET0, EP1_RX_IRQ_BIT);
+	iso_timeouts++;
+	wake_up(&iso_wait);
+}
+
+void uvc_dump_state(void)
+{
+	static const char * const at[] = {
+		"?", "drain", "unmask", "sleep", "convert", "report"
+	};
+	int w = iso_where;
+
+	CWR8(MC_INDEX, UVC_EP_HW);
+	printk("[UVC?] at %s: %lu pkt, %lu irq, %lu lost, seq=%lu rxcsr=%04x\n",
+	       at[(w >= 0 && w <= 5) ? w : 0],
+	       iso_packets, iso_irqs, iso_timeouts,
+	       (unsigned long)cam_seq,
+	       (unsigned int)mmio_read16(usbss_va + EP1_RXCSR));
+}

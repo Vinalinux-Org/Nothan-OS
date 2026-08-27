@@ -4,6 +4,7 @@
 #include <nothan/types.h>
 #include <nothan/mm.h>
 #include <nothan/sched.h>
+#include <nothan/timer.h>
 #include <asm/irqflags.h>
 
 /**
@@ -57,5 +58,51 @@ void wait_event_locked(struct wait_queue_head *wq);
 
 void wait_event(struct wait_queue_head *wq);
 void wake_up(struct wait_queue_head *wq);
+
+/**
+ * struct wait_timeout - the timer behind wait_event_cond_timeout()
+ *
+ * PROTECTION: every field is touched with interrupts masked, by the sleeper
+ * setting it up and by the timer callback running from the tick.  The callback
+ * has to unlink the task from the wait queue itself, which is why this exists
+ * at all: @rt.run_list is the same field the runqueue links through, so a
+ * waker that enqueues a task still linked into a wait queue corrupts both
+ * lists at once.  msleep() gets away without it only because nothing it sleeps
+ * on is a wait queue.
+ */
+struct wait_timeout {
+	struct timer_list	timer;
+	struct task_struct	*task;
+	volatile int		fired;
+};
+
+void wait_timeout_arm(struct wait_timeout *wt, unsigned long ms);
+void wait_timeout_disarm(struct wait_timeout *wt);
+
+/**
+ * wait_event_cond_timeout() - sleep until @cond, or until @ms have passed
+ *
+ * Evaluates to 1 if the condition held, 0 if the time ran out.
+ *
+ * For waiting on hardware.  A condition that depends on a device is a
+ * condition that can simply never become true — a missed interrupt, a
+ * peripheral left in the wrong state — and wait_event_cond() has no answer to
+ * that but to hang.  The alternative in this tree until now was a busy loop
+ * with a jiffy deadline, which does not hang but burns whatever priority the
+ * caller happens to run at: on a 60 Hz panel a task waiting for a frame
+ * boundary thirty times a second spins away a quarter of the machine.
+ */
+#define wait_event_cond_timeout(wq, cond, ms)				\
+({									\
+	struct wait_timeout __wt;					\
+	unsigned long __wt_flags = local_irq_save();			\
+									\
+	wait_timeout_arm(&__wt, (ms));					\
+	while (!(cond) && !__wt.fired)					\
+		wait_event_locked(wq);					\
+	wait_timeout_disarm(&__wt);					\
+	local_irq_restore(__wt_flags);					\
+	!!(cond);							\
+})
 
 #endif /* _WAIT_H */

@@ -8,6 +8,8 @@
 #include <nothan/sched.h>
 #include <nothan/wait.h>
 #include <nothan/mm.h>		/* list helpers */
+#include <nothan/timer.h>
+#include <nothan/time.h>
 #include <asm/irqflags.h>
 
 /**
@@ -78,4 +80,57 @@ void wake_up(struct wait_queue_head *wq)
 	enqueue_task(&runqueue, p);
 
 	local_irq_restore(flags);
+}
+
+/*
+ * Wake the sleeper whose time ran out.
+ *
+ * Runs from the tick, so the mask is already held by the interrupt path, but
+ * take it anyway: this is called through the timer list and the contract there
+ * does not promise it.
+ *
+ * The unlink is the whole reason this is not msleep's callback.  A task
+ * sleeping on a wait queue is linked into it through rt.run_list, and that is
+ * the same field the runqueue uses — enqueueing it without removing it first
+ * splices the two lists together.  TASK_RUNNING is the test for "already
+ * woken", set under the mask by wake_up(), so checking it here cannot race.
+ */
+static void wait_timeout_fn(struct timer_list *t)
+{
+	struct wait_timeout *wt = (struct wait_timeout *)t->data;
+	unsigned long flags = local_irq_save();
+
+	wt->fired = 1;
+
+	if (wt->task->__state != TASK_RUNNING) {
+		list_del(&wt->task->rt.run_list);
+		wt->task->__state = TASK_RUNNING;
+		if (!wt->task->rt.on_rq)
+			enqueue_task(&runqueue, wt->task);
+	}
+
+	local_irq_restore(flags);
+}
+
+void wait_timeout_arm(struct wait_timeout *wt, unsigned long ms)
+{
+	unsigned long ticks = (ms * HZ + 999) / 1000;
+
+	if (!ticks)
+		ticks = 1;
+
+	wt->task  = runqueue.curr;
+	wt->fired = 0;
+
+	init_timer(&wt->timer);
+	wt->timer.expires  = get_jiffies() + ticks;
+	wt->timer.function = wait_timeout_fn;
+	wt->timer.data     = (unsigned long)wt;
+
+	add_timer(&wt->timer);
+}
+
+void wait_timeout_disarm(struct wait_timeout *wt)
+{
+	del_timer(&wt->timer);
 }
