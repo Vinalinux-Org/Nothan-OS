@@ -41,6 +41,7 @@
 #include <nothan/printk.h>
 
 void uvc_dump_state(void);
+void lcdc_dump_health(void);
 
 #if CONFIG_VIDEO_STREAM
 
@@ -64,6 +65,21 @@ static struct udp_sock vrx_sock;
 static u8 vrx_stage[VRX_MAX_BYTES] __attribute__((aligned(4)));
 
 DEFINE_RATELIMIT(vrx_rl, 1000, 1);
+
+/*
+ * The two probes into other subsystems, once every ten seconds rather than
+ * every one.
+ *
+ * They were written to find a bug that turned out not to exist — the display
+ * path was correct throughout, and what was wrong was the picture being sent
+ * to it — so what is left is telemetry rather than an investigation.  Useful
+ * telemetry: an LCDC underflow count and the address the DMA is actually
+ * reading are the two facts that separate "the write never happened" from
+ * "nobody is looking at where it happened", which no amount of frame counting
+ * can.  But a line a second forever is how a console stops being readable,
+ * and this file has complained about that three times already.
+ */
+DEFINE_RATELIMIT(vrx_probe_rl, 10000, 1);
 
 static unsigned long vrx_frames;	/* frames finished, whole or holed */
 static unsigned long vrx_complete;	/* finished with nothing missing */
@@ -311,8 +327,10 @@ static void video_rx_task(void)
 			       vrx_frames, fps10 / 10UL, fps10 % 10UL,
 			       vrx_complete, di / (ms * 10UL));
 
-			/* Temporary: see uvc_dump_state(). Goes with the bug. */
-			uvc_dump_state();
+			if (ratelimit_allow(&vrx_probe_rl)) {
+				uvc_dump_state();
+				lcdc_dump_health();
+			}
 
 			if (vrx_bad || vrx_late || vrx_sock.rx_dropped)
 				printk("[VRX] bad %lu, late %lu, no slot %lu\n",

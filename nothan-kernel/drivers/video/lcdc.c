@@ -297,6 +297,53 @@ static int lcdc_get_surface(struct fb_surface *s)
  * out whatever was in DRAM before the writes — which is last frame, or at boot,
  * nothing at all.
  */
+/*
+ * Whether the panel is still being fed.
+ *
+ * lcdc_fuf_count has been ticking up since the driver was written and nothing
+ * has ever printed it: the only reader was wait_eof(), and nothing calls flip
+ * on a board with no GUI.  A silent counter is the same as no counter, and
+ * this one answers a question nothing else can — a FIFO underflow means the
+ * raster ran out of pixels mid-line, which the framer sees as broken timing
+ * and the monitor as no signal.  The framebuffer can be perfectly correct
+ * while that happens, which is exactly what it looks like: a receiver
+ * reporting thousands of whole frames painted, and a black screen.
+ */
+void lcdc_dump_health(void)
+{
+	if (!CONFIG_VIDEO)
+		return;
+
+	{
+		const u16 *px = (const u16 *)((u8 *)fb_va + PALETTE_SZ);
+
+		/*
+		 * Two facts, and between them they leave nowhere to hide.
+		 *
+		 * The address the DMA is actually reading, against the one
+		 * handed out by fb_get_surface(): if they disagree, a writer
+		 * can paint perfectly into memory nobody is scanning, and
+		 * count every frame it painted while the panel shows whatever
+		 * was there first.
+		 *
+		 * And three pixels read back out of the framebuffer.  A writer
+		 * that never landed leaves the old contents; a writer that
+		 * landed leaves its own.  That tells the two halves of the
+		 * question apart — did the write happen, and is anyone looking
+		 * at where it happened — which no amount of frame counting can.
+		 */
+		printk("[LCDC?] %u uflow raw=0x%08lx | dma=0x%08lx surf=0x%08lx"
+		       " | px 0=%04x mid=%04x end=%04x\n",
+		       lcdc_fuf_count,
+		       (unsigned long)mmio_read32(LCDC_BASE + LCDC_IRQSTATUS_RAW),
+		       (unsigned long)mmio_read32(LCDC_BASE + LCDC_FB0_BASE),
+		       (unsigned long)kva_to_phys((void *)px),
+		       (unsigned int)px[0],
+		       (unsigned int)px[FB_W * (FB_H / 2) + FB_W / 2],
+		       (unsigned int)px[FB_W * FB_H - 1]);
+	}
+}
+
 static void lcdc_sync(void)
 {
 	clean_dcache_range((unsigned long)fb_va,

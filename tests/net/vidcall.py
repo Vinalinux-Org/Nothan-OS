@@ -130,6 +130,26 @@ def serve_http(port, frames, stats):
     ThreadingHTTPServer(("", port), Handler).serve_forever(poll_interval=0.2)
 
 
+# Bright bars, and a marker that moves.  The first pattern here was
+# (x + y + seq) taken raw as RGB565, which is exact and checkable by formula —
+# and nearly invisible: at those values red is zero and green sits in its
+# lowest few steps, so it renders as dark blue-green.  On a screen that reads
+# as black, and a test pattern indistinguishable from a broken display costs
+# more than the arithmetic it saves.  A whole debugging session went on the
+# question "why is the panel dark" with the answer "because you sent dark".
+_BARS = np.array([0xF800, 0x07E0, 0x001F, 0xFFFF,
+                  0xFFE0, 0x07FF, 0xF81F, 0x8410], dtype="<u2")
+
+
+def pattern(seq):
+    """Eight colour bars that rotate, plus a white column sweeping across."""
+    img = np.repeat(_BARS[(np.arange(8) + seq // 15) % 8], W // 8)[:W]
+    img = np.tile(img, (H, 1))
+    img[:, (seq * 7) % W] = 0xFFFF          # a marker that cannot sit still
+    img[H // 2 - 2:H // 2 + 2, :] = 0x0000  # a black rule, to see geometry
+    return img.astype("<u2").tobytes()
+
+
 def sender(sock, board, use_pattern, fps, stats):
     """Capture, convert, chop, send.  Paced by the clock, not by sleep()."""
     cap = None
@@ -159,8 +179,7 @@ def sender(sock, board, use_pattern, fps, stats):
             bgr = cv2.flip(bgr, 1)          # a mirror is what a caller expects
             payload = to_rgb565(bgr)
         else:
-            y, x = np.mgrid[0:H, 0:W].astype(np.uint16)
-            payload = ((x + y + seq) & 0xFFFF).astype("<u2").tobytes()
+            payload = pattern(seq)
 
         for off in range(0, len(payload), CHUNK):
             piece = payload[off:off + CHUNK]
@@ -177,7 +196,7 @@ def sender(sock, board, use_pattern, fps, stats):
         cap.release()
 
 
-def receiver(sock, stats, frames):
+def receiver(sock, stats, frames, loopback=None):
     """Reassemble by offset; hand each finished frame to the display thread."""
     cur_seq, buf, have, geom = None, None, 0, None
 
@@ -203,6 +222,14 @@ def receiver(sock, stats, frames):
         if magic != MAGIC or ver != VERSION:
             continue
 
+        # Loopback: the camera's own datagrams, straight back to the board's
+        # screen.  Forwarded before reassembly and untouched — the bytes that
+        # left the sensor are the bytes the panel scans — so the picture on the
+        # monitor and the picture in the browser are the same frames, not two
+        # renderings of them.
+        if loopback:
+            sock.sendto(d, loopback)
+
         piece = d[HDR:]
         if seq != cur_seq:
             finish()
@@ -221,6 +248,9 @@ def main():
     ap.add_argument("--board", default="10.42.0.2")
     ap.add_argument("--fps", type=float, default=30.0)
     ap.add_argument("--no-send", action="store_true")
+    ap.add_argument("--loopback", action="store_true",
+                    help="send the board's own camera back to its screen, so "
+                         "both ends show the same picture at once")
     ap.add_argument("--pattern", action="store_true")
     ap.add_argument("--secs", type=float, default=0.0,
                     help="stop after this long (0 = until interrupted)")
@@ -245,11 +275,13 @@ def main():
     stats = {"tx_frames": 0, "tx_fail": 0, "rx_frames": 0, "rx_whole": 0}
     frames = []
 
-    threads = [threading.Thread(target=receiver, args=(sock, stats, frames),
+    loop_to = (args.board, PORT_RX) if args.loopback else None
+    threads = [threading.Thread(target=receiver,
+                                args=(sock, stats, frames, loop_to),
                                 daemon=True),
                threading.Thread(target=serve_http,
                                 args=(args.http, frames, stats), daemon=True)]
-    if not args.no_send:
+    if not args.no_send and not args.loopback:
         threads.append(threading.Thread(
             target=sender, args=(sock, args.board, args.pattern, args.fps, stats),
             daemon=True))
