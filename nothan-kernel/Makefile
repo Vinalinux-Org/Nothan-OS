@@ -96,6 +96,7 @@ OBJS += $(BUILD_DIR)/drivers/char/phonebus.o
 OBJS += $(BUILD_DIR)/drivers/char/storagebus.o
 OBJS += $(BUILD_DIR)/drivers/i2c/i2c-core.o
 OBJS += $(BUILD_DIR)/drivers/i2c/i2c-omap.o
+OBJS += $(BUILD_DIR)/drivers/usb/cppi41.o
 OBJS += $(BUILD_DIR)/drivers/usb/musb-hcd.o
 OBJS += $(BUILD_DIR)/drivers/net/ethernet/ti/cpsw.o
 OBJS += $(BUILD_DIR)/net/net_core.o

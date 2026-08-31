@@ -39,6 +39,7 @@
 #include <nothan/wait.h>
 #include <nothan/input.h>
 #include <nothan/video.h>
+#include "cppi41.h"
 #include <nothan/wait.h>
 
 /* ---- PRCM: clocks (L4_WKUP window) ----------------------------------
@@ -2098,6 +2099,14 @@ static int musb_hcd_probe(struct platform_device *pdev)
 
 	printk("[MUSB] host mode, session started (devctl=0x%x) — plug touch to test\n",
 	       (unsigned int)CRD8(MC_DEVCTL));
+	/*
+	 * The DMA engine, stage 1: only the queue manager, and only far enough
+	 * to prove it answers.  Nothing uses it yet — the drain still polls —
+	 * so a failure here costs nothing but a line in the log, which is the
+	 * point of bringing it up separately.
+	 */
+	cppi_init(usbss_va);
+
 	printk("[MUSB] probe ok (Milestone 2: enumeration ready)\n");
 	return 0;
 }
