@@ -688,20 +688,18 @@ static void cpsw_ale_init(void)
  * looks like a bad cable, which is a long way from the line that hard-coded
  * it.  The driver this is derived from wrote MAC_FULLDUPLEX unconditionally.
  *
- * KNOWN LIMITATION: read once, here, and never looked at again.  Boot with the
- * cable out and the link comes up later as full duplex while this MAC stays
- * half, and the half-duplex receiver is gated off for the whole time the port
- * is transmitting.  Measured, because it happened: a bidirectional video call
- * lost 79% of what arrived — 28 of every 132 datagrams — while transmit stayed
- * perfect and every counter in the machine read clean.  0 CRC errors, 0 DMA
- * overruns, 0 dropped by any ring: the frames were refused by the MAC before
- * anything here could count them.  Plugging the cable in first and rebooting
- * took the same test to 132 of 132.
+ * It used to be read once here and never looked at again, which meant a board
+ * booted with the cable out kept a half-duplex MAC after the link came up full.
+ * A half-duplex receiver is gated off for as long as the port is transmitting,
+ * so a bidirectional video call lost 79% of what arrived — 28 of every 132
+ * datagrams — while transmit stayed perfect and every counter in the machine
+ * read clean: 0 CRC errors, 0 DMA overruns, 0 dropped by any ring.  The frames
+ * were refused by the MAC before anything here could count them.
  *
- * A box that gets its cable plugged in after it is switched on is an ordinary
- * box, so this wants link-change detection and a MAC reconfigured when the
- * PHY renegotiates.  Until then the failure is silent, and this comment is the
- * only place that says what it looks like.
+ * A box whose cable is plugged in after it is switched on is an ordinary box,
+ * so cpsw_link_task() now watches the PHY and calls back here.  What is left
+ * of the old bug is the reason this function takes no argument and reads a
+ * variable instead: there is one link, and one place that decides what it is.
  */
 static void cpsw_port_init(void)
 {
@@ -725,6 +723,65 @@ static void cpsw_port_init(void)
 	       (unsigned long)cpsw_mac[4], (unsigned long)cpsw_mac[5],
 	       link_full_duplex ? "full" : "half",
 	       (unsigned long)rd(SL_MACCONTROL));
+}
+
+/*
+ * Follow the link for as long as the box is running.
+ *
+ * Polled rather than driven by the PHY's interrupt: the LAN8710A can raise one,
+ * but its pin is not routed to the SoC on this board, so there is nothing to
+ * catch.  Twice a second is far more often than a cable is plugged in and far
+ * less often than anything here would notice the cost — one MDIO transaction,
+ * from a task with no deadline.
+ *
+ * Only a *change* is acted on.  Rewriting SL_MACCONTROL every half second
+ * would work, but it would also mean the log could never say when the cable
+ * moved, and that is the one thing worth knowing here.
+ */
+static void cpsw_link_task(void)
+{
+	int was_up = 1;			/* probe already reported the initial state */
+
+	for (;;) {
+		int bmsr, adv, lpa, up, full;
+
+		msleep(500);
+
+		mdio_read(PHY_ADDR, MII_BMSR);	/* latching low: read twice */
+		bmsr = mdio_read(PHY_ADDR, MII_BMSR);
+		if (bmsr < 0)
+			continue;
+
+		up = (bmsr & BMSR_LSTATUS) && (bmsr & BMSR_ANEGCOMPLETE);
+
+		if (!up) {
+			if (was_up) {
+				printk("[CPSW] link DOWN\n");
+				was_up = 0;
+			}
+			continue;
+		}
+
+		adv = mdio_read(PHY_ADDR, MII_ADVERTISE);
+		lpa = mdio_read(PHY_ADDR, MII_LPA);
+		if (adv < 0 || lpa < 0)
+			continue;
+
+		full = ((adv & lpa) & (LPA_100FULL | LPA_10FULL)) ? 1 : 0;
+
+		if (was_up && full == link_full_duplex)
+			continue;		/* nothing has moved */
+
+		printk("[CPSW] link UP: %s, %s duplex (was %s)\n",
+		       ((adv & lpa) & (LPA_100FULL | LPA_100HALF)) ? "100 Mbit"
+								   : "10 Mbit",
+		       full ? "full" : "half",
+		       was_up ? (link_full_duplex ? "full" : "half") : "down");
+
+		link_full_duplex = full;
+		cpsw_port_init();		/* re-apply, now that it is known */
+		was_up = 1;
+	}
 }
 
 static void cpsw_rx_ring_init(void)
@@ -1291,6 +1348,34 @@ static int cpsw_probe(struct platform_device *pdev)
 			return -1;
 		}
 		enqueue_task(&runqueue, t);
+	}
+
+	/*
+	 * In the NET band, not BG, and the reason is a lesson rather than a
+	 * preference.
+	 *
+	 * Watching a link is background work by every ordinary measure: no
+	 * deadline, half a second between glances, nothing waiting on it.  It
+	 * was put in BG on exactly that reasoning and never ran again — the
+	 * camera drain polls at PRIO_VIDEO_CAPTURE and leaves the machine at
+	 * 0% idle, so nothing below it is scheduled at all.  The watcher
+	 * reported the link down once, before the camera started, and then sat
+	 * there while a bidirectional call lost 79% of its receive traffic to
+	 * the duplex mismatch it existed to prevent.
+	 *
+	 * "No deadline" is not the same as "may never run".  This has to run
+	 * for the link to work, the link has to work for video to work, and
+	 * video is what was starving it.  One level below the receive task,
+	 * where it is above everything that could crowd it out and below the
+	 * path it protects.
+	 */
+	{
+		struct task_struct *t = task_create(cpsw_link_task, PRIO_NET + 1,
+						    "net-link");
+		if (!t)
+			printk("[CPSW] no link watcher: duplex is fixed at boot\n");
+		else
+			enqueue_task(&runqueue, t);
 	}
 
 	request_irq(pdev->irq, cpsw_rx_isr);

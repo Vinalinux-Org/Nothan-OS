@@ -154,10 +154,22 @@ def sender(sock, board, use_pattern, fps, stats):
     """Capture, convert, chop, send.  Paced by the clock, not by sleep()."""
     cap = None
     if not use_pattern:
-        cap = cv2.VideoCapture(0)
+        # The backend is named rather than guessed.  cv2.VideoCapture(0) lets
+        # OpenCV pick, and its index-based probe fails on this machine even
+        # though the camera is an ordinary UVC device on /dev/video0 — the
+        # error it prints talks about backends, which reads like the camera is
+        # missing.  Asking for V4L2 by name opens it first time.
+        cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
         if not cap.isOpened():
             print("no webcam; sending a pattern instead", file=sys.stderr)
             cap = None
+        else:
+            # Throw the first frames away.  A sensor that has just been opened
+            # returns black while its exposure settles, and those frames are
+            # indistinguishable from a camera that does not work — which is
+            # exactly the conclusion they led to for most of a day.
+            for _ in range(10):
+                cap.read()
 
     seq = 0
     period = 1.0 / fps
