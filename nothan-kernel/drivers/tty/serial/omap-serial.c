@@ -56,7 +56,19 @@ static struct uart_inst uarts[] = {
 
 static unsigned int uart_current_baud = 115200;	/* console (UART0) */
 
-#define LOG_BUF_SIZE	4096u			/* power of two */
+/*
+ * Sixteen kilobytes, up from four.
+ *
+ * Four was enough for a line at a time and not for a burst: a USB camera's
+ * configuration descriptors print as about sixty lines, which is 4260 bytes,
+ * and the tail went over the edge.  Sixteen holds any burst this box currently
+ * produces, at 12 KB of .bss out of 506 MB.
+ *
+ * It only moves the threshold, though — which is why the notice below matters
+ * more than the size.  A ring that drops is survivable; a ring that drops
+ * without saying so has cost this project four wrong diagnoses.
+ */
+#define LOG_BUF_SIZE	16384u			/* power of two */
 #define LOG_BUF_MASK	(LOG_BUF_SIZE - 1u)
 
 static char log_buf[LOG_BUF_SIZE];
@@ -76,6 +88,42 @@ static volatile int log_tx_armed;	/* THR_IT enabled; the ISR owns the ring */
 
 /* Arm the TX interrupt if there is work and it is not already running.
  * Caller must hold the interrupt mask. */
+/*
+ * Say that bytes were lost, from a context that cannot call printk.
+ *
+ * printk appends to this same ring, so calling it from the drain path is a
+ * recursion into the thing being drained.  The message is therefore written
+ * straight into the buffer, which is safe precisely where it is called: the
+ * ring has just gone empty, so every byte of it is free.
+ *
+ * The caller must hold the interrupt mask and must not disarm the transmitter
+ * afterwards — there is data again.
+ */
+static void log_note_dropped_locked(void)
+{
+	static const char pre[]  = "\r\n[log] ";
+	static const char post[] = " bytes dropped (ring full)\r\n";
+	char num[12];
+	unsigned int n = log_dropped;
+	unsigned int i = 0, j;
+
+	log_dropped = 0;
+
+	if (!n)
+		num[i++] = '0';
+	while (n) {
+		num[i++] = (char)('0' + n % 10u);
+		n /= 10u;
+	}
+
+	for (j = 0; pre[j]; j++)
+		log_buf[log_head++ & LOG_BUF_MASK] = pre[j];
+	while (i)
+		log_buf[log_head++ & LOG_BUF_MASK] = num[--i];
+	for (j = 0; post[j]; j++)
+		log_buf[log_head++ & LOG_BUF_MASK] = post[j];
+}
+
 static void log_tx_arm_locked(void)
 {
 	if (!log_irq_ready || log_tx_armed || log_head == log_tail)
@@ -195,6 +243,23 @@ static void uart_tx_fill(struct uart_inst *u)
 			     log_buf[log_tail++ & LOG_BUF_MASK]);
 
 	if (log_head == log_tail) {
+		/*
+		 * Empty — but first, own up to anything that was thrown away.
+		 *
+		 * log_dropped has been counted since this driver was written
+		 * and only ever read by the boot-time polling drain, which
+		 * stops running the moment the TX interrupt goes live.  So in
+		 * normal operation the ring dropped bytes in complete silence,
+		 * and a log that goes quiet about being incomplete is worse
+		 * than no log: it was blamed on line width, on volume, and
+		 * twice on two subsystems printing over each other, and all
+		 * four were this.
+		 */
+		if (log_dropped) {
+			log_note_dropped_locked();
+			return;		/* data again: leave the interrupt armed */
+		}
+
 		/* Nothing left — stop the interrupt, or it re-fires forever on
 		 * an empty transmitter. */
 		log_tx_armed = 0;
