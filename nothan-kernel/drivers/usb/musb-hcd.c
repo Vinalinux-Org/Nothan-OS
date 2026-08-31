@@ -39,6 +39,8 @@
 #include <nothan/wait.h>
 #include <nothan/input.h>
 #include <nothan/video.h>
+#include <nothan/mm.h>
+#include <asm/barrier.h>
 #include "cppi41.h"
 #include <nothan/wait.h>
 
@@ -81,6 +83,19 @@
 #  define USB1STAT_DRVVBUS	(1u << 8)
 #define USB1_IRQSTAT0		(USB1_CTL_OFF + 0x30)	/* EP TX[15:0]/RX[31:17] */
 #define USB1_IRQSTAT1		(USB1_CTL_OFF + 0x34)	/* core/USB line events  */
+/*
+ * How each endpoint talks to the DMA engine.  Two bits per endpoint in each
+ * register, endpoint 1 in the lowest pair.  Transparent mode and no automatic
+ * request is what a receive channel wants: the engine moves one packet per
+ * descriptor and software still issues the token.  Both are zero, but zero is
+ * only the value they hold if nothing before this kernel wrote them — and the
+ * bootloader ran first.
+ */
+#define USB1_RX_MODE		(USB1_CTL_OFF + 0x74)
+#define USB1_AUTOREQ		(USB1_CTL_OFF + 0xD0)
+#  define EPMODE_TRANSPARENT	0u
+#  define EPMODE_MASK(ep)	(3u << (((ep) - 1) * 2))
+
 #define USB1_IRQENSET0		(USB1_CTL_OFF + 0x38)
 #define USB1_IRQENSET1		(USB1_CTL_OFF + 0x3C)
 #define USB1_IRQENCLR0		(USB1_CTL_OFF + 0x40)
@@ -171,6 +186,7 @@
 #  define RXCSR_DATAERROR	0x0008	/* NAK timeout (interrupt) */
 #  define RXCSR_FLUSHFIFO	0x0010
 #  define RXCSR_H_REQPKT	0x0020
+#  define RXCSR_DMAENAB		0x2000
 #  define RXCSR_H_RXSTALL	0x0040
 #  define RXCSR_CLRDATATOG	0x0080
 /*
@@ -1478,6 +1494,188 @@ static struct video_source cam_source = {
  * 4096 bytes total (the device tree says ram-bits 12), so two 1024-byte halves
  * is a quarter of it — affordable, and there is nothing else asking.
  */
+/*
+ * Receive exactly one packet by DMA, and say what came back.
+ *
+ * The point is not the packet.  It is that a channel that is misconfigured and
+ * a queue manager that is misconfigured both look like silence, so this asks
+ * only the part stage 1 did not already answer: given a working queue manager,
+ * does channel 15 fill a buffer when the endpoint has data?
+ *
+ * Three things have to be true at once and each is checked separately below —
+ * the descriptor comes back on the completion queue, it comes back with a
+ * plausible length, and the buffer holds a UVC payload header rather than the
+ * poison it was filled with.  The last is what distinguishes "DMA ran" from
+ * "DMA reported success and wrote nothing", which are otherwise identical from
+ * the queue's point of view.
+ */
+static u8 cppi_test_buf[1024] __attribute__((aligned(DCACHE_LINE_SIZE)));
+
+static void cppi_rx_selftest(void)
+{
+	u32 desc_pa, got;
+	unsigned int len, i;
+	int ms, taken;
+	u16 csr;
+
+	/* Poison, so anything the engine writes is distinguishable from stale. */
+	for (i = 0; i < sizeof(cppi_test_buf); i++)
+		cppi_test_buf[i] = 0xA5;
+	flush_dcache_range((unsigned long)cppi_test_buf,
+			   (unsigned long)cppi_test_buf + sizeof(cppi_test_buf));
+
+	/*
+	 * The last unexamined link in the chain.
+	 *
+	 * Everything either side of this has now been measured: the queue
+	 * manager pushes and pops, the scheduler is running, the channel's
+	 * enable bit reads back, the endpoint reports DMA mode, and the
+	 * descriptor sits on the right queue untouched.  What has never been
+	 * read is the register that decides whether the controller offers
+	 * endpoint 1's packets to the engine at all.  It is expected to be
+	 * zero; it is printed rather than assumed because the bootloader had
+	 * this hardware first, and an inherited non-zero mode would produce
+	 * exactly the silence observed.
+	 */
+	{
+		u32 rxmode = mmio_read32(usbss_va + USB1_RX_MODE);
+		u32 autoreq = mmio_read32(usbss_va + USB1_AUTOREQ);
+
+		printk("[CPPI] ep1 glue: rx_mode=%08x autoreq=%08x\n",
+		       (unsigned int)rxmode, (unsigned int)autoreq);
+
+		mmio_write32(usbss_va + USB1_RX_MODE,
+			     (rxmode & ~EPMODE_MASK(1)) | EPMODE_TRANSPARENT);
+		mmio_write32(usbss_va + USB1_AUTOREQ,
+			     autoreq & ~EPMODE_MASK(1));
+	}
+
+	cppi_rx_channel_open(CPPI_CH_USB1_EP1_RX, CPPI_Q_USB1_EP1_RX_SUBMIT,
+			     CPPI_Q_USB1_EP1_RX_DONE);
+
+	desc_pa = cppi_desc_prep_rx(0, kva_to_phys(cppi_test_buf), iso_maxp,
+				    CPPI_Q_USB1_EP1_RX_DONE);
+	cppi_push(CPPI_Q_USB1_EP1_RX_SUBMIT, desc_pa);
+
+	if (!cppi_queue_pending(CPPI_Q_USB1_EP1_RX_SUBMIT))
+		printk("[CPPI] descriptor did not stay on submit queue %d\n",
+		       CPPI_Q_USB1_EP1_RX_SUBMIT);
+
+	/*
+	 * Hand the endpoint to the engine and ask for a packet.  REQPKT is still
+	 * issued by software here: AUTOREQ is stage 3, and asking one question
+	 * at a time is the whole reason this is staged.
+	 */
+	CWR8(MC_INDEX, UVC_EP_HW);
+	mmio_write16(usbss_va + EP1_RXCSR, RXCSR_DMAENAB | RXCSR_H_REQPKT);
+
+	/* A packet is due every 125 us; 20 ms is a hundred and sixty chances. */
+	for (ms = 0; ms < 20; ms++) {
+		if (cppi_queue_pending(CPPI_Q_USB1_EP1_RX_DONE))
+			break;
+		udelay(1000);
+	}
+
+	/*
+	 * Read the endpoint's state *before* handing it back.  The first
+	 * attempt at this test printed it after the restore writes and so
+	 * reported the value it had just written itself — a diagnostic that
+	 * destroys its own evidence is worse than none, because it still reads
+	 * like a measurement.
+	 */
+	csr = mmio_read16(usbss_va + EP1_RXCSR);
+
+	/*
+	 * Take the descriptor back off the submit queue rather than asking
+	 * whether the queue says it is there.  The pending bits are documented
+	 * for completion queues — the vendor only ever scans the slots above
+	 * queue 93 — so a bit read out of the range anyone uses is a weaker
+	 * claim than simply popping and looking at what comes out.  It also
+	 * leaves the queue clean either way, which matters because the polled
+	 * path shares this hardware.
+	 */
+	taken = (cppi_pop(CPPI_Q_USB1_EP1_RX_SUBMIT) != desc_pa);
+
+	/* Give the endpoint back to the polled drain. */
+	mmio_write16(usbss_va + EP1_RXCSR, RXCSR_FLUSHFIFO | RXCSR_CLRDATATOG);
+	mmio_write16(usbss_va + EP1_RXCSR, RXCSR_H_REQPKT);
+
+	if (ms == 20) {
+		/*
+		 * Which half is at fault is now readable.  If the descriptor
+		 * was taken, the engine ran and the packet never reached it;
+		 * if it is still sitting there, the channel or the scheduler
+		 * never looked, and the two registers below say which.
+		 */
+		printk("[CPPI] no completion in 20 ms: rxcsr=%04x, descriptor"
+		       " %s\n", csr,
+		       taken ? "was taken by the engine"
+			     : "came back off the submit queue untouched");
+		cppi_dump(CPPI_CH_USB1_EP1_RX);
+
+		/*
+		 * Two more answers, because a flash cycle is the expensive part
+		 * of this and each of these forks the search.
+		 *
+		 * Pop the completion queue whatever the pending bit said: if a
+		 * descriptor comes out here, the transfer worked all along and
+		 * what is broken is only the bit being polled to notice it —
+		 * which would also mean every earlier "nothing arrived" was
+		 * reading the wrong thing.
+		 *
+		 * Then look at the buffer regardless.  Data in it without a
+		 * completion means the engine moved bytes and only the
+		 * reporting failed; poison still there means it never ran.
+		 * These are different faults with the same silence.
+		 */
+		got = cppi_pop(CPPI_Q_USB1_EP1_RX_DONE);
+		invalidate_dcache_range((unsigned long)cppi_test_buf,
+					(unsigned long)cppi_test_buf
+						+ sizeof(cppi_test_buf));
+
+		printk("[CPPI] blind pop of queue %d: %08x (wanted %08x)\n",
+		       CPPI_Q_USB1_EP1_RX_DONE, (unsigned int)got,
+		       (unsigned int)desc_pa);
+		printk("[CPPI] buffer head: %02x %02x %02x %02x (%s)\n",
+		       cppi_test_buf[0], cppi_test_buf[1],
+		       cppi_test_buf[2], cppi_test_buf[3],
+		       cppi_test_buf[0] == 0xA5 ? "still poison, engine never"
+						  " wrote"
+						: "written — bytes moved");
+		return;
+	}
+
+	got = cppi_pop(CPPI_Q_USB1_EP1_RX_DONE);
+	if (got != desc_pa) {
+		printk("[CPPI] queue %d returned 0x%08x, expected 0x%08x\n",
+		       CPPI_Q_USB1_EP1_RX_DONE, (unsigned int)got,
+		       (unsigned int)desc_pa);
+		return;
+	}
+
+	len = cppi_desc_len(0);
+	invalidate_dcache_range((unsigned long)cppi_test_buf,
+				(unsigned long)cppi_test_buf
+					+ sizeof(cppi_test_buf));
+
+	/*
+	 * A UVC payload begins with its own header length and a bitfield, so a
+	 * first byte of 2 or 12 is the format saying it arrived intact.  0xA5
+	 * would mean the descriptor was retired without the buffer being
+	 * touched.
+	 */
+	printk("[CPPI] DMA got %u B in %d ms, head:", len, ms);
+	for (i = 0; i < 16 && i < len; i++)
+		printk(" %02x", cppi_test_buf[i]);
+	printk("\n");
+
+	if (cppi_test_buf[0] == 0xA5)
+		printk("[CPPI] buffer untouched — descriptor retired empty\n");
+	else
+		printk("[CPPI] stage 2 ok: %u bytes moved with no CPU copy\n",
+		       len);
+}
+
 static void uvc_iso_setup(int remote_ep, int maxp)
 {
 	if (maxp > ISO_MAX_PKT)
@@ -1861,6 +2059,15 @@ static int uvc_start(void)
 		printk("[UVC] SET_INTERFACE(%d) failed\n", alt);
 		return -1;
 	}
+
+	/*
+	 * Stage 2 of the DMA bring-up, run once here while the endpoint is live
+	 * and packets are already arriving.  It borrows the stream for a few
+	 * milliseconds, puts one packet in memory without the CPU touching it,
+	 * and hands the endpoint back — so a failure costs a line in the log and
+	 * the polled path carries on exactly as before.
+	 */
+	cppi_rx_selftest();
 
 	t = task_create(uvc_capture_task, PRIO_VIDEO_CAPTURE, "uvc-capture");
 	if (!t) {

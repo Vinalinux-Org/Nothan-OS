@@ -47,9 +47,74 @@
  * built against, so they are the ones the silicon was tested with.
  */
 #define CPPI_GLUE		0x0000
+
+/*
+ * The USB subsystem's own idle control, and the reason none of the rest of
+ * this file could work.
+ *
+ * A module on this bus has two ports: the slave port answers the CPU, and the
+ * master port is what the module uses to reach DDR on its own.  MIDLEMODE
+ * gates the master, so force-idle would have made this a perfectly
+ * configurable device that could never move a byte by itself — which fit the
+ * evidence exactly.  It reads 2, smart-idle: the master was free all along.
+ *
+ * The read stays because that was worth establishing and is worth not having
+ * to establish again.  Nothing here writes it: it was never wrong, and
+ * changing hardware state to match a hypothesis that has already been
+ * disproved is how a driver accumulates settings nobody can justify.
+ */
+#define USBSS_SYSCONFIG		(CPPI_GLUE + 0x10)
+#  define SYSC_SIDLE_SHIFT	2
+#  define SYSC_MIDLE_SHIFT	4
+#  define SYSC_IDLE_MASK	3u
+#  define SYSC_IDLE_NONE	1u	/* never idle: master stays able to run */
 #define CPPI_CTRL		0x2000
 #define CPPI_SCHED		0x3000
 #define CPPI_QMGR		0x4000
+
+/*
+ * The channel controller and the scheduler.
+ *
+ * The scheduler is a fixed round-robin table: every entry names a channel and
+ * a direction, and the engine walks it forever.  Nothing is dynamic about it —
+ * an endpoint gets its turn because its channel appears in the table, and a
+ * channel that is disabled simply has nothing to do when its turn comes.
+ */
+#define DMA_RXGCR(x)		(CPPI_CTRL + 0x808 + (x) * 0x20)
+/*
+ * Where a receive channel takes its empty buffers from.
+ *
+ * The completion queue in RXGCR tells the channel where to report; this tells
+ * it where to fetch.  Without it the channel is enabled, correctly configured,
+ * pointed at the right completion queue — and has no idea that the descriptors
+ * waiting on queue 16 are meant for it.  It never fetches, so it never
+ * reports, and that silence is indistinguishable from a channel that was never
+ * turned on, which is what made it cost eight flash cycles to find.
+ *
+ * It is missing from the vendor's channel-configure path, where every other
+ * setting lives.  It is written once when a channel is allocated, and again on
+ * resume — two places that look like housekeeping rather than setup.
+ */
+#define DMA_RXHPCRA(x)		(DMA_RXGCR(x) + 0x04)
+#  define GCR_CHAN_ENABLE	(1u << 31)
+#  define GCR_STARV_RETRY	(1u << 24)
+#  define GCR_DESC_TYPE_HOST	(1u << 14)
+
+/*
+ * The teardown free-descriptor queue.  Nothing here tears anything down yet,
+ * but the engine is told where teardown descriptors live as part of coming up,
+ * and it was the one line of the vendor's init sequence this file had skipped.
+ */
+#define DMA_TDFDQ		(CPPI_CTRL + 0x04)
+#define CPPI_Q_TEARDOWN		31
+
+#define DMA_SCHED_CTRL		(CPPI_SCHED + 0x00)
+#  define SCHED_CTRL_EN		(1u << 31)
+#define DMA_SCHED_WORD(x)	(CPPI_SCHED + 0x800 + (x) * 4)
+#  define SCHED_ENTRY_IS_RX	0x80u
+
+/* How many channels this controller has; am33xx.dtsi says dma-channels = 30. */
+#define CPPI_NCHAN		30
 
 /* Queue manager. */
 #define QMGR_LRAM0_BASE		(CPPI_QMGR + 0x80)
@@ -68,6 +133,24 @@
 #define QMGR_QUEUE_D(n)		(CPPI_QMGR + 0x200C + (n) * 0x10)
 
 /*
+ * One bit per queue, thirty-two queues to a word: whether anything is waiting.
+ * Reading this is how completion is noticed without an interrupt, and without
+ * popping a queue that may be empty.
+ */
+#define QMGR_PEND(x)		(CPPI_QMGR + 0x90 + (x) * 4)
+
+/*
+ * Host descriptor, eight words.  The fields are the vendor driver's, and the
+ * two that look redundant are not: pd4 and pd7 both carry the buffer address
+ * because one belongs to the packet and one to the buffer, and the engine uses
+ * them for different things when descriptors are chained.
+ */
+#define DESC_TYPE_HOST_SH	27
+#define DESC_TYPE_HOST		0x10u
+#define DESC_TYPE_USB		(5u << 26)
+#define DESC_PD_COMPLETE	(1u << 31)
+
+/*
  * Descriptors: 64 of them, 32 bytes each.
  *
  * Both numbers are constrained rather than chosen.  The hardware encodes the
@@ -79,8 +162,19 @@
 #define CPPI_NDESC		64
 #define CPPI_DESC_SIZE		32
 
+/*
+ * Page-aligned, not descriptor-aligned.
+ *
+ * The vendor gets both of these regions from the coherent allocator, which
+ * hands back page-aligned memory that the CPU does not cache.  A .bss array
+ * aligned only to a descriptor is a quieter thing than it looks: the queue
+ * manager indexes a descriptor by its offset from the region base, and a base
+ * the hardware did not expect to be arbitrary is the kind of assumption that
+ * survives a software push and pop — which is all stage 1 proved — and fails
+ * the moment the engine itself walks the region.
+ */
 static u8 cppi_descs[CPPI_NDESC * CPPI_DESC_SIZE]
-	__attribute__((aligned(CPPI_DESC_SIZE)));
+	__attribute__((aligned(4096)));
 
 /*
  * Linking RAM: one word per descriptor, which the queue manager uses to thread
@@ -88,7 +182,7 @@ static u8 cppi_descs[CPPI_NDESC * CPPI_DESC_SIZE]
  * reads it — but leaving it unset means every queue operation writes through a
  * null pointer inside the hardware.
  */
-static u32 cppi_lram[CPPI_NDESC];
+static u32 cppi_lram[CPPI_NDESC] __attribute__((aligned(4096)));
 
 static u32 cppi_va;		/* USB subsystem base, already translated */
 
@@ -135,6 +229,124 @@ void cppi_push(unsigned int queue, u32 desc_phys)
 u32 cppi_pop(unsigned int queue)
 {
 	return rd(QMGR_QUEUE_D(queue)) & ~0x1Fu;
+}
+
+int cppi_queue_pending(unsigned int queue)
+{
+	return (rd(QMGR_PEND(queue / 32u)) >> (queue % 32u)) & 1u;
+}
+
+u32 cppi_desc_prep_rx(unsigned int i, u32 buf_phys, unsigned int len,
+		      unsigned int done_queue)
+{
+	u32 *d = (u32 *)cppi_desc(i);
+
+	d[0] = (DESC_TYPE_HOST << DESC_TYPE_HOST_SH) | len;
+	d[1] = 0;
+	d[2] = DESC_TYPE_USB | done_queue;	/* where to report back */
+	d[3] = len;				/* packet size */
+	d[4] = buf_phys;
+	d[5] = 0;
+	d[6] = DESC_PD_COMPLETE | len;		/* buffer size */
+	d[7] = buf_phys;
+
+	/*
+	 * The descriptor is ordinary cached memory and the engine reads it
+	 * from DDR, so it has to be pushed out before the address is offered.
+	 * cppi_push() has the barrier; this only writes.
+	 */
+	flush_dcache_range((unsigned long)d, (unsigned long)d + CPPI_DESC_SIZE);
+
+	return cppi_desc_phys(i);
+}
+
+unsigned int cppi_desc_len(unsigned int i)
+{
+	u32 *d = (u32 *)cppi_desc(i);
+
+	/*
+	 * The engine wrote this descriptor back, so the CPU's cached copy is
+	 * stale — invalidate before believing any of it.  Forgetting this
+	 * reads the length that was *asked for* rather than the one delivered,
+	 * which is the same number on a full packet and quietly wrong on every
+	 * short one.
+	 */
+	invalidate_dcache_range((unsigned long)d,
+				(unsigned long)d + CPPI_DESC_SIZE);
+
+	return d[0] & ((1u << 21) - 1u);
+}
+
+/*
+ * Turn a receive channel on.
+ *
+ * STARV_RETRY matters for isochronous: if the engine finds no descriptor
+ * waiting when a packet arrives it retries rather than giving up on the
+ * channel, which is the difference between dropping one packet and stopping
+ * the stream.  It is exactly the failure the polled path had to be rescued
+ * from with a watchdog.
+ */
+void cppi_rx_channel_open(unsigned int chan, unsigned int free_queue,
+			  unsigned int done_queue)
+{
+	/*
+	 * Both halves of the channel's world, then the enable.
+	 *
+	 * Only the enable bit of RXGCR reads back — the rest of the register is
+	 * write-only, which was established the expensive way — so there is
+	 * nothing to verify here and no point printing it.  What matters is
+	 * that the fetch side is configured at all: it was missing for eight
+	 * flash cycles, and its absence looked exactly like everything else
+	 * being wrong.
+	 */
+	wr(DMA_RXHPCRA(chan), free_queue);
+	wr(DMA_RXGCR(chan), GCR_CHAN_ENABLE | GCR_STARV_RETRY
+			    | GCR_DESC_TYPE_HOST | done_queue);
+}
+
+/*
+ * What the engine thinks its own state is.
+ *
+ * Every impasse in this driver has ended the same way: a measurement, not an
+ * argument.  "No completion" has at least three causes that look identical from
+ * the completion queue — the channel never ran, the scheduler never gave it a
+ * turn, or it ran and found nothing to do — and these two registers separate
+ * them.  A channel enable that does not read back means the write did not take;
+ * a scheduler that is not running means no channel gets a turn at all.
+ */
+void cppi_dump(unsigned int chan)
+{
+	printk("[CPPI] rxgcr[%u]=%08x sched=%08x\n", chan,
+	       (unsigned int)rd(DMA_RXGCR(chan)),
+	       (unsigned int)rd(DMA_SCHED_CTRL));
+}
+
+/*
+ * The round-robin table the engine walks.
+ *
+ * Every channel gets an entry in both directions, whether or not it is enabled
+ * — a disabled channel simply has nothing to do when its turn comes, and
+ * building the table around which endpoints happen to be open would mean
+ * rewriting it every time one opens.  Four entries to a word, so fifteen words
+ * cover thirty channels.
+ */
+static void cppi_sched_init(void)
+{
+	unsigned int ch, word = 0;
+
+	wr(DMA_SCHED_CTRL, 0);
+
+	for (ch = 0; ch < CPPI_NCHAN; ch += 2) {
+		u32 reg = (u32)ch
+			| ((u32)(ch | SCHED_ENTRY_IS_RX) << 8)
+			| ((u32)(ch + 1) << 16)
+			| ((u32)((ch + 1) | SCHED_ENTRY_IS_RX) << 24);
+
+		wr(DMA_SCHED_WORD(word++), reg);
+	}
+
+	/* Last entry index, then run. */
+	wr(DMA_SCHED_CTRL, (CPPI_NCHAN * 2u - 1u) | SCHED_CTRL_EN);
 }
 
 /*
@@ -213,6 +425,39 @@ int cppi_init(u32 va)
 
 	wr(QMGR_MEMBASE(0), kva_to_phys(cppi_descs));
 	wr(QMGR_MEMCTRL(0), memctrl);
+
+	/*
+	 * Both regions are written by the engine and live in ordinary cached
+	 * memory, so every line the CPU still holds over them has to go before
+	 * the hardware is told they exist.  Zeroing .bss at boot dirtied them;
+	 * an eviction afterwards would put those zeroes back on top of what the
+	 * engine had written, at whatever moment the cache chose — which is the
+	 * kind of fault that looks like the hardware being unreliable.  Nothing
+	 * reads the linking RAM from software, so cleaning it once here is the
+	 * only handling it needs.
+	 */
+	/*
+	 * Ungate the master port before anything is told to use it.  Printed
+	 * before and after, because "the module was already able to do this"
+	 * and "it was not" are different findings and only one of them makes
+	 * this write the fix.
+	 */
+	{
+		u32 sysc = rd(USBSS_SYSCONFIG);
+
+		printk("[CPPI] usbss sysconfig %08x (midle %u, smart = master"
+		       " already free to run)\n", (unsigned int)sysc,
+		       (unsigned int)((sysc >> SYSC_MIDLE_SHIFT)
+				      & SYSC_IDLE_MASK));
+	}
+
+	flush_dcache_range((unsigned long)cppi_descs,
+			   (unsigned long)cppi_descs + sizeof(cppi_descs));
+	flush_dcache_range((unsigned long)cppi_lram,
+			   (unsigned long)cppi_lram + sizeof(cppi_lram));
+
+	wr(DMA_TDFDQ, CPPI_Q_TEARDOWN);
+	cppi_sched_init();
 
 	printk("[CPPI] qmgr: %d descs of %d B at PA 0x%08lx, lram 0x%08lx,"
 	       " memctrl 0x%08lx\n",

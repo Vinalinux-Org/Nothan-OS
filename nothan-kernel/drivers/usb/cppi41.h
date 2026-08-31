@@ -44,4 +44,29 @@ u32 cppi_desc_phys(unsigned int i);
 void cppi_push(unsigned int queue, u32 desc_phys);
 u32  cppi_pop(unsigned int queue);
 
+/* Is anything waiting on @queue?  Cheaper than popping to find out. */
+int cppi_queue_pending(unsigned int queue);
+
+/*
+ * Tell a receive channel where its empty buffers come from and where to report
+ * them when they are full, then turn it on.  Separate from
+ * cppi_init() because a queue manager that works and a channel that works are
+ * two different claims, and the log should be able to make them one at a time.
+ */
+void cppi_rx_channel_open(unsigned int chan, unsigned int free_queue,
+			  unsigned int done_queue);
+
+/*
+ * Fill in one host descriptor: hand the engine a buffer to put a packet in.
+ * Returns the descriptor's physical address, ready to push.
+ */
+u32 cppi_desc_prep_rx(unsigned int i, u32 buf_phys, unsigned int len,
+		      unsigned int done_queue);
+
+/* Print the channel enable and the scheduler state, for when nothing happens. */
+void cppi_dump(unsigned int chan);
+
+/* How many bytes the engine actually wrote into a completed descriptor. */
+unsigned int cppi_desc_len(unsigned int i);
+
 #endif /* _NOTHAN_USB_CPPI41_H */
