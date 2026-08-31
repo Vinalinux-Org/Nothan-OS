@@ -187,6 +187,16 @@
 #  define RXCSR_FLUSHFIFO	0x0010
 #  define RXCSR_H_REQPKT	0x0020
 #  define RXCSR_DMAENAB		0x2000
+#  define RXCSR_AUTOCLEAR	0x8000
+/*
+ * An isochronous packet that arrived incomplete.  Nothing clears it but
+ * software, and while it is set the endpoint takes no more packets: the FIFO
+ * fills, RXPKTRDY stays up, and the stream is over.  The polled path never had
+ * to know about it because it emptied the FIFO by hand every time round; a DMA
+ * path that only ever looks at completion queues would wait forever for a
+ * packet the endpoint has stopped accepting.
+ */
+#  define RXCSR_INCOMPRX	0x0100
 #  define RXCSR_H_RXSTALL	0x0040
 #  define RXCSR_CLRDATATOG	0x0080
 /*
@@ -1396,9 +1406,16 @@ static unsigned long cam_dropped;	/* converted slower than they arrived */
  * drawn.  There is a whole frame along in a thirtieth of a second; the wire
  * does not need this one.
  */
+static unsigned long iso_short_fill;
+static unsigned long iso_malformed, iso_malformed_bytes;
+
 static void iso_finish(void)
 {
 	iso_frames++;
+
+	/* How close the last incomplete frame came, in bytes. */
+	if (iso_fill != ISO_FRAME_MAX)
+		iso_short_fill = ISO_FRAME_MAX - iso_fill;
 
 	if (iso_fill == ISO_FRAME_MAX) {
 		iso_whole++;
@@ -1596,7 +1613,11 @@ static void cppi_rx_selftest(void)
 	 */
 	taken = (cppi_pop(CPPI_Q_USB1_EP1_RX_SUBMIT) != desc_pa);
 
-	/* Give the endpoint back to the polled drain. */
+	/*
+	 * Give the endpoint back to the polled drain, and the channel back to
+	 * nobody.  Leaving it enabled is not neutral — see cppi_rx_channel_close.
+	 */
+	cppi_rx_channel_close(CPPI_CH_USB1_EP1_RX);
 	mmio_write16(usbss_va + EP1_RXCSR, RXCSR_FLUSHFIFO | RXCSR_CLRDATATOG);
 	mmio_write16(usbss_va + EP1_RXCSR, RXCSR_H_REQPKT);
 
@@ -1676,7 +1697,7 @@ static void cppi_rx_selftest(void)
 		       len);
 }
 
-static void uvc_iso_setup(int remote_ep, int maxp)
+static void uvc_iso_setup(int remote_ep, int maxp, int epmaxp)
 {
 	if (maxp > ISO_MAX_PKT)
 		maxp = ISO_MAX_PKT;	/* uvc_start refuses first; belt and braces */
@@ -1701,7 +1722,23 @@ static void uvc_iso_setup(int remote_ep, int maxp)
 	/* Logarithmic for isochronous: 1 means every microframe. */
 	CWR8(EP1_RXINTERVAL, 1);
 	CWR8(EP1_RXTYPE, TYPE_SPEED_HIGH | TYPE_PROTO_ISO | (remote_ep & 0xF));
-	mmio_write16(usbss_va + EP1_RXMAXP, (u16)maxp);
+	/*
+	 * The endpoint's size, not the payload this driver asked for.
+	 *
+	 * These are different numbers and mean different things: the
+	 * alternate setting in use carries 800 bytes a microframe, while the
+	 * payload negotiated with the camera is 644.  RXMAXP describes what
+	 * the hardware may receive, and telling it 644 makes every larger
+	 * packet a protocol error.
+	 *
+	 * The polled path survived the confusion because it read the byte
+	 * count out of the endpoint and clamped it, and because the stream
+	 * begins with a couple of hundred milliseconds of twelve-byte headers
+	 * that fit under either number.  DMA stops the moment the first real
+	 * packet arrives — the same 1481 packets in, twice running, with the
+	 * FIFO full and nobody able to empty it.
+	 */
+	mmio_write16(usbss_va + EP1_RXMAXP, (u16)epmaxp);
 
 	mmio_write16(usbss_va + EP1_RXCSR,
 		     RXCSR_FLUSHFIFO | RXCSR_CLRDATATOG);
@@ -1745,6 +1782,332 @@ static int uvc_iso_ready(void)
  * interesting way, and adding it before the transport is proven would mean
  * debugging both at once.
  */
+static void uvc_payload(const u8 *packet, unsigned int cnt);
+
+/*
+ * The DMA ring.
+ *
+ * Thirty-two descriptors, each owning one packet's worth of buffer, all handed
+ * to the engine at once.  The number is the whole point of the exercise: the
+ * camera delivers a packet every 125 microseconds, so a ring this deep holds
+ * four milliseconds of stream.  Software's deadline stops being one packet and
+ * becomes the ring — and four milliseconds is the first deadline in this
+ * driver that is longer than a scheduler tick, which is what makes sleeping
+ * between drains possible at all.
+ *
+ * With AUTOREQ the controller asks for each packet itself as a descriptor
+ * retires.  That is the half of the change that matters: without it software
+ * would still have to write REQPKT every 125 microseconds and would still be
+ * pinned to the wire, DMA or no DMA.  ALWAYS rather than ALL_NEOP because an
+ * isochronous stream has no end-of-packet to stop at — short packets are
+ * ordinary here, and a mode that halts on one would halt on the first
+ * header-only packet the camera sends.
+ */
+/*
+ * Sixty-four, the whole descriptor pool: eight milliseconds of stream.
+ *
+ * Thirty-two was four milliseconds against a one millisecond sleep, which
+ * looked like ample margin, and the starvation counter agreed — but that
+ * counter reads a pending bit on the submit queue, and the submit queues sit
+ * below the range the vendor's driver ever scans.  A zero from an instrument
+ * whose scale was never established is not a measurement.  Doubling the ring
+ * asks the question a different way: if the shortfall halves, the ring was
+ * running dry no matter what the bit said.
+ */
+#define ISO_RING	64
+
+static u8 iso_dma_buf[ISO_RING][ISO_MAX_PKT]
+	__attribute__((aligned(DCACHE_LINE_SIZE)));
+static int iso_dma_on;
+static unsigned long iso_dma_drained, iso_dma_starved, iso_dma_jams;
+static unsigned long iso_dma_deepest;
+
+/*
+ * Hand descriptor @i, pointing at its own buffer, back to the engine.
+ *
+ * The length offered is the whole buffer, not the payload size negotiated with
+ * the camera.  It is how much the engine may write, not a promise about how
+ * much will arrive, and the two are not the same number: the alternate setting
+ * in use carries 800 bytes a microframe while the negotiated payload is 644,
+ * so a packet can legally be larger than the size this driver asked for.  The
+ * polled path never had to care because it read the byte count out of the
+ * endpoint and clamped it; a descriptor that is too small has no such
+ * recourse, and the endpoint reports it as an incomplete packet.
+ */
+static void iso_dma_arm(unsigned int i)
+{
+	cppi_push(CPPI_Q_USB1_EP1_RX_SUBMIT,
+		  cppi_desc_prep_rx(i, kva_to_phys(iso_dma_buf[i]),
+				    ISO_MAX_PKT, CPPI_Q_USB1_EP1_RX_DONE));
+}
+
+/*
+ * Put the whole receive path back to the state uvc_dma_start left it in.
+ *
+ * An incomplete isochronous packet is a fault, not a hiccup: the transfer is
+ * abandoned and the channel with it, and everything downstream — the endpoint
+ * holding a packet nobody will collect, the descriptors that were in flight —
+ * stays exactly as it was until someone rebuilds it.  Clearing the endpoint's
+ * status bit and hoping was the first attempt, and it left RXPKTRDY set with a
+ * dead channel behind it for the rest of the boot.
+ */
+static void uvc_dma_restart(void)
+{
+	unsigned int i;
+
+	cppi_rx_channel_close(CPPI_CH_USB1_EP1_RX);
+
+	/* Nothing in flight can be trusted; drop both queues. */
+	while (cppi_queue_pending(CPPI_Q_USB1_EP1_RX_DONE))
+		cppi_pop(CPPI_Q_USB1_EP1_RX_DONE);
+	while (cppi_queue_pending(CPPI_Q_USB1_EP1_RX_SUBMIT))
+		cppi_pop(CPPI_Q_USB1_EP1_RX_SUBMIT);
+
+	CWR8(MC_INDEX, UVC_EP_HW);
+	mmio_write16(usbss_va + EP1_RXCSR,
+		     RXCSR_FLUSHFIFO | RXCSR_CLRDATATOG);
+
+	cppi_rx_channel_open(CPPI_CH_USB1_EP1_RX, CPPI_Q_USB1_EP1_RX_SUBMIT,
+			     CPPI_Q_USB1_EP1_RX_DONE);
+	for (i = 0; i < ISO_RING; i++)
+		iso_dma_arm(i);
+
+	mmio_write16(usbss_va + EP1_RXCSR,
+		     RXCSR_AUTOCLEAR | RXCSR_DMAENAB | RXCSR_H_REQPKT);
+}
+
+static int uvc_dma_start(void)
+{
+	unsigned int i;
+	u32 autoreq;
+
+	if (iso_maxp > ISO_MAX_PKT)
+		return -1;
+
+
+	cppi_rx_channel_open(CPPI_CH_USB1_EP1_RX, CPPI_Q_USB1_EP1_RX_SUBMIT,
+			     CPPI_Q_USB1_EP1_RX_DONE);
+
+	for (i = 0; i < ISO_RING; i++)
+		iso_dma_arm(i);
+
+	/* Endpoint 1 asks for its own packets from here on. */
+	autoreq = mmio_read32(usbss_va + USB1_AUTOREQ);
+	autoreq = (autoreq & ~EPMODE_MASK(1)) | (3u << 0);
+	mmio_write32(usbss_va + USB1_AUTOREQ, autoreq);
+
+	/*
+	 * AUTOCLEAR is what lets the engine hand the FIFO back on its own.
+	 * Without it RXPKTRDY stays set after the first packet is taken and
+	 * the endpoint jams — one packet, then silence, which is a failure
+	 * this driver has learned to recognise.
+	 */
+	CWR8(MC_INDEX, UVC_EP_HW);
+	mmio_write16(usbss_va + EP1_RXCSR,
+		     RXCSR_AUTOCLEAR | RXCSR_DMAENAB | RXCSR_H_REQPKT);
+
+	iso_dma_on = 1;
+	printk("[UVC] DMA: %d descriptors of %d B, autoreq on — %d ms of ring\n",
+	       ISO_RING, ISO_MAX_PKT, ISO_RING / 8);
+	return 0;
+}
+
+/*
+ * Take back every descriptor the engine has finished with.
+ *
+ * No budget: the ring is the budget.  Whatever is waiting is what arrived
+ * since the last wake-up, and leaving any of it would only shrink the margin
+ * before the next one.
+ */
+static int uvc_dma_drain(void)
+{
+	int n = 0;
+	u16 csr;
+
+	/*
+	 * Look at the endpoint before the queue.  A jam here is invisible from
+	 * the completion side — the queue simply stays empty, which is what a
+	 * quiet camera looks like too.
+	 */
+	/*
+	 * Real starvation, measured before anything is taken back.
+	 *
+	 * The old test — a drain that returned the whole ring — could never
+	 * fire: this loop re-arms each descriptor as it goes, so the count it
+	 * returns is how many packets arrived, not how many the ring held.  It
+	 * read as a safety margin and was nothing of the kind.  An empty
+	 * submit queue on arrival is the real thing: for some part of the last
+	 * millisecond the engine had nowhere to put a packet.
+	 */
+	if (!cppi_queue_pending(CPPI_Q_USB1_EP1_RX_SUBMIT))
+		iso_dma_starved++;
+
+	CWR8(MC_INDEX, UVC_EP_HW);
+	csr = mmio_read16(usbss_va + EP1_RXCSR);
+	if (csr & (RXCSR_INCOMPRX | RXCSR_H_ERROR | RXCSR_DATAERROR)) {
+		iso_errors++;
+		iso_dma_jams++;
+		uvc_dma_restart();
+	}
+
+	while (cppi_queue_pending(CPPI_Q_USB1_EP1_RX_DONE)) {
+		u32 pa = cppi_pop(CPPI_Q_USB1_EP1_RX_DONE);
+		int i = cppi_desc_index(pa);
+		unsigned int len;
+
+		if (i < 0 || i >= ISO_RING) {
+			iso_errors++;
+			continue;
+		}
+
+		len = cppi_desc_len(i);
+
+		/*
+		 * Clamp to the buffer, not to the negotiated payload.
+		 *
+		 * This clamped to iso_maxp — 644, the size asked for — while
+		 * the endpoint carries up to 800 and the camera uses it.  Every
+		 * large packet lost its last hundred and fifty-six bytes here,
+		 * about seventeen packets a frame, which is the two and a half
+		 * thousand bytes every frame came up short by.  Nothing
+		 * reported it because nothing was wrong: the engine delivered
+		 * the packet, the descriptor recorded its length, and this line
+		 * quietly disagreed.
+		 *
+		 * The same confusion, for the third time in this file: what the
+		 * software asked for is not what the hardware may deliver.  It
+		 * cost a stall at RXMAXP, an incomplete-packet fault at the
+		 * descriptor size, and a slow leak here — three different
+		 * symptoms, one mistake.
+		 */
+		if (len > ISO_MAX_PKT)
+			len = ISO_MAX_PKT;
+
+		/*
+		 * The engine wrote this buffer behind the cache's back, so the
+		 * CPU's view of it is stale until this line.
+		 */
+		/*
+		 * The whole buffer, not the part just written.
+		 *
+		 * Invalidating only len bytes leaves the tail beyond it holding
+		 * whatever the previous, longer packet put there — and since
+		 * packet sizes vary from twelve bytes to six hundred, a short
+		 * packet followed by a long one reads its own end out of the
+		 * cache.  The range also has to be line-aligned to mean
+		 * anything, and a length off the wire is aligned to nothing.
+		 */
+		invalidate_dcache_range((unsigned long)iso_dma_buf[i],
+					(unsigned long)iso_dma_buf[i]
+						+ ISO_MAX_PKT);
+
+		/*
+		 * The first two completions, in full.  A length that disagrees
+		 * with the buffer is the difference between a plumbing fault
+		 * and a parsing one, and the eight words say which.
+		 */
+		if (iso_dma_drained + n < 2)
+			cppi_desc_dump(i, "done");
+
+		if (len)
+			uvc_payload(iso_dma_buf[i], len);
+		else
+			iso_zero++;
+
+		iso_packets++;
+		iso_bytes += len;
+
+		iso_dma_arm(i);
+		n++;
+	}
+
+	iso_dma_drained += n;
+
+	/*
+	 * The deepest single drain, which cannot lie.  If it approaches the
+	 * ring, the engine was close to having nowhere left to put a packet
+	 * while this task slept.
+	 */
+	if ((unsigned long)n > iso_dma_deepest)
+		iso_dma_deepest = n;
+
+	/*
+	 * A drain that came back with the whole ring was a drain that arrived
+	 * late: everything the engine had, it had already finished, and any
+	 * packet after that had nowhere to go.  It is the only warning the
+	 * hardware gives before it starts dropping.
+	 */
+	return n;
+}
+
+/*
+ * One isochronous packet, assembled into the frame being built.
+ *
+ * Shared by both ways of getting a packet here — read out of the FIFO by the
+ * CPU, or written into memory by the DMA engine.  Where the bytes came from
+ * changes nothing about what they mean, and keeping the format in one place is
+ * what let the DMA path be a change of plumbing rather than a second parser.
+ *
+ * A packet shorter than its own declared header, or one claiming a header
+ * longer than the packet, is refused rather than trusted — this is data off a
+ * wire that nobody here wrote, and the same rule the network path lives by
+ * applies to it.
+ */
+static void uvc_payload(const u8 *packet, unsigned int cnt)
+{
+	unsigned int hlen, dlen;
+	int fid;
+
+	/*
+	 * The only path out of this function that counted nothing.
+	 *
+	 * Everything else about the DMA stream has a number on it now — the
+	 * ring never runs dry, nothing is refused for size, no packet carries
+	 * an error flag — and frames still arrive a few thousand bytes short.
+	 * A packet whose header does not describe itself was dropped here in
+	 * silence, which makes this the last place the missing bytes can be.
+	 */
+	if (cnt < 2 || packet[UVC_PH_LENGTH] < 2 ||
+	    packet[UVC_PH_LENGTH] > cnt) {
+		iso_malformed++;
+		iso_malformed_bytes += cnt;
+		return;
+	}
+
+	hlen = packet[UVC_PH_LENGTH];
+	dlen = cnt - hlen;
+	fid = packet[UVC_PH_INFO] & UVC_PH_FID;
+
+	if (iso_fid < 0)
+		iso_fid = fid;
+
+	/* FID toggling means the previous frame is over. */
+	if (fid != iso_fid) {
+		iso_finish();
+		iso_fid = fid;
+	}
+
+	if (packet[UVC_PH_INFO] & UVC_PH_ERR) {
+		iso_errors++;
+	} else if (dlen) {
+		if (iso_fill + dlen <= ISO_FRAME_MAX) {
+			u8 *dst = iso_frame[iso_wr] + iso_fill;
+			unsigned int k;
+
+			for (k = 0; k < dlen; k++)
+				dst[k] = packet[hlen + k];
+			iso_fill += dlen;
+		} else {
+			iso_oversize++;
+		}
+	}
+
+	if (packet[UVC_PH_INFO] & UVC_PH_EOF) {
+		iso_finish();
+		iso_fid = -1;
+	}
+}
+
 static int uvc_drain(int budget)
 {
 	static u8 packet[1024];
@@ -1794,48 +2157,7 @@ static int uvc_drain(int budget)
 		else
 			iso_zero++;
 
-		/*
-		 * Assemble.  A packet shorter than its own declared header, or
-		 * one claiming a header longer than the packet, is refused
-		 * rather than trusted — this is data off a wire that nobody
-		 * here wrote, and the same rule the network path lives by
-		 * applies to it.
-		 */
-		if (cnt >= 2 && packet[UVC_PH_LENGTH] >= 2 &&
-		    packet[UVC_PH_LENGTH] <= cnt) {
-			unsigned int hlen = packet[UVC_PH_LENGTH];
-			unsigned int dlen = cnt - hlen;
-			int fid = packet[UVC_PH_INFO] & UVC_PH_FID;
-
-			if (iso_fid < 0)
-				iso_fid = fid;
-
-			/* FID toggling means the previous frame is over. */
-			if (fid != iso_fid) {
-				iso_finish();
-				iso_fid = fid;
-			}
-
-			if (packet[UVC_PH_INFO] & UVC_PH_ERR) {
-				iso_errors++;
-			} else if (dlen) {
-				if (iso_fill + dlen <= ISO_FRAME_MAX) {
-					u8 *dst = iso_frame[iso_wr] + iso_fill;
-					unsigned int k;
-
-					for (k = 0; k < dlen; k++)
-						dst[k] = packet[hlen + k];
-					iso_fill += dlen;
-				} else {
-					iso_oversize++;
-				}
-			}
-
-			if (packet[UVC_PH_INFO] & UVC_PH_EOF) {
-				iso_finish();
-				iso_fid = -1;
-			}
-		}
+		uvc_payload(packet, cnt);
 
 		/*
 		 * One write does both: RXPKTRDY is cleared by writing zero to
@@ -1876,6 +2198,31 @@ static void uvc_capture_task(void)
 	unsigned long mark_j = 0, mark_p = 0, mark_b = 0, mark_i = 0, mark_f = 0;
 
 	for (;;) {
+		/*
+		 * The DMA path, and the reason the rest of this loop reads the
+		 * way it does.
+		 *
+		 * With the engine filling a ring of thirty-two descriptors and
+		 * the controller asking for its own packets, this task no
+		 * longer has to be present when a packet lands.  It sleeps a
+		 * tick, wakes, and takes whatever arrived — about eight
+		 * packets, a quarter of the ring.  The deadline it has to meet
+		 * is four milliseconds instead of a hundred and twenty-five
+		 * microseconds, and that is the first deadline in this driver
+		 * that a sleeping task can meet at all.
+		 *
+		 * The polled branch below is kept, and is not dead code: it is
+		 * what runs if the engine could not be brought up, and it is
+		 * the only thing that made this driver work for a week.
+		 */
+		if (iso_dma_on) {
+			iso_where = ISO_AT_DRAIN;
+			uvc_dma_drain();
+			iso_where = ISO_AT_SLEEP;
+			msleep(1);
+			goto convert;
+		}
+
 		iso_where = ISO_AT_DRAIN;
 		if (uvc_drain(UVC_DRAIN_BUDGET) < UVC_DRAIN_BUDGET && !iso_maxp) {
 			/*
@@ -1923,10 +2270,17 @@ static void uvc_capture_task(void)
 			wait_event_cond(&iso_wait, uvc_iso_ready());
 		}
 
+convert:
 		/*
 		 * Convert outside the drain, between packets.  Two
 		 * milliseconds of arithmetic inside it would miss sixteen
 		 * isochronous slots, and those cannot be asked for again.
+		 *
+		 * Both paths land here.  The DMA branch first skipped straight
+		 * to the report, which left frames arriving complete and never
+		 * handed on: 589 whole, none published, one counted late for
+		 * every one built.  The assembly was right and the shelf it was
+		 * put on was never emptied.
 		 */
 		if (iso_full >= 0) {
 			int done = iso_full;
@@ -1991,6 +2345,23 @@ static void uvc_capture_task(void)
 			       iso_frames, iso_whole, (unsigned long)cam_seq,
 			       cam_dropped, iso_errors);
 
+			/*
+			 * Starved counts the drains that came back holding the
+			 * whole ring — the engine had finished everything it
+			 * had, so anything that arrived after that had nowhere
+			 * to go.  It is the only notice the hardware gives
+			 * before it starts dropping, and a stream that is
+			 * keeping up should never see it.
+			 */
+			if (iso_dma_on)
+				printk("[UVC] dma: %lu drained, %lu starved,"
+				       " %lu jams, short by %lu B,"
+				       " %lu malformed, deepest %lu/%d\n",
+				       iso_dma_drained, iso_dma_starved,
+				       iso_dma_jams, iso_short_fill,
+				       iso_malformed, iso_dma_deepest,
+				       ISO_RING);
+
 			mark_f = iso_frames;
 
 			mark_j = now;
@@ -2052,7 +2423,15 @@ static int uvc_start(void)
 	printk("[UVC] alt %d (%d B/uframe) for a %d byte payload\n",
 	       alt, vs.alt_bytes[alt], payload);
 
-	uvc_iso_setup(vs.ep & 0xF, payload);
+	/*
+	 * The endpoint hears what it may carry, not what was asked for.
+	 *
+	 * Putting 644 back here brought the stall straight back, at the same
+	 * 1480 packets — which settled the question the other way round: the
+	 * camera does send packets larger than the payload it agreed to, and
+	 * the endpoint has to be told the alternate setting's real size.
+	 */
+	uvc_iso_setup(vs.ep & 0xF, payload, vs.alt_bytes[alt]);
 
 	/* Selecting the setting is what turns the endpoint on. */
 	if (uvc_set_interface(alt) < 0) {
@@ -2075,6 +2454,13 @@ static int uvc_start(void)
 		return -1;
 	}
 	enqueue_task(&runqueue, t);
+
+	/*
+	 * Try the engine.  A failure here is not fatal and deliberately so —
+	 * the polled path still works, and a camera that streams expensively
+	 * is better than one that does not stream.
+	 */
+	uvc_dma_start();
 
 	printk("[UVC] streaming %dx%d YUY2 from ep 0x%02x\n",
 	       vs.frame_w, vs.frame_h, vs.ep);

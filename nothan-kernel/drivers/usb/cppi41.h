@@ -60,8 +60,18 @@ void cppi_rx_channel_open(unsigned int chan, unsigned int free_queue,
  * Fill in one host descriptor: hand the engine a buffer to put a packet in.
  * Returns the descriptor's physical address, ready to push.
  */
+/* Stop a receive channel: it stops being offered packets. */
+void cppi_rx_channel_close(unsigned int chan);
+
 u32 cppi_desc_prep_rx(unsigned int i, u32 buf_phys, unsigned int len,
 		      unsigned int done_queue);
+
+/* Print a descriptor's eight raw words. */
+void cppi_desc_dump(unsigned int i, const char *tag);
+
+/* Which descriptor a physical address names, for turning a completion back
+ * into the buffer it filled. */
+int cppi_desc_index(u32 desc_phys);
 
 /* Print the channel enable and the scheduler state, for when nothing happens. */
 void cppi_dump(unsigned int chan);

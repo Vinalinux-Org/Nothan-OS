@@ -149,6 +149,7 @@
 #define DESC_TYPE_HOST		0x10u
 #define DESC_TYPE_USB		(5u << 26)
 #define DESC_PD_COMPLETE	(1u << 31)
+#define PD2_ZERO_LENGTH		(1u << 19)
 
 /*
  * Descriptors: 64 of them, 32 bytes each.
@@ -209,6 +210,34 @@ u32 cppi_desc_phys(unsigned int i)
 void *cppi_desc(unsigned int i)
 {
 	return &cppi_descs[i * CPPI_DESC_SIZE];
+}
+
+/* The raw descriptor words, for when the length looks wrong. */
+void cppi_desc_dump(unsigned int i, const char *tag)
+{
+	u32 *d = (u32 *)cppi_desc(i);
+
+	invalidate_dcache_range((unsigned long)d,
+				(unsigned long)d + CPPI_DESC_SIZE);
+	printk("[CPPI] %s desc%u: %08x %08x %08x %08x %08x %08x %08x %08x\n",
+	       tag, i, (unsigned int)d[0], (unsigned int)d[1],
+	       (unsigned int)d[2], (unsigned int)d[3], (unsigned int)d[4],
+	       (unsigned int)d[5], (unsigned int)d[6], (unsigned int)d[7]);
+}
+
+int cppi_desc_index(u32 desc_phys)
+{
+	u32 base = cppi_desc_phys(0);
+	u32 off;
+
+	if (desc_phys < base)
+		return -1;
+
+	off = desc_phys - base;
+	if (off % CPPI_DESC_SIZE || off / CPPI_DESC_SIZE >= CPPI_NDESC)
+		return -1;
+
+	return (int)(off / CPPI_DESC_SIZE);
 }
 
 /*
@@ -274,7 +303,16 @@ unsigned int cppi_desc_len(unsigned int i)
 	invalidate_dcache_range((unsigned long)d,
 				(unsigned long)d + CPPI_DESC_SIZE);
 
-	return d[0] & ((1u << 21) - 1u);
+	/*
+	 * Twenty-two bits, and the zero-length flag beats them.  The vendor's
+	 * mask is (1 << (21 + 1)) - 1 — the constant is named for the field's
+	 * top bit, not its width, which is the kind of off-by-one that only
+	 * shows up on lengths nothing here will ever send.
+	 */
+	if (d[2] & PD2_ZERO_LENGTH)
+		return 0;
+
+	return d[0] & ((1u << 22) - 1u);
 }
 
 /*
@@ -302,6 +340,18 @@ void cppi_rx_channel_open(unsigned int chan, unsigned int free_queue,
 	wr(DMA_RXHPCRA(chan), free_queue);
 	wr(DMA_RXGCR(chan), GCR_CHAN_ENABLE | GCR_STARV_RETRY
 			    | GCR_DESC_TYPE_HOST | done_queue);
+}
+
+/*
+ * An enabled channel with nothing on its free queue is worse than a disabled
+ * one: the controller still hands it packets and it drops them, silently and
+ * at full rate.  That is what halved the frame rate the first time this ran —
+ * the packet count was unchanged and half the bytes were gone, which is the
+ * signature of data going somewhere that does not count it.
+ */
+void cppi_rx_channel_close(unsigned int chan)
+{
+	wr(DMA_RXGCR(chan), 0);
 }
 
 /*
