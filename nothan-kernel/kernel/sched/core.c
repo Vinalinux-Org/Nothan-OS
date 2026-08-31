@@ -95,6 +95,7 @@ static void reap_dead(void)
 			continue;	/* never free the stack we're running on */
 		printk("[REAP] free pid=%d kstack=%p\n", z->pid, z->kstack_base);
 		list_del(&rt->run_list);
+		task_all_del(z);	/* off the roll before the memory goes */
 		if (z->kstack_base)
 			kfree(z->kstack_base);
 		kfree(z);
@@ -448,6 +449,15 @@ static void idle_task_init(void)
 		idle_tsk.comm[i] = name[i];
 	idle_tsk.comm[i] = '\0';
 
+	/*
+	 * On the roll like everything else.  It is a static rather than a
+	 * kmalloc, so nothing added it, and ps only ever showed it because it
+	 * happened to be the running task or sitting on the runqueue — which
+	 * would have quietly stopped being true the moment ps started walking
+	 * this list instead.
+	 */
+	task_all_add(&idle_tsk);
+
 	sched_claim_prio(IDLE_PRIO, idle_tsk.comm);
 	task_stack_arm(&idle_tsk);
 	enqueue_task(&runqueue, &idle_tsk);
@@ -530,6 +540,29 @@ void sched_init(void)
  * The idle task is always on the runqueue, so pick_next_task() never returns
  * NULL.
  */
+/*
+ * Every task, in creation order.  ps walks this instead of the runqueue, which
+ * is why a blocked task is visible at all: the runqueue holds what *can* run,
+ * and during a hang the interesting task is precisely the one that cannot.
+ */
+struct list_head all_tasks = { &all_tasks, &all_tasks };
+
+void task_all_add(struct task_struct *p)
+{
+	unsigned long flags = local_irq_save();
+
+	list_add_tail(&p->all, &all_tasks);
+	local_irq_restore(flags);
+}
+
+void task_all_del(struct task_struct *p)
+{
+	unsigned long flags = local_irq_save();
+
+	list_del(&p->all);
+	local_irq_restore(flags);
+}
+
 void schedule(void)
 {
 	reap_dead();

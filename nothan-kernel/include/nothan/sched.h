@@ -79,24 +79,31 @@
 #define PRIO_VIDEO_TX		(PRIO_VIDEO + 1)	/* sends; only ever late */
 
 /*
- * Draining the camera, and last on purpose — which is the opposite of what its
- * deadline deserves.
+ * Draining the camera — in the background band, which is the opposite of what
+ * its deadline deserves and the only place it can go.
  *
  * The endpoint has 125 microseconds of slack and the interrupt that should
- * announce it does not arrive, so the drain polls.  A polling task cannot have
+ * announce it never arrives, so the drain polls.  A polling task cannot have
  * its deadline protected by priority: it holds the deadline by not being
- * preempted, and nothing in a system with other work can promise that.  Put it
- * above the network halves and it spins while transmit never runs; put it below
- * and transmit interrupts it every 123 microseconds.  Both were measured, and
- * both fail.
+ * preempted, and nothing in a system with other work can promise that.  Once
+ * that is true, priority has exactly one remaining effect — deciding who the
+ * task starves — so the only sane answer is "as low as possible while still
+ * keeping up".
  *
- * So it goes where its spinning does least harm, and keeps up on whatever the
- * machine is not otherwise using — which is most of it.  That is enough for
- * one direction and is not enough for a call, and no arrangement of these
- * three numbers makes it enough.  CPPI 4.1 DMA is what removes the deadline
- * from software altogether; this level is what the box does until then.
+ * It sat in the video band on the strength of its deadline, and the machine
+ * ran at 0% idle with everything below it frozen: the shell would not echo a
+ * keypress, so ps could not be typed to find out why.  A camera that cannot be
+ * switched off by typing is a worse box than one that drops a frame.
+ *
+ * Measured here: 30 fps with every frame whole, while both halves of a call
+ * ran above it.  It keeps up on what the machine is not otherwise using, which
+ * is most of it, and yields to anything that actually asks.
+ *
+ * BG is shared, so this costs no deadline level at all — and the video band is
+ * back to two, which is what it was sized for.  CPPI 4.1 DMA is what removes
+ * the deadline from software altogether; this is what the box does until then.
  */
-#define PRIO_VIDEO_CAPTURE	(PRIO_VIDEO + 2)
+#define PRIO_VIDEO_CAPTURE	PRIO_BG
 
 /*
  * The throughput benchmarks, out of the deadline bands entirely.
@@ -183,6 +190,23 @@ struct task_struct {
 	char				comm[16];
 	struct mm_struct		*mm;    /* NULL = kernel thread */
 	int				exit_code;
+
+	/*
+	 * Every task that exists, whether it can run or not.
+	 *
+	 * A separate link, not @rt.run_list reused.  That field is the
+	 * runqueue's and the wait queues', and a task on a wait queue is
+	 * already linked through it — threading a third list down the same
+	 * pointer is how two lists get spliced into one.  Eight bytes per task
+	 * to keep them apart.
+	 *
+	 * It exists because a sleeping task vanished completely: ps walked the
+	 * runqueue, so anything blocked was invisible, and a hung task left no
+	 * trace but the work it had stopped doing.  Three flash cycles went on
+	 * finding where one was stuck, and the answer came from a hand-placed
+	 * breadcrumb rather than from the kernel.
+	 */
+	struct list_head		all;
 	char				cwd[64];
 
 	/*
@@ -331,6 +355,18 @@ void check_preempt_curr(struct rq *rq, struct task_struct *p);
 void enqueue_task(struct rq *rq, struct task_struct *p);
 void dequeue_task(struct rq *rq, struct task_struct *p);
 struct task_struct *pick_next_task(struct rq *rq);
+
+/*
+ * The roll of every task that exists, runnable or not.
+ *
+ * PROTECTION: the interrupt mask, taken inside each helper.  Creation and exit
+ * both happen with the machine running, and the reaper walks this from a
+ * context that must not see a half-unlinked node.
+ */
+extern struct list_head all_tasks;
+
+void task_all_add(struct task_struct *p);
+void task_all_del(struct task_struct *p);
 void schedule(void);
 void scheduler_tick(void);
 

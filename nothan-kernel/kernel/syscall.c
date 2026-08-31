@@ -192,44 +192,42 @@ static long sys_gettasklist(unsigned long a0, unsigned long a1, unsigned long a2
 	struct task_info *buf = (struct task_info *)a0;
 	unsigned long max = a1;
 	unsigned long count = 0;
-	struct rq *rq = &runqueue;
 
 	if (max > USER_ARR_MAX || !access_ok(buf, max * sizeof(struct task_info)))
 		return -1;
 
-	/* Always include the currently running task */
-	if (count < max && rq->curr) {
-		buf[count].pid = rq->curr->pid;
-		buf[count].state = rq->curr->__state;
-		buf[count].prio = rq->curr->prio;
-		buf[count].cpu_us = rq->curr->cpu_us;
-		buf[count].picked = rq->curr->nr_picked;
-		unsigned int i;
-		for (i = 0; i < TASK_NAME_LEN - 1 && rq->curr->comm[i]; i++)
-			buf[count].name[i] = rq->curr->comm[i];
-		buf[count].name[i] = '\0';
-		count++;
-	}
-
-	/* Then iterate the runqueue for other tasks */
-	for (int prio = 0; prio < MAX_PRIO && count < max; prio++) {
+	/*
+	 * Walk every task, not the runqueue.
+	 *
+	 * ps used to list what could run, which meant a blocked task did not
+	 * appear at all — and during a hang the one worth seeing is exactly the
+	 * one that cannot run.  Three rounds of flashing went on locating a
+	 * task stuck in a wait, and the answer finally came from a breadcrumb
+	 * placed by hand rather than from the kernel being asked.
+	 */
+	{
 		struct list_head *pos;
-		list_for_each(pos, &rq->active.queue[prio]) {
+		unsigned long flags = local_irq_save();
+
+		list_for_each(pos, &all_tasks) {
+			struct task_struct *tsk =
+				list_entry(pos, struct task_struct, all);
+			unsigned int i;
+
 			if (count >= max)
 				break;
-			struct sched_rt_entity *rt = list_entry(pos, struct sched_rt_entity, run_list);
-			struct task_struct *tsk = container_of(rt, struct task_struct, rt);
-			buf[count].pid = tsk->pid;
-			buf[count].state = tsk->__state;
-			buf[count].prio = tsk->prio;
+
+			buf[count].pid    = tsk->pid;
+			buf[count].state  = tsk->__state;
+			buf[count].prio   = tsk->prio;
 			buf[count].cpu_us = tsk->cpu_us;
 			buf[count].picked = tsk->nr_picked;
-			unsigned int i;
 			for (i = 0; i < TASK_NAME_LEN - 1 && tsk->comm[i]; i++)
 				buf[count].name[i] = tsk->comm[i];
 			buf[count].name[i] = '\0';
 			count++;
 		}
+		local_irq_restore(flags);
 	}
 	return (long)count;
 }

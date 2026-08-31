@@ -105,13 +105,12 @@ static void cmd_ps(void)
 	}
 
 	/*
-	 * Only runnable tasks appear here: the kernel builds this list by
-	 * walking the runqueue, and a sleeping task has been taken off it.  On
-	 * this box that hides most of what is running — a daemon spends nearly
-	 * all its life blocked waiting for a request.  Say so, rather than
-	 * letting a short list read as a machine with nothing on it.
+	 * Every task now, sleeping ones included.  This listed only what could
+	 * run for a long time, because the kernel built it by walking the
+	 * runqueue — which hid nearly everything, since a daemon spends almost
+	 * all its life blocked, and hid the one task worth seeing during a
+	 * hang: the one that cannot run.
 	 */
-	puts("\n  (runnable only — sleeping tasks are off the runqueue)\n");
 }
 
 static void cmd_info(void)
