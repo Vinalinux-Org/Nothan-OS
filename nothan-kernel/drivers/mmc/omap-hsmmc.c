@@ -21,6 +21,9 @@
 #define MMCHS_ARG        0x108
 #define MMCHS_CMD        0x10C
 #define MMCHS_RSP10      0x110
+#define MMCHS_RSP32      0x114
+#define MMCHS_RSP54      0x118
+#define MMCHS_RSP76      0x11C
 #define MMCHS_DATA       0x120
 #define MMCHS_PSTATE     0x124
 #define MMCHS_HCTL       0x128
@@ -382,8 +385,84 @@ static struct gendisk omap_hsmmc_disk = {
 	.first_minor  = 0,
 	.fops         = &omap_hsmmc_ops,
 	.private_data = NULL,
-	.capacity     = 7744512, /* approx 3.7 GB in 512-byte sectors */
+	.capacity     = 0,   /* asked of the card in probe(), see mmc_read_capacity() */
 };
+
+/*
+ * csd_bits() - Extract a field from a CSD by its spec bit numbers
+ *
+ * csd[0] is the high word (RSP76) and csd[3] the low one (RSP10), and this
+ * controller places CSD bit N at register bit N with no shift — so the bit
+ * numbers printed in the SD spec can be used verbatim.  Both facts are worth
+ * stating because a silent 8-bit skew here would not crash anything; it would
+ * just produce a capacity that looks like a plausible card.
+ */
+static uint32_t csd_bits(const uint32_t *csd, int start, int size)
+{
+	uint32_t mask = (size < 32 ? 1u << size : 0u) - 1;
+	int off   = 3 - (start / 32);
+	int shift = start & 31;
+	uint32_t res = csd[off] >> shift;
+
+	if (size + shift > 32)
+		res |= csd[off - 1] << ((32 - shift) % 32);
+
+	return res & mask;
+}
+
+/*
+ * mmc_read_capacity() - Ask the card how big it is (CMD9, SEND_CSD)
+ *
+ * Must run in stand-by state: after CMD3 has handed out an RCA, before CMD7
+ * selects the card.  In transfer state the card rejects CMD9.
+ */
+static int mmc_read_capacity(u64 *sectors)
+{
+	uint32_t csd[4];
+
+	if (mmc_send_cmd(9, card_rca << 16, RSP_R2) != 0) {
+		printk("[MMC] SEND_CSD failed\n");
+		return -1;
+	}
+
+	csd[0] = mmc_read(MMCHS_RSP76);
+	csd[1] = mmc_read(MMCHS_RSP54);
+	csd[2] = mmc_read(MMCHS_RSP32);
+	csd[3] = mmc_read(MMCHS_RSP10);
+
+	uint32_t structure = csd_bits(csd, 126, 2);
+
+	switch (structure) {
+	case 0: {
+		/* Byte-addressed card (<= 2 GB): a block count and a block
+		 * size, both stored as exponents. */
+		uint32_t c_size       = csd_bits(csd, 62, 12);
+		uint32_t c_size_mult  = csd_bits(csd, 47, 3);
+		uint32_t read_blkbits = csd_bits(csd, 80, 4);
+
+		if (read_blkbits < 9) {
+			printk("[MMC] CSD v1 read_bl_len %u is under 512 B\n",
+			       (unsigned int)read_blkbits);
+			return -1;
+		}
+		*sectors = (u64)(c_size + 1) << (c_size_mult + 2 + read_blkbits - 9);
+		break;
+	}
+	case 1:
+		/* Block-addressed SDHC/SDXC: C_SIZE counts 512 KB units. */
+		*sectors = ((u64)csd_bits(csd, 48, 22) + 1) << 10;
+		break;
+	default:
+		/* Structure 2 is SDUC (> 2 TB).  Its C_SIZE is 28 bits, but it
+		 * also changes addressing elsewhere in the driver, so refuse it
+		 * rather than register a disk that reads the wrong sectors. */
+		printk("[MMC] unsupported CSD structure %u\n",
+		       (unsigned int)structure);
+		return -1;
+	}
+
+	return 0;
+}
 
 static int omap_hsmmc_probe(struct platform_device *pdev)
 {
@@ -494,6 +573,10 @@ static int omap_hsmmc_probe(struct platform_device *pdev)
 		return -1;
 	card_rca = mmc_read(MMCHS_RSP10) >> 16;
 	printk("[MMC] Card detected, RCA=0x%04x\n", (unsigned int)card_rca);
+
+	/* Between CMD3 and CMD7 is the only window where CMD9 is legal. */
+	if (mmc_read_capacity(&omap_hsmmc_disk.capacity) != 0)
+		return -1;
 
 	if (mmc_send_cmd(7, card_rca << 16, RSP_R1B) != 0)
 		return -1;

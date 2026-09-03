@@ -151,6 +151,23 @@ static int parse_mbr(struct gendisk *disk)
 		       (unsigned int)e->lba_start,
 		       (unsigned int)e->lba_size,
 		       (unsigned int)e->type);
+
+		/*
+		 * A partition cannot be longer than the disk holding it, so if
+		 * it looks that way one of the two numbers is wrong and this is
+		 * the only moment both are on screen together.  Warn rather
+		 * than reject: reads past the reported capacity still work, and
+		 * a driver that lies about its size should not cost the user
+		 * their filesystem.  This is here because a hardcoded capacity
+		 * once claimed 3.7 GB of a 29 GB card and nothing noticed.
+		 */
+		if ((u64)e->lba_start + e->lba_size > disk->capacity)
+			printk("[BLOCK] %s%d ends at %u but %s claims only %u sectors"
+			       " — one of these is wrong\n",
+			       disk->disk_name, i + 1,
+			       (unsigned int)(e->lba_start + e->lba_size),
+			       disk->disk_name,
+			       (unsigned int)disk->capacity);
 	}
 
 	return 0;
