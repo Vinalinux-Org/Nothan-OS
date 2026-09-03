@@ -19,9 +19,20 @@
  * An unsupported conversion cannot consume its argument, so it desynchronises
  * every conversion after it.  Adding one is cheaper than debugging what that
  * does three call sites away.
+ *
+ * 'l' is accepted; 'll' is not — see the note in the parser.  A 64-bit value
+ * has no conversion here, so cast it down at the call site and say so.
  */
 
 static const char hex_lower[] = "0123456789abcdef";
+
+/* Append one char if it fits; always counts, so pos stays a true length. */
+static int emit(char *buf, unsigned long size, int pos, char c)
+{
+	if (pos + 1 < (int)size)
+		buf[pos] = c;
+	return 1;
+}
 
 static int number(char *buf, unsigned long size, unsigned long val,
 		  int base, int width, int sign, int upper, int zp)
@@ -98,7 +109,33 @@ int vsnprintf(char *buf, unsigned long size, const char *fmt, va_list args)
 
 		int is_long = (*fmt == 'l');
 		if (is_long) fmt++;
-		if (*fmt == 'l') fmt++;
+
+		/*
+		 * 'll' is not supported, and it is the worst kind of
+		 * unsupported: a 64-bit argument occupies two varargs slots and
+		 * is 8-byte aligned, so reading it as one 32-bit slot does not
+		 * merely truncate — it desynchronises every conversion after
+		 * it.  Consuming the second 'l' and falling into the perfectly
+		 * valid 'u' case is what the old code did, which is why the
+		 * guard at the bottom of the switch never fired: the line came
+		 * out full of plausible numbers that were not the arguments.
+		 *
+		 * There is no libgcc here, so a decimal 64-bit conversion would
+		 * need a hand-written divide.  Nothing in the kernel needs one
+		 * yet — every current caller prints sector counts, which fit in
+		 * 32 bits up to 2 TB.  So say plainly that the format string is
+		 * wrong instead of answering it with fiction.
+		 */
+		if (*fmt == 'l') {
+			fmt++;
+			pos += emit(buf, size, pos, '%');
+			pos += emit(buf, size, pos, 'l');
+			pos += emit(buf, size, pos, 'l');
+			if (!*fmt)
+				break;
+			pos += emit(buf, size, pos, *fmt);
+			continue;
+		}
 
 		switch (*fmt) {
 		case 's': {

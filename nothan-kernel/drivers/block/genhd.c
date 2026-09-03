@@ -146,10 +146,10 @@ static int parse_mbr(struct gendisk *disk)
 		disk->part[p].valid      = 1;
 		disk->nr_parts++;
 
-		printk("[BLOCK] %s%d: start=%llu size=%llu sectors type=0x%02x\n",
+		printk("[BLOCK] %s%d: start=%u size=%u sectors type=0x%02x\n",
 		       disk->disk_name, i + 1,
-		       (unsigned long long)e->lba_start,
-		       (unsigned long long)e->lba_size,
+		       (unsigned int)e->lba_start,
+		       (unsigned int)e->lba_size,
 		       (unsigned int)e->type);
 	}
 
@@ -222,8 +222,11 @@ int add_disk(struct gendisk *disk)
 	}
 	disk_table[slot] = disk;
 
-	printk("[BLOCK] %s: registered, capacity=%llu sectors\n",
-	       disk->disk_name, (unsigned long long)disk->capacity);
+	/* capacity is u64, but printk has no 64-bit conversion.  A 32-bit
+	 * sector count covers 2 TB, which is past what this MMC controller
+	 * addresses, so the cast loses nothing that could reach here. */
+	printk("[BLOCK] %s: registered, capacity=%u sectors\n",
+	       disk->disk_name, (unsigned int)disk->capacity);
 
 	/* Whole-disk cdev */
 	register_disk_cdev(disk, slot, 0);

@@ -263,11 +263,11 @@ static int omap_hsmmc_read_block_inner(struct gendisk *disk, u64 block, void *bu
 	timeout = 10000000;
 	while (!(mmc_read(MMCHS_STAT) & STAT_BRR)) {
 		if (mmc_read(MMCHS_STAT) & STAT_ERRI) {
-			printk("[MMC] BRR error at block %llu\n", (unsigned long long)block);
+			printk("[MMC] BRR error at block %u\n", (unsigned int)block);
 			return -1;
 		}
 		if (--timeout == 0) {
-			printk("[MMC] BRR timeout at block %llu\n", (unsigned long long)block);
+			printk("[MMC] BRR timeout at block %u\n", (unsigned int)block);
 			return -1;
 		}
 	}
@@ -282,11 +282,11 @@ static int omap_hsmmc_read_block_inner(struct gendisk *disk, u64 block, void *bu
 	timeout = 10000000;
 	while (!(mmc_read(MMCHS_STAT) & STAT_TC)) {
 		if (mmc_read(MMCHS_STAT) & STAT_ERRI) {
-			printk("[MMC] TC error at block %llu\n", (unsigned long long)block);
+			printk("[MMC] TC error at block %u\n", (unsigned int)block);
 			return -1;
 		}
 		if (--timeout == 0) {
-			printk("[MMC] TC timeout at block %llu\n", (unsigned long long)block);
+			printk("[MMC] TC timeout at block %u\n", (unsigned int)block);
 			return -1;
 		}
 	}
@@ -316,11 +316,11 @@ static int omap_hsmmc_write_block_inner(struct gendisk *disk, u64 block, const v
 	timeout = 10000000;
 	while (!(mmc_read(MMCHS_STAT) & STAT_BWR)) {
 		if (mmc_read(MMCHS_STAT) & STAT_ERRI) {
-			printk("[MMC] BWR error at block %llu\n", (unsigned long long)block);
+			printk("[MMC] BWR error at block %u\n", (unsigned int)block);
 			return -1;
 		}
 		if (--timeout == 0) {
-			printk("[MMC] BWR timeout at block %llu\n", (unsigned long long)block);
+			printk("[MMC] BWR timeout at block %u\n", (unsigned int)block);
 			return -1;
 		}
 	}
@@ -335,11 +335,11 @@ static int omap_hsmmc_write_block_inner(struct gendisk *disk, u64 block, const v
 	timeout = 10000000;
 	while (!(mmc_read(MMCHS_STAT) & STAT_TC)) {
 		if (mmc_read(MMCHS_STAT) & STAT_ERRI) {
-			printk("[MMC] TC error at block %llu\n", (unsigned long long)block);
+			printk("[MMC] TC error at block %u\n", (unsigned int)block);
 			return -1;
 		}
 		if (--timeout == 0) {
-			printk("[MMC] TC timeout at block %llu\n", (unsigned long long)block);
+			printk("[MMC] TC timeout at block %u\n", (unsigned int)block);
 			return -1;
 		}
 	}
