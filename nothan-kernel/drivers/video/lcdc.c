@@ -80,13 +80,42 @@
 #define DMA_BURST_16        (4 << 4)
 #define DMA_TH_FIFO_512     (6 << 8)   /* 512-word refill threshold */
 /*
- * Frame-pacing IRQ. Per the AM335x TRM (Ch.13, IRQSTATUS_RAW 0x58) bit 1 is
- * "recurrent_raster_done" — fires when a frame has been scanned OUT to the
- * panel pins, which is exactly the boundary we want to pace flips to (EOF0/bit8
- * only signals the DMA finished filling the FIFO, before scanout). Despite the
- * name this is NOT EOF0.
+ * Frame-pacing IRQ.
+ *
+ * This used to be bit 1, on a reading of the TRM that called it
+ * "recurrent_raster_done" and argued it was the scanout boundary while EOF0
+ * merely meant the DMA had filled the FIFO.  The argument was reasonable and
+ * the bit was wrong: with the GUI running, every flush timed out, and the
+ * status the timeout printed said why —
+ *
+ *   [LCDC] WARN wait_eof: frame-done IRQ timeout (raw=0x00000100 fuf=0)
+ *
+ * 0x100 is EOF0, and it is the ONLY bit set.  That is IRQSTATUS_RAW, the
+ * source before masking, so bit 1 was not being suppressed — it was never
+ * produced.  Meanwhile EOF0 fires every frame and stayed latched because
+ * nothing enabled it and nothing cleared it.
+ *
+ * The vendor agrees: tilcdc_regs.h puts FRAME_DONE at bit 0, EOF0 at bit 8,
+ * and nothing at bit 1; tilcdc_crtc.c enables END_OF_FRAME0 and uses it as the
+ * per-frame event, keeping FRAME_DONE for the one-shot "raster has stopped"
+ * at shutdown.  Two of the three bits here already matched that header
+ * exactly, which is what made the third one worth doubting.
+ *
+ * So pace on EOF0.  If it does turn out to lead scanout, the cost is a flip
+ * issued slightly early — tearing at worst.  Waiting on a bit the hardware
+ * does not drive costs a 30 ms stall on every single frame, which is what it
+ * was doing.
  */
-#define IRQBIT_FRAME_DONE   (1 << 1)   /* recurrent_raster_done */
+#define IRQBIT_FRAME_DONE   (1 << 0)   /* raster stopped; one-shot, no reader */
+/*
+ * Bit 1 is not in the vendor's header and has no name here, but the hardware
+ * drives it: the moment it was dropped from the clear mask it latched and
+ * stayed, which is how it was found.  Cleared but never enabled — an
+ * uncleared bit sits in every IRQSTATUS_RAW dump from then on and makes the
+ * next person read a stale flag as a live one.
+ */
+#define IRQBIT_UNDOCUMENTED (1 << 1)
+#define IRQBIT_EOF0         (1 << 8)   /* end of frame — the pacing signal */
 #define IRQBIT_FUF          (1 << 5)   /* FIFO underflow (DMA starved) */
 #define IRQBIT_SYNC_LOST    (1 << 2)   /* frame sync lost */
 
@@ -178,10 +207,24 @@ static void dpll_disp_configure(void)
 		printk("[LCDC] DPLL_DISP lock timeout\n");
 }
 
-/* Frame-done IRQ handler — fires once per frame scanned out to the panel
- * (recurrent_raster_done). Used by wait_eof() to pace flips to the frame
- * boundary. Clears the underflow/sync-lost error latches too so they don't
- * stay asserted. */
+/*
+ * LCDC interrupt handler.  Every enabled source arrives here; only EOF0 means
+ * a frame boundary.
+ *
+ * This used to raise @eof_flag for any of them, which turned the two error
+ * sources into a pacing signal: a FIFO underflow or a lost sync would release
+ * wait_eof() exactly as a frame boundary should.  With the frame source
+ * enabled on a bit the hardware does not drive, those errors were the only
+ * thing that ever released it — so the GUI paced on its own faults, ran while
+ * the panel was starving, and stalled the moment the panel was fixed.  It read
+ * as "the display worked before and does not now"; what had changed was that
+ * it had stopped going wrong.
+ *
+ * An event and a fault are not interchangeable even when both can be waited
+ * on.  Clear all of them, because the module requires every pending source
+ * serviced before the ISR exits, but only let the one that means "a frame
+ * ended" say so.
+ */
 static void lcdc_eof_handler(unsigned int irq)
 {
 	(void)irq;
@@ -195,7 +238,8 @@ static void lcdc_eof_handler(unsigned int irq)
 	 * ALL pending interrupts to be serviced before the ISR exits (TRM
 	 * 13.3.7.1.1). */
 	mmio_write32(LCDC_BASE + LCDC_IRQSTATUS,
-		     IRQBIT_FRAME_DONE | IRQBIT_FUF | IRQBIT_SYNC_LOST);
+		     IRQBIT_EOF0 | IRQBIT_FRAME_DONE | IRQBIT_UNDOCUMENTED |
+		     IRQBIT_FUF | IRQBIT_SYNC_LOST);
 
 	/* The source-clear above is a posted write over L4 — it must reach the
 	 * LCDC before the EOI below, or the end-of-interrupt closes the service
@@ -210,13 +254,29 @@ static void lcdc_eof_handler(unsigned int irq)
 	mmio_write32(LCDC_BASE + LCDC_END_OF_INT, 0);
 	dsb();
 
-	eof_flag = 1;
+	if (stat & IRQBIT_EOF0)
+		eof_flag = 1;
 }
 
-/* Block until the frame-done IRQ fires (max 30 ms = ~2 frames at 60 Hz). */
+/*
+ * Block until the end-of-frame IRQ fires, for at most two frames.
+ *
+ * The bound used to be a literal 3, with a comment saying 30 ms — true when
+ * the tick was 10 ms and false ever since it became 1 ms.  Three jiffies is
+ * now 3 ms, and a frame at 60 Hz is 16.7, so the wait could not reach a frame
+ * boundary even in principle: every flush timed out, and the only thing that
+ * ever released it early was an error interrupt landing inside the window.
+ *
+ * That is the failure time.h devotes a paragraph to — a number the machine
+ * depends on, written once as a literal and once as a comment, with nothing
+ * that fails when the two stop agreeing.  Derived from HZ, it cannot drift
+ * again.
+ */
+#define EOF_WAIT_MS	34	/* two frames at 60 Hz, plus a little */
+
 static void wait_eof(void)
 {
-	unsigned long end = get_jiffies() + 3;
+	unsigned long end = get_jiffies() + (EOF_WAIT_MS * HZ) / 1000;
 
 	eof_flag = 0;
 	while (!eof_flag) {
@@ -468,7 +528,7 @@ static int __init lcdc_init(void)
 	/* Enable the frame-done pacing IRQ + the underflow/sync-lost error
 	 * interrupts so the handler can sample and report them. */
 	mmio_write32(LCDC_BASE + LCDC_IRQENABLE_SET,
-		     IRQBIT_FRAME_DONE | IRQBIT_FUF | IRQBIT_SYNC_LOST);
+		     IRQBIT_EOF0 | IRQBIT_FUF | IRQBIT_SYNC_LOST);
 	request_irq(LCDC_IRQ, lcdc_eof_handler);
 	intc_enable_irq(LCDC_IRQ);
 

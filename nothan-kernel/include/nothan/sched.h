@@ -56,7 +56,26 @@
 
 /* Priority assignment for the tasks this box actually runs. */
 #define PRIO_SHELL		(PRIO_UI + 0)	/* echoing a keypress: short, urgent */
-#define PRIO_GUI		(PRIO_UI + 1)	/* redraw: long, so below the shell */
+
+/*
+ * Reading the touch panel, above the thing it is touching.
+ *
+ * The poll loop lived in the USB host task down in BG, which was fine while
+ * the GUI was off and wrong the moment it came back: the compositor is
+ * runnable almost always — wait_eof() spins rather than sleeps — so under
+ * fixed priority a band below it never runs at all.  Measured: the GUI took 22
+ * of 24 seconds of CPU and the input task was picked twice.  Every tap was
+ * lost, and nothing said so, because a task that never runs cannot report
+ * anything.
+ *
+ * Input goes above redraw because of what each one costs when it is late.  A
+ * frame drawn a few milliseconds late is a frame; a touch sampled late is a
+ * touch that did not happen.  This is the third time in this file that "has no
+ * deadline" turned out to mean "never runs" — see cpsw_link_task at the
+ * bottom, and PRIO_REL above.
+ */
+#define PRIO_INPUT		(PRIO_UI + 1)	/* touch poll: short, and lost if late */
+#define PRIO_GUI		(PRIO_UI + 2)	/* redraw: long, so below both */
 
 /*
  * Ordered by how long each may be late before something is lost, which is not

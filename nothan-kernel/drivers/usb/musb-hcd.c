@@ -2675,7 +2675,15 @@ static int musb_hcd_probe(struct platform_device *pdev)
 	 * device is up is a different path — short, and driven by the IRQ.
 	 */
 	init_completion(&musb_connect_event);
-	struct task_struct *t = task_create(musb_enum_thread, PRIO_BG,
+	/*
+	 * PRIO_INPUT, not BG.  When the device on the port is a touch panel
+	 * this task IS the input path, and it has to outrank the GUI it feeds
+	 * or the taps are never sampled.  When the device is a camera the same
+	 * task only enumerates once and then watchdogs on a 200 ms sleep, so
+	 * the higher band costs nothing — the streaming itself is uvc-capture,
+	 * which stays in BG for the reasons in sched.h.
+	 */
+	struct task_struct *t = task_create(musb_enum_thread, PRIO_INPUT,
 					    "musb-enum");
 	if (t)
 		enqueue_task(&runqueue, t);
