@@ -28,6 +28,7 @@
 
 #include <nothan/types.h>
 #include <nothan/udp.h>
+#include <nothan/rel.h>
 #include <nothan/fs.h>
 #include <nothan/printk.h>
 #include <nothan/init.h>
@@ -46,6 +47,8 @@
 
 struct usock {
 	struct udp_sock	sock;
+	struct rel_sock	rel;		/* used only when @reliable */
+	int		reliable;
 	int		in_use;
 };
 
@@ -71,6 +74,15 @@ static int sock_release(struct inode *inode, struct file *file)
 
 	if (!u)
 		return 0;
+
+	/*
+	 * Detach before releasing the port, so the transport task can never be
+	 * left holding a socket whose ring another owner is already draining.
+	 */
+	if (u->reliable) {
+		rel_detach(&u->rel);
+		u->reliable = 0;
+	}
 
 	udp_port_release(&u->sock);
 	u->in_use = 0;
@@ -107,10 +119,17 @@ const struct file_operations sock_fops = {
 
 /**
  * sock_open() - lend out a pooled socket bound to @port
+ * @reliable: 0 for datagrams, 1 for the ordered, acknowledged transport
+ *
+ * The choice is made here and never again.  It could have been a flag on each
+ * send, and that would be worse: the two have different delivery promises, and
+ * a socket whose promise changes per call is one an application cannot reason
+ * about — nor could the peer, which has no way to know which mode a datagram
+ * was sent in.
  *
  * Return: a file descriptor, or -1.
  */
-int sock_open(u16 port)
+int sock_open(u16 port, int reliable)
 {
 	unsigned long flags;
 	struct usock *u = NULL;
@@ -151,6 +170,16 @@ int sock_open(u16 port)
 		return -1;
 	}
 
+	/*
+	 * Attached last, once nothing else can fail.  From this call the
+	 * transport task is the only consumer of the socket's ring, and a
+	 * failure path that released the port afterwards would leave it
+	 * draining a socket that had been handed to somebody else.
+	 */
+	u->reliable = reliable ? 1 : 0;
+	if (u->reliable)
+		rel_attach(&u->rel, &u->sock);
+
 	return fd;
 }
 
@@ -177,6 +206,18 @@ int sock_send(struct file *file, const struct sock_addr *addr,
 
 	if (!u || len > UDP_MAX_PAYLOAD)
 		return -1;
+
+	/*
+	 * A reliable send only queues.  It cannot report -2, because there is
+	 * nothing for the caller to retry: an unresolved address is one of the
+	 * things the retransmission timer already covers, so the answer to
+	 * "not yet" is to say nothing and let the transport handle it.
+	 */
+	if (u->reliable) {
+		if (rel_send(&u->rel, addr->ip, addr->port, data, len) != 0)
+			return -1;
+		return (int)len;
+	}
 
 	ret = udp_send_to(&u->sock, addr->ip, addr->port, data, len);
 	if (ret != 0)
@@ -207,6 +248,14 @@ int sock_recv(struct file *file, struct sock_addr *out, void *buf,
 
 	if (!u)
 		return -1;
+
+	/*
+	 * Never udp_poll() a reliable socket: ring.h allows one consumer, and
+	 * on this socket that consumer is the transport task.  Two would take
+	 * turns losing each other's datagrams.
+	 */
+	if (u->reliable)
+		return rel_recv(&u->rel, out->ip, &out->port, buf, len);
 
 	dg = udp_poll(&u->sock);
 	if (!dg)

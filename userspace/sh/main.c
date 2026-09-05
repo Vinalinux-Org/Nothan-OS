@@ -22,6 +22,7 @@ static void cmd_help(void)
 	puts("  cd <path>\t\tChange directory\n");
 	puts("  ls\t\t\tList current directory\n");
 	puts("  udp <ip> <port> <text>\tSend a datagram, print the reply\n");
+	puts("  chat <ip> <port> <text>\tSame, over the reliable transport\n");
 	puts("  ps\t\t\tList running tasks\n");
 	puts("  kill <pid>\t\tTerminate a task\n");
 	puts("  info\t\t\tMemory info\n");
@@ -108,7 +109,7 @@ static void cmd_udp(int argc, char **argv)
 	dst.port = (unsigned short)port;
 
 	/* A fixed local port, so the far end can answer without being told. */
-	fd = sock_open(9000);
+	fd = sock_open(9000, SOCK_DGRAM);
 	if (fd < 0) {
 		puts("udp: cannot open socket\n");
 		return;
@@ -174,6 +175,95 @@ static void cmd_udp(int argc, char **argv)
 	}
 
 	puts("udp: sent, no reply in 2 s\n");
+	close((int)fd);
+}
+
+/*
+ * cmd_chat() - the same errand as cmd_udp(), over the reliable transport
+ *
+ * Worth having both, because the difference between them is the whole point of
+ * the transport and it is visible from here.  cmd_udp() has a retry loop: its
+ * first send cannot succeed, because nothing knows the peer's link address
+ * yet.  This one has no retry loop at all and still works on the first call —
+ * the queue accepts the message, and the timer underneath treats an address
+ * that is not resolved yet exactly as it treats a datagram that was lost.
+ *
+ * So "sent" printing immediately here, on a peer that has never been spoken
+ * to, is not the tool being optimistic.  It is the property being demonstrated.
+ */
+static void cmd_chat(int argc, char **argv)
+{
+	struct sock_addr dst;
+	struct sock_msg m;
+	char rx[256];
+	long fd, n;
+
+	if (argc < 4) {
+		puts("usage: chat <ip> <port> <text>\n");
+		return;
+	}
+
+	if (parse_ip(argv[1], dst.ip) != 0) {
+		puts("chat: bad address\n");
+		return;
+	}
+
+	int port = 0;
+	for (const char *p = argv[2]; *p; p++) {
+		if (*p < '0' || *p > '9') { port = 0; break; }
+		port = port * 10 + (*p - '0');
+	}
+	if (port <= 0 || port > 65535) {
+		puts("chat: bad port\n");
+		return;
+	}
+	dst.port = (unsigned short)port;
+
+	fd = sock_open(9001, SOCK_RELIABLE);
+	if (fd < 0) {
+		puts("chat: cannot open socket\n");
+		return;
+	}
+
+	m.buf  = argv[3];
+	m.len  = (unsigned int)strlen(argv[3]);
+	m.addr = dst;
+
+	if (sock_send((int)fd, &m) < 0) {
+		puts("chat: send queue full\n");
+		close((int)fd);
+		return;
+	}
+	puts("chat: queued\n");
+
+	/*
+	 * Three seconds, because the transport is allowed two of them before it
+	 * gives up: waiting less would report a failure the kernel had not
+	 * finished deciding on.
+	 */
+	for (int ms = 0; ms < 3000; ms += 20) {
+		m.buf = rx;
+		m.len = sizeof(rx) - 1;
+
+		n = sock_recv((int)fd, &m);
+		if (n > 0) {
+			rx[n] = '\0';
+			puts("chat: ");
+			putint((int)m.addr.ip[0], 0); putchar('.');
+			putint((int)m.addr.ip[1], 0); putchar('.');
+			putint((int)m.addr.ip[2], 0); putchar('.');
+			putint((int)m.addr.ip[3], 0); putchar(':');
+			putint((int)m.addr.port, 0);
+			puts(" says \"");
+			puts(rx);
+			puts("\"\n");
+			close((int)fd);
+			return;
+		}
+		msleep(20);
+	}
+
+	puts("chat: no reply in 3 s\n");
 	close((int)fd);
 }
 
@@ -421,6 +511,8 @@ static void execute(char *line, char *cwd)
 		cmd_ls(cwd);
 	} else if (strcmp(cmd, "udp") == 0) {
 		cmd_udp(argc, argv);
+	} else if (strcmp(cmd, "chat") == 0) {
+		cmd_chat(argc, argv);
 	} else if (strcmp(cmd, "cd") == 0) {
 		const char *path = (argc >= 2) ? argv[1] : "/";
 		if (chdir(path) < 0) {

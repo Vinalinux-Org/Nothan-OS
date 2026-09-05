@@ -166,9 +166,19 @@ static inline long close(int fd)
  *
  * sock_recv() returns 0 when nothing has arrived.  It never blocks.
  */
-static inline long sock_open(unsigned short port)
+/*
+ * @reliable picks the transport and cannot be changed afterwards.  0 is plain
+ * datagrams: fast, unordered, and lossy, which is what audio and video want.
+ * 1 is sequenced and acknowledged, which is what a conversation wants — and
+ * on that one sock_send() never reports an unresolved address, because the
+ * retransmission timer underneath already treats that as an ordinary loss.
+ */
+#define SOCK_DGRAM	0
+#define SOCK_RELIABLE	1
+
+static inline long sock_open(unsigned short port, int reliable)
 {
-	return __syscall1(__NR_sock_open, (long)port);
+	return __syscall2(__NR_sock_open, (long)port, (long)reliable);
 }
 
 static inline long sock_send(int fd, struct sock_msg *m)

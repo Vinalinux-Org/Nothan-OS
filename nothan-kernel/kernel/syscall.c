@@ -581,15 +581,18 @@ static long sys_sleep(unsigned long a0, unsigned long a1, unsigned long a2)
 /**
  * sys_sock_open - bind a UDP port and return a descriptor for it
  * @a0: port, host byte order
+ * @a1: 0 for datagrams, 1 for the ordered, acknowledged transport
  */
 static long sys_sock_open(unsigned long a0, unsigned long a1, unsigned long a2)
 {
-	(void)a1; (void)a2;
+	(void)a2;
 
 	if (a0 == 0 || a0 > 0xFFFF)
 		return -1;
+	if (a1 > 1)
+		return -1;
 
-	return sock_open((u16)a0);
+	return sock_open((u16)a0, (int)a1);
 }
 
 /*

@@ -105,6 +105,7 @@ OBJS += $(BUILD_DIR)/net/ipv4.o
 OBJS += $(BUILD_DIR)/net/icmp.o
 OBJS += $(BUILD_DIR)/net/udp.o
 OBJS += $(BUILD_DIR)/net/socket.o
+OBJS += $(BUILD_DIR)/net/rel.o
 OBJS += $(BUILD_DIR)/net/udp_echo.o
 OBJS += $(BUILD_DIR)/net/udp_sink.o
 OBJS += $(BUILD_DIR)/net/udp_source.o

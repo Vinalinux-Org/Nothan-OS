@@ -79,6 +79,26 @@
 #define PRIO_VIDEO_TX		(PRIO_VIDEO + 1)	/* sends; only ever late */
 
 /*
+ * The reliable transport's timer, in the network band and not in BG.
+ *
+ * It has no deadline in the sense the video path does — a chat message a
+ * hundred milliseconds late is a chat message.  That argues for BG, and BG is
+ * where it was going to go.
+ *
+ * The note at the bottom of this file is why it did not.  cpsw_link_task had
+ * no deadline either, sat in BG, and never ran at all while the camera held
+ * the machine at 0% idle; a link that was plugged in stayed down for ever.
+ * This task would fail the same way and look worse doing it: retransmission
+ * timers that never fire mean every message is eventually given up on, and the
+ * symptom is a chat that stops working whenever the camera is busy.
+ *
+ * "No deadline" is not "may never run".  It costs one deadline level in a band
+ * sized for four, and it is the level below the driver's own receive path,
+ * which is the only thing here that must go first.
+ */
+#define PRIO_REL		(PRIO_NET + 2)	/* seq/ack/retransmit timer */
+
+/*
  * Draining the camera — in the background band, which is the opposite of what
  * its deadline deserves and the only place it can go.
  *

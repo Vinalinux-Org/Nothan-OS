@@ -16,7 +16,7 @@
  * Included here rather than restated so the limit has one definition. */
 #include <nothan/udp.h>
 
-int  sock_open(u16 port);
+int  sock_open(u16 port, int reliable);
 int  sock_send(struct file *file, const struct sock_addr *addr,
 	       const void *data, unsigned int len);
 int  sock_recv(struct file *file, struct sock_addr *out, void *buf,
