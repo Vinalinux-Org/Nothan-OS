@@ -25,8 +25,11 @@
 #define __NR_getcwd     18  /* get current working directory     */
 #define __NR_getticks   19  /* get system tick count in ms       */
 #define __NR_sleep      20  /* block the task for N milliseconds  */
+#define __NR_sock_open  21  /* bind a UDP port, return a descriptor */
+#define __NR_sock_send  22  /* send one datagram to an address    */
+#define __NR_sock_recv  23  /* take one datagram, without blocking */
 
-#define NR_SYSCALLS     21
+#define NR_SYSCALLS     24
 
 /* reboot commands */
 #define REBOOT_WARM     0
@@ -51,6 +54,30 @@ struct task_info {
 struct sys_info {
 	unsigned long total_pages;
 	unsigned long free_pages;
+};
+
+/*
+ * A datagram and the address at the other end of it.
+ *
+ * One struct for both directions — @addr is where it is going on a send and
+ * where it came from on a receive — because the ABI here passes three
+ * registers and a send needs five values.  Splitting it into two structs would
+ * describe the same bytes twice, and this header already carries a warning
+ * about what happens when one fact has two definitions.
+ *
+ * @len on a receive is the size of @buf going in and the size of the datagram
+ * coming out; a datagram longer than @buf is truncated, and the return value
+ * says how much was kept, not how much arrived.
+ */
+struct sock_addr {
+	unsigned char  ip[4];
+	unsigned short port;		/* host byte order */
+};
+
+struct sock_msg {
+	void            *buf;
+	unsigned int     len;
+	struct sock_addr addr;
 };
 
 /**

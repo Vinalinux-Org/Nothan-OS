@@ -88,6 +88,10 @@ int vfs_read(int fd, char *buf, size_t count);
 int vfs_write(int fd, const char *buf, size_t count);
 int vfs_close(int fd);
 int vfs_ioctl(int fd, unsigned int cmd, unsigned long arg);
+
+/* Descriptors for things with no path and no inode — see vfs.c. */
+int vfs_install_file(const struct file_operations *fop, void *priv);
+struct file *vfs_file_from_fd(int fd);
 int vfs_chdir(const char *path);
 int vfs_listdir(const char *path, struct file_entry *buf, int max);
 

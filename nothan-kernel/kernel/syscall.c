@@ -17,6 +17,7 @@
 #include <nothan/time.h>
 #include <nothan/delay.h>
 #include <nothan/uaccess.h>
+#include <nothan/socket.h>
 
 /* Longest path/string a syscall will scan out of user space. */
 #define USER_STR_MAX	256
@@ -577,6 +578,109 @@ static long sys_sleep(unsigned long a0, unsigned long a1, unsigned long a2)
 	return 0;
 }
 
+/**
+ * sys_sock_open - bind a UDP port and return a descriptor for it
+ * @a0: port, host byte order
+ */
+static long sys_sock_open(unsigned long a0, unsigned long a1, unsigned long a2)
+{
+	(void)a1; (void)a2;
+
+	if (a0 == 0 || a0 > 0xFFFF)
+		return -1;
+
+	return sock_open((u16)a0);
+}
+
+/*
+ * The descriptor behind a socket syscall, or NULL.
+ *
+ * Checking f_op is not defensive tidiness: a process passes a number, and
+ * nothing in a number says what kind of object it names.  Without this, a
+ * write to fd 3 could reach sock_send()'s private_data — a struct file for an
+ * open file on the SD card, read as a struct usock — and the first field it
+ * touched would be somebody else's pointer.
+ */
+static struct file *sock_file(unsigned long fd)
+{
+	struct file *f = vfs_file_from_fd((int)fd);
+
+	if (!f || f->f_op != &sock_fops)
+		return NULL;
+	return f;
+}
+
+/**
+ * sys_sock_send - send one datagram
+ * @a0: socket descriptor
+ * @a1: struct sock_msg (user) — @addr is the destination
+ */
+static long sys_sock_send(unsigned long a0, unsigned long a1, unsigned long a2)
+{
+	struct file *f = sock_file(a0);
+	struct sock_msg msg;
+
+	(void)a2;
+
+	if (!f)
+		return -1;
+
+	if (copy_from_user(&msg, (const void *)a1, sizeof(msg)) != 0)
+		return -1;
+
+	/*
+	 * The payload stays where the process put it — see sock_send() for why
+	 * it is not bounced through the kernel stack.  This is the check that
+	 * makes that safe, so it has to cover the whole range, not the pointer.
+	 */
+	if (msg.len > UDP_MAX_PAYLOAD || !access_ok(msg.buf, msg.len))
+		return -1;
+
+	return sock_send(f, &msg.addr, msg.buf, msg.len);
+}
+
+/**
+ * sys_sock_recv - take one datagram if one has arrived
+ * @a0: socket descriptor
+ * @a1: struct sock_msg (user) — @addr is filled with the sender
+ *
+ * Return: bytes copied, 0 if nothing was waiting, -1 on error.
+ */
+static long sys_sock_recv(unsigned long a0, unsigned long a1, unsigned long a2)
+{
+	struct file *f = sock_file(a0);
+	struct sock_msg msg;
+	struct sock_addr from;
+	long n;
+
+	(void)a2;
+
+	if (!f)
+		return -1;
+
+	if (copy_from_user(&msg, (const void *)a1, sizeof(msg)) != 0)
+		return -1;
+
+	if (msg.len > UDP_MAX_PAYLOAD || !access_ok(msg.buf, msg.len))
+		return -1;
+
+	n = sock_recv(f, &from, msg.buf, msg.len);
+	if (n <= 0)
+		return n;
+
+	/*
+	 * The sender's address is written back only after a datagram was
+	 * actually taken.  Filling it on the empty case would hand the caller a
+	 * stale peer that looks like a fresh one, and a protocol that answers
+	 * whoever spoke last would then answer whoever spoke last time.
+	 */
+	if (copy_to_user(&((struct sock_msg *)a1)->addr, &from,
+			 sizeof(from)) != 0)
+		return -1;
+
+	return n;
+}
+
 /*
  * Syscall dispatch table
  * Indexed by syscall number; must match __NR_xxx constants.
@@ -603,6 +707,9 @@ static const syscall_fn_t syscall_table[NR_SYSCALLS] = {
 	[__NR_getcwd]      = sys_getcwd,
 	[__NR_getticks]    = sys_getticks,
 	[__NR_sleep]       = sys_sleep,
+	[__NR_sock_open]   = sys_sock_open,
+	[__NR_sock_send]   = sys_sock_send,
+	[__NR_sock_recv]   = sys_sock_recv,
 };
 
 /**

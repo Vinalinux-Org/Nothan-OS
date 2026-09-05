@@ -19,6 +19,10 @@
 #define __NR_chdir      17
 #define __NR_getcwd     18
 #define __NR_getticks   19
+#define __NR_sleep      20
+#define __NR_sock_open  21
+#define __NR_sock_send  22
+#define __NR_sock_recv  23
 
 #define REBOOT_WARM     0
 #define REBOOT_HALT     1
@@ -37,6 +41,29 @@
  * Duplicated verbatim in nothan-kernel/include/nothan/syscall.h — the two must
  * stay identical, since this crosses the syscall boundary and nothing checks it.
  */
+struct sock_addr {
+	unsigned char  ip[4];
+	unsigned short port;		/* host byte order */
+};
+
+struct sock_msg {
+	void            *buf;
+	unsigned int     len;
+	struct sock_addr addr;		/* destination on send, sender on recv */
+};
+
+/*
+ * Largest datagram that fits one frame, which is the only size that can be
+ * delivered — the IP layer drops fragments.
+ *
+ * 1536 - 14 Ethernet - 20 IP - 8 UDP.  Note the 1536: this driver's buffers
+ * are that size, not the 1500 the number is usually reached for, so guessing
+ * the familiar answer here gives 1472 and quietly loses 22 bytes a datagram.
+ * The kernel checks the real limit on every send, so a stale copy costs a
+ * refused send and never a corrupted one — but it is still worth being right.
+ */
+#define SOCK_MAX_PAYLOAD	1494
+
 struct task_info {
 	int pid;
 	char name[TASK_NAME_LEN];
@@ -128,6 +155,32 @@ static inline long close(int fd)
 	return __syscall1(__NR_close, (long)fd);
 }
 
+/*
+ * Sockets.  A socket descriptor closes with close() like anything else — that
+ * is the whole reason it is a descriptor and not a handle of its own kind.
+ *
+ * sock_send() returns -1 while the peer's link address is still being looked
+ * up, which is the ordinary result of the first message to a machine this box
+ * has not spoken to.  Callers are expected to retry; a chat protocol resends
+ * anyway, so the retry it already has is the one that covers this.
+ *
+ * sock_recv() returns 0 when nothing has arrived.  It never blocks.
+ */
+static inline long sock_open(unsigned short port)
+{
+	return __syscall1(__NR_sock_open, (long)port);
+}
+
+static inline long sock_send(int fd, struct sock_msg *m)
+{
+	return __syscall2(__NR_sock_send, (long)fd, (long)m);
+}
+
+static inline long sock_recv(int fd, struct sock_msg *m)
+{
+	return __syscall2(__NR_sock_recv, (long)fd, (long)m);
+}
+
 static inline long gettasklist(struct task_info *buf, unsigned long max)
 {
 	return __syscall2(__NR_gettasklist, (long)buf, (long)max);
@@ -182,6 +235,18 @@ static inline long getcwd(char *buf, unsigned long size)
 static inline unsigned long getticks(void)
 {
 	return (unsigned long)__syscall0(__NR_getticks);
+}
+
+/*
+ * The kernel has had this since __NR_sleep was added and this header did not,
+ * which is the drift the warning above this file's structs is about: two
+ * copies of one fact, and nothing that fails when they disagree.  A process
+ * that wanted to wait had to spin on getticks() and burn the CPU it was
+ * waiting on.
+ */
+static inline void msleep(unsigned long ms)
+{
+	__syscall1(__NR_sleep, (long)ms);
 }
 
 #endif

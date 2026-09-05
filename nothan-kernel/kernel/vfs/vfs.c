@@ -298,6 +298,74 @@ int vfs_open(const char *pathname, int flags)
 }
 
 /**
+ * vfs_install_file() - give an fd to something that is not a file on a disk
+ * @fop:  operations for it; @release is where it is handed back
+ * @priv: stored in f->private_data for @fop to find
+ *
+ * A socket has no path to walk and no inode to read, but it wants everything
+ * else a descriptor gets: a number the process can hold, and a close() that
+ * calls back exactly once.  Rather than teach sockets to fake a file, this
+ * hands out the descriptor directly.
+ *
+ * f_inode stays NULL, which vfs_close() already tolerates — vfs_free_inode()
+ * returns on NULL — so nothing on the close path needs to know what this is.
+ *
+ * Return: file descriptor, or -1.
+ */
+int vfs_install_file(const struct file_operations *fop, void *priv)
+{
+	unsigned long irq_flags;
+	int fd = -1;
+
+	irq_flags = local_irq_save();
+	for (int i = FD_FIRST; i < MAX_FDS; i++) {
+		if (!fd_table[i]) {
+			fd_table[i] = FD_RESERVED;
+			fd = i;
+			break;
+		}
+	}
+	local_irq_restore(irq_flags);
+
+	if (fd < 0) {
+		printk("[VFS] Out of file descriptors\n");
+		return -1;
+	}
+
+	struct file *f = (struct file *)kmalloc(sizeof(*f), GFP_KERNEL);
+	if (!f) {
+		fd_table[fd] = NULL;
+		return -1;
+	}
+
+	f->f_dentry     = NULL;
+	f->f_inode      = NULL;
+	f->f_op         = fop;
+	f->f_pos        = 0;
+	f->f_flags      = 0;
+	f->private_data = priv;
+
+	fd_table[fd] = f;
+	return fd;
+}
+
+/**
+ * vfs_file_from_fd() - the open file behind a descriptor, or NULL
+ *
+ * For syscalls that do more than read and write and so cannot go through
+ * vfs_read()/vfs_write().  The caller must check f_op is the one it expects
+ * before touching private_data: a descriptor number says nothing about what
+ * kind of thing is on the other end, and a process can pass any number.
+ */
+struct file *vfs_file_from_fd(int fd)
+{
+	if (fd < 0 || fd >= MAX_FDS || !fd_table[fd] ||
+	    fd_table[fd] == FD_RESERVED)
+		return NULL;
+	return fd_table[fd];
+}
+
+/**
  * vfs_read() - Read from a file descriptor
  * @fd: File descriptor (returned by vfs_open)
  * @buf: User buffer to store data

@@ -14,6 +14,7 @@
 #include <nothan/netdev.h>
 #include <nothan/ipv4.h>
 #include <nothan/udp.h>
+#include <nothan/arp.h>
 #include <nothan/wait.h>
 #include <nothan/printk.h>
 
@@ -62,11 +63,57 @@ static u32 udp_pseudo_sum(const u8 *sip, const u8 *dip, unsigned int udp_len)
 	return sum;
 }
 
+int udp_port_claim(struct udp_sock *s, u16 port)
+{
+	struct udp_sock *p;
+
+	if (port == 0)
+		return -1;
+
+	for (p = bound; p; p = p->next) {
+		if (p->port == port)
+			return -1;
+	}
+
+	/*
+	 * Drain before publishing the port, never after.
+	 *
+	 * The receive task decides where a datagram goes by reading @port, so
+	 * the instant the store below lands, frames can start arriving.  Emptying
+	 * the ring afterwards would throw away datagrams that belong to the new
+	 * owner along with any left by the old one.  In this order the ring is
+	 * empty at the moment it becomes reachable, and nothing is lost or
+	 * inherited.
+	 */
+	s->rx.head = s->rx.tail;
+	s->port    = port;
+	return 0;
+}
+
+void udp_port_release(struct udp_sock *s)
+{
+	/*
+	 * Port first: this is udp_port_claim() run backwards, and for the same
+	 * reason.  Clearing @port stops the receive task from choosing this
+	 * socket, so the drain that follows cannot race with a fill.
+	 */
+	s->port = 0;
+	s->rx.head = s->rx.tail;
+}
+
 int udp_bind(struct udp_sock *s, u16 port, const char *name)
 {
 	struct udp_sock *p;
 
-	for (p = bound; p; p = p->next) {
+	/*
+	 * Port 0 binds a socket into the list without giving it an address:
+	 * the pool behind the socket syscalls registers its entries this way at
+	 * initcall time, so that opening one at runtime changes a field instead
+	 * of touching @next.  The invariant in udp.h — that the list is built
+	 * before any frame can arrive — therefore still holds literally, which
+	 * is what keeps the receive path lock free.
+	 */
+	for (p = bound; port && p; p = p->next) {
 		if (p->port == port) {
 			printk("[UDP] port %lu refused for %s: %s has it\n",
 			       (unsigned long)port, name, p->name);
@@ -83,15 +130,30 @@ int udp_bind(struct udp_sock *s, u16 port, const char *name)
 	s->next = bound;
 	bound = s;
 
-	printk("[UDP] %s bound to port %lu, %d slots of %lu bytes\n",
-	       name, (unsigned long)port, 1 << UDP_RING_ORDER,
-	       (unsigned long)UDP_MAX_PAYLOAD);
+	/* A port of 0 is a pool entry with no address yet; it has nothing to
+	 * announce, and four of them would say it four times.  Whoever
+	 * registered them reports the pool instead. */
+	if (port)
+		printk("[UDP] %s bound to port %lu, %d slots of %lu bytes\n",
+		       name, (unsigned long)port, 1 << UDP_RING_ORDER,
+		       (unsigned long)UDP_MAX_PAYLOAD);
 	return 0;
 }
 
 static struct udp_sock *udp_lookup(u16 port)
 {
 	struct udp_sock *s;
+
+	/*
+	 * Port 0 is not a port, it is how a socket in the pool says it is not
+	 * in use — see udp_port_claim().  Refusing it here rather than trusting
+	 * that no datagram carries it is the §7.2 rule: the destination port
+	 * comes off the wire, so a frame claiming port 0 is an input, not an
+	 * impossibility, and it would otherwise fill an idle socket's ring with
+	 * datagrams no owner will ever drain.
+	 */
+	if (port == 0)
+		return (struct udp_sock *)0;
 
 	for (s = bound; s; s = s->next) {
 		if (s->port == port)
@@ -212,6 +274,32 @@ struct udp_datagram *udp_poll(struct udp_sock *s)
 void udp_done(struct udp_sock *s)
 {
 	udp_rx_release(&s->rx);
+}
+
+int udp_send_to(struct udp_sock *s, const u8 *dst_ip, u16 dst_port,
+		const u8 *data, unsigned int len)
+{
+	struct netdev *dev = netdev_get();
+	u8 dst_mac[ETH_ALEN];
+
+	/*
+	 * Resolved before udp_send() claims the transmit buffer, not inside it.
+	 * arp_resolve() may put a request on the wire, and that request is
+	 * itself a frame — asking for the buffer while already holding it would
+	 * be the deadlock that netdev.h's "claim late" rule exists to prevent.
+	 */
+	/*
+	 * -2 rather than -1, so a caller can tell "not yet" from "no".  They
+	 * are different events with different answers — one is retried in a
+	 * moment, the other never succeeds — and a single failure code forces
+	 * whoever reports it to guess which happened.  A tool that guesses
+	 * prints a cause it did not measure, which is how a wrong diagnosis
+	 * gets believed for as long as it takes to read the message.
+	 */
+	if (arp_resolve(dev, dst_ip, dst_mac) != 0)
+		return -2;
+
+	return udp_send(s, dst_mac, dst_ip, dst_port, data, len);
 }
 
 int udp_send(struct udp_sock *s, const u8 *dst_mac, const u8 *dst_ip,

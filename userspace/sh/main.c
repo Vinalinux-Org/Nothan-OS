@@ -21,6 +21,7 @@ static void cmd_help(void)
 	puts("  clear\t\t\tClear screen\n");
 	puts("  cd <path>\t\tChange directory\n");
 	puts("  ls\t\t\tList current directory\n");
+	puts("  udp <ip> <port> <text>\tSend a datagram, print the reply\n");
 	puts("  ps\t\t\tList running tasks\n");
 	puts("  kill <pid>\t\tTerminate a task\n");
 	puts("  info\t\t\tMemory info\n");
@@ -29,6 +30,151 @@ static void cmd_help(void)
 	puts("  shutdown\t\tHalt system\n");
 	puts("  simstat\t\tCheck SIM status\n");
 	putchar('\n');
+}
+
+/*
+ * "10.42.0.1" into four bytes, or -1.
+ *
+ * Strict about what it accepts: an octet over 255, an empty one, or a fifth
+ * would all otherwise turn into an address the user did not type, and the
+ * failure would surface a layer down as ARP asking about a machine nobody
+ * meant.  A parser that guesses is worse here than one that refuses.
+ */
+static int parse_ip(const char *s, unsigned char *ip)
+{
+	for (int i = 0; i < 4; i++) {
+		int v = 0, digits = 0;
+
+		while (*s >= '0' && *s <= '9') {
+			v = v * 10 + (*s++ - '0');
+			if (++digits > 3 || v > 255)
+				return -1;
+		}
+		if (!digits)
+			return -1;
+		ip[i] = (unsigned char)v;
+
+		if (i < 3) {
+			if (*s != '.')
+				return -1;
+			s++;
+		}
+	}
+	return *s ? -1 : 0;
+}
+
+/*
+ * cmd_udp() - send a datagram and print whatever answers
+ *
+ * The first thing in this system that opens a conversation instead of
+ * continuing one, which makes it the only way to see whether ARP resolution
+ * works: everything else learned its peer's link address from a frame that
+ * peer had already sent.
+ *
+ * The retry loop is the point, not politeness.  A first send to an unknown
+ * machine returns -1 while the request is on the wire, so a single attempt
+ * would report failure on a perfectly good link.  Printing which attempt
+ * succeeded turns that into a measurement — attempt 1 means the address was
+ * cached, attempt 2 means ARP resolved in under 50 ms, and never means it did
+ * not resolve at all.
+ */
+static void cmd_udp(int argc, char **argv)
+{
+	struct sock_addr dst;
+	struct sock_msg m;
+	char rx[256];
+	long fd, n;
+	int sent = 0;
+
+	if (argc < 4) {
+		puts("usage: udp <ip> <port> <text>\n");
+		return;
+	}
+
+	if (parse_ip(argv[1], dst.ip) != 0) {
+		puts("udp: bad address\n");
+		return;
+	}
+
+	int port = 0;
+	for (const char *p = argv[2]; *p; p++) {
+		if (*p < '0' || *p > '9') { port = 0; break; }
+		port = port * 10 + (*p - '0');
+	}
+	if (port <= 0 || port > 65535) {
+		puts("udp: bad port\n");
+		return;
+	}
+	dst.port = (unsigned short)port;
+
+	/* A fixed local port, so the far end can answer without being told. */
+	fd = sock_open(9000);
+	if (fd < 0) {
+		puts("udp: cannot open socket\n");
+		return;
+	}
+
+	m.buf  = argv[3];
+	m.len  = (unsigned int)strlen(argv[3]);
+	m.addr = dst;
+
+	long rc = -1;
+
+	for (int try = 1; try <= 5; try++) {
+		rc = sock_send((int)fd, &m);
+		if (rc >= 0) {
+			puts("udp: sent on attempt ");
+			putint(try, 0);
+			putchar('\n');
+			sent = 1;
+			break;
+		}
+		msleep(50);		/* let the ARP reply come back */
+	}
+
+	if (!sent) {
+		/*
+		 * Report the code, not a story about it.  The first version of
+		 * this said "nothing answered the ARP request" for every
+		 * failure, including the ones that never reached ARP — which
+		 * sent the search after the network while the fault was in the
+		 * syscall.  -2 is the only value that means the address is
+		 * unresolved, and it is the kernel that says so.
+		 */
+		if (rc == -2)
+			puts("udp: address unresolved — ARP got no answer\n");
+		else
+			puts("udp: send refused before it reached the wire\n");
+		close((int)fd);
+		return;
+	}
+
+	/* Listen for a moment.  Nothing arriving is a result too: it separates
+	 * "the frame did not leave" from "nobody was listening". */
+	for (int ms = 0; ms < 2000; ms += 20) {
+		m.buf = rx;
+		m.len = sizeof(rx) - 1;
+
+		n = sock_recv((int)fd, &m);
+		if (n > 0) {
+			rx[n] = '\0';
+			puts("udp: ");
+			putint((int)m.addr.ip[0], 0); putchar('.');
+			putint((int)m.addr.ip[1], 0); putchar('.');
+			putint((int)m.addr.ip[2], 0); putchar('.');
+			putint((int)m.addr.ip[3], 0); putchar(':');
+			putint((int)m.addr.port, 0);
+			puts(" says \"");
+			puts(rx);
+			puts("\"\n");
+			close((int)fd);
+			return;
+		}
+		msleep(20);
+	}
+
+	puts("udp: sent, no reply in 2 s\n");
+	close((int)fd);
 }
 
 static void cmd_ls(const char *cwd)
@@ -273,6 +419,8 @@ static void execute(char *line, char *cwd)
 		puts("\033[H");
 	} else if (strcmp(cmd, "ls") == 0) {
 		cmd_ls(cwd);
+	} else if (strcmp(cmd, "udp") == 0) {
+		cmd_udp(argc, argv);
 	} else if (strcmp(cmd, "cd") == 0) {
 		const char *path = (argc >= 2) ? argv[1] : "/";
 		if (chdir(path) < 0) {

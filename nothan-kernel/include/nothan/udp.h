@@ -113,8 +113,27 @@ struct udp_sock {
 /*
  * Bind a socket to a port.  Initcall time only — see the note on @next.
  * Returns 0, or -1 if the port is already taken.
+ *
+ * A port of 0 registers the socket without an address, for a pool whose
+ * entries are handed out later by udp_port_claim().  It is what lets a socket
+ * appear at runtime without the list itself ever changing.
  */
 int udp_bind(struct udp_sock *s, u16 port, const char *name);
+
+/*
+ * Give an already-registered socket an address, or take it away again.
+ *
+ * These exist so that a user process can open and close sockets without
+ * anything being added to or removed from the list @next threads.  Removal is
+ * the operation that would race: a receive task walking the list while a link
+ * is unhooked from under it has no safe outcome, and the alternative is a lock
+ * on the hottest path in the network stack.  Changing a port cannot break a
+ * walk, so the pool is registered once at boot and its entries are lent out.
+ *
+ * udp_port_claim() returns 0, or -1 if the port is 0 or already taken.
+ */
+int  udp_port_claim(struct udp_sock *s, u16 port);
+void udp_port_release(struct udp_sock *s);
 
 /*
  * Borrow the oldest datagram, sleeping until one arrives.  The pointer stays
@@ -143,14 +162,30 @@ void udp_done(struct udp_sock *s);
  * blasting a thousand frames cannot hold a receive slot for the duration, and
  * a copy of one on the stack is 1512 bytes against a 4 KB kernel stack.
  *
- * It is also the shape the ARP cache will slot into.  When something finally
- * needs to start a conversation rather than continue one, what changes is
- * where @dst_mac comes from — a lookup instead of an argument — and not this
- * signature.  There is still deliberately no udp_send_to() that takes only an
- * IP, because nothing yet has an address it was not handed.
+ * It is also the shape the ARP cache slots into: udp_send_to() below is this
+ * function with @dst_mac come from a lookup instead of an argument, and this
+ * signature did not have to change to gain it.
  */
 int udp_send(struct udp_sock *s, const u8 *dst_mac, const u8 *dst_ip,
 	     u16 dst_port, const u8 *data, unsigned int len);
+
+/**
+ * udp_send_to() - send to an IP address, resolving the link address
+ *
+ * For a sender that was not handed an address by an incoming frame — the one
+ * that speaks first.  Everything that came before could use udp_reply().
+ *
+ * Fails while the address is being resolved, and does not sleep waiting for
+ * it: see arp_resolve().  A first send to a new peer will therefore usually
+ * fail, and the retry a moment later is the one that goes out.  That is a
+ * property of the caller's protocol, not a bug to paper over here — chat
+ * retransmits anyway, so it costs nothing, whereas hiding the wait inside this
+ * call would mean sleeping while holding the link's only transmit buffer.
+ *
+ * Return: 0 on success, -1 if the address is not yet known or the send failed.
+ */
+int udp_send_to(struct udp_sock *s, const u8 *dst_ip, u16 dst_port,
+		const u8 *data, unsigned int len);
 
 /* Answer a borrowed datagram: the frame that arrived says where to reply. */
 static inline int udp_reply(struct udp_sock *s, const struct udp_datagram *dg,
