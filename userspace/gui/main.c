@@ -17,6 +17,7 @@
 #include "screens/home.h"
 #include "core/call_ui.h"
 #include "services/messages.h"
+#include "services/chat.h"
 #include "services/telephony.h"
 #include "services/modem_client.h"
 #include "../lib/syscall.h"
@@ -43,6 +44,7 @@ void main(void)
 	 * boot-time wipe, so a swipe-deleted thread/call stays gone across
 	 * reboots. The demo has no address book — Phone/Messages show numbers. */
 	messages_init();
+	chat_init();
 	telephony_init();
 	call_ui_init();
 	modem_client_init();

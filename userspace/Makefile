@@ -102,13 +102,14 @@ GUI_SRCS := gui/main.c \
             gui/core/nav.c gui/core/log.c gui/core/keyboard.c gui/core/call_ui.c \
             gui/services/contacts.c gui/services/messages.c gui/services/telephony.c \
             gui/services/modem_client.c \
-            gui/services/storage.c \
+            gui/services/storage.c gui/services/chat.c \
             gui/widgets/status_bar.c gui/widgets/app_tile.c gui/widgets/nav_bar.c \
             gui/widgets/app_header.c gui/widgets/avatar.c gui/widgets/swipe_row.c \
             gui/screens/boot.c gui/screens/home.c \
             gui/screens/contacts_list.c gui/screens/contact_detail.c \
             gui/screens/contacts_add.c \
             gui/screens/sms_list.c gui/screens/sms_chat.c \
+            gui/screens/chat_list.c gui/screens/chat_thread.c \
             gui/screens/dialer.c gui/screens/call_log.c
 GUI_OBJS := $(patsubst gui/%.c,$(BUILD)/gui/%.o,$(GUI_SRCS)) \
             $(BUILD)/gui/phone_daemon/phone_frame.o \

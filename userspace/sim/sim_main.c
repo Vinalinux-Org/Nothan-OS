@@ -29,6 +29,7 @@
 #include "core/call_ui.h"
 #include "services/contacts.h"
 #include "services/messages.h"
+#include "services/chat.h"
 #include "services/telephony.h"
 #include "services/modem_client.h"
 
@@ -630,6 +631,7 @@ int main(void)
 	nav_init();
 	contacts_init();
 	messages_init();
+	chat_init();
 	telephony_init();
 	call_ui_init();
 #if !defined(SIM_AUTOTAP) && !defined(SIM_MONKEY)
