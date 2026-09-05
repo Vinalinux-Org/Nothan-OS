@@ -45,7 +45,7 @@
 #define CONFIG_VIDEO		1
 
 /* LVGL GUI (userspace).  Needs the video stack. */
-#define CONFIG_GUI		0
+#define CONFIG_GUI		1
 
 /*
  * SIM7600 modem: the UART1 platform device, the phonebus character devices,
@@ -69,7 +69,7 @@
  * polling loop that turns reports into /dev/input0 events.  All of it assumes
  * that one device.  Needs CONFIG_USB_HOST.
  */
-#define CONFIG_USB_TOUCH	0
+#define CONFIG_USB_TOUCH	1
 
 /* Interactive shell on the console UART.  Needs no peripheral. */
 #define CONFIG_SHELL		1
