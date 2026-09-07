@@ -705,6 +705,7 @@ int main(void)
 				 (unsigned)mon.frag_pct, (unsigned)mon.max_used);
 		}
 
+		chat_pump();
 		lv_task_handler();
 		SDL_Delay(1);
 	}

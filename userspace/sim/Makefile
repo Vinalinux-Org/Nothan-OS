@@ -29,8 +29,9 @@ LDFLAGS := $(shell pkg-config --libs sdl2) -lm -lrt
 #   gui/port/lv_port_indev.c     → lv_port_indev_sdl.c    (SDL2 mouse)
 #   gui/services/storage.c       → storage_sim.c           (no-op; no kernel/FS in sim)
 #   gui/services/modem_client.c  → modem_client_sim.c      (no-op; mock driven by lv_timer)
+#   gui/services/chat_net.c      → chat_net_sim.c          (no-op; the socket is a kernel away)
 SIM_SRC := sim_main.c log_sim.c lv_port_disp_sdl.c lv_port_indev_sdl.c \
-           storage_sim.c modem_client_sim.c
+           storage_sim.c modem_client_sim.c chat_net_sim.c
 
 GUI_ALL  := $(shell find $(ROOT)/gui -name "*.c")
 GUI_EXCL := $(ROOT)/gui/main.c \
@@ -38,7 +39,8 @@ GUI_EXCL := $(ROOT)/gui/main.c \
             $(ROOT)/gui/port/lv_port_disp.c \
             $(ROOT)/gui/port/lv_port_indev.c \
             $(ROOT)/gui/services/storage.c \
-            $(ROOT)/gui/services/modem_client.c
+            $(ROOT)/gui/services/modem_client.c \
+            $(ROOT)/gui/services/chat_net.c
 GUI_SRC  := $(filter-out $(GUI_EXCL), $(GUI_ALL))
 
 LVGL_SRC := $(shell find $(ROOT)/lib/lvgl/src -name "*.c")

@@ -13,13 +13,10 @@
  * carrying two meanings, and the first bug would be a message sent by the
  * wrong path to the right-looking name.
  *
- * WHAT IS NOT HERE YET.  No socket.  chat_send() appends to the store and
- * returns; nothing reaches the wire.  That is the whole of what is missing,
- * and it is missing on purpose so the screens can be built and looked at
- * before the transport under them is wired in — the two fail differently and
- * finding out which is which is easier one at a time.  The seam is
- * chat_send() and chat_poll(); the kernel side they will call is already
- * done and tested (sock_open/sock_send/sock_recv over SOCK_RELIABLE).
+ * The transport is chat_net.c, kept separate the way modem_client.c is kept
+ * separate from messages.c: this file knows what a conversation is, that one
+ * knows how a message travels.  Nothing here calls a syscall, which is what
+ * lets the simulator compile it unchanged on a laptop.
  *
  * Written by Doan Phu Hai <haidoan2098@gmail.com>
  */
@@ -37,7 +34,8 @@ struct chat_message {
 
 struct chat_peer {
 	char name[CHAT_NAME_MAX];
-	char addr[CHAT_ADDR_MAX];
+	char addr[CHAT_ADDR_MAX];	/* the printable form, for the screen */
+	unsigned char  ip[4];		/* the same address, for the wire */
 	unsigned short port;
 
 	struct chat_message msg[CHAT_MSG_MAX];
@@ -54,17 +52,46 @@ const struct chat_peer *chat_peer_get(int idx);
 const struct chat_message *chat_peer_last(int idx);
 
 /*
- * Append @text to @idx as ours.  Returns 0, or -1 if the peer or the text is
- * not usable.  Sending will later mean queueing on the reliable socket; the
- * store is updated first either way, so the bubble appears as the user
- * releases the button rather than one round trip later.
+ * Append @text to @idx as ours and hand it to the transport.
+ *
+ * Returns 0 if the message was stored, whether or not it reached the network:
+ * the bubble appears as the user releases the button, and a peer that is
+ * switched off is the transport's problem to keep retrying, not a reason to
+ * refuse the message on screen.  -1 means the peer or the text is not usable.
  */
 int  chat_send(int idx, const char *text);
 
-/* Append @text to @idx as theirs.  For the receive path, and for the screens
- * to be testable before there is one. */
+/* Append @text to @idx as theirs. */
 int  chat_receive(int idx, const char *text);
 
+/*
+ * Deliver a message that arrived from @ip.
+ *
+ * Matching by address rather than trusting a name in the payload: the sender
+ * is whoever the datagram says it is, and that is the one field on the wire
+ * this box did not have to be told.  A message from an address not in the
+ * peer list is dropped and counted, not turned into a new conversation —
+ * inventing peers from arriving traffic is how a chat window fills with
+ * whatever else is on the segment.
+ */
+void chat_receive_from(const unsigned char *ip, const char *text);
+
+/* Drain the transport into the store.  Call once per GUI loop. */
+void chat_pump(void);
+
 void chat_mark_read(int idx);
+
+/*
+ * Add a peer.  @ip is dotted-quad text; rejected if it does not parse, so a
+ * typo becomes a refusal on the screen rather than an ARP request for an
+ * address nobody meant.
+ *
+ * Return: the new index, or -1.
+ */
+int  chat_peer_add(const char *name, const char *ip);
+
+/* This box's own address, for the profile tab.  A constant until something
+ * hands the network configuration to userspace. */
+const char *chat_self_addr(void);
 
 #endif

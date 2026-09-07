@@ -103,17 +103,38 @@ static void add_row(lv_obj_t *list, const struct chat_peer *p, int idx)
 	}
 }
 
-void chat_list_create(lv_obj_t *screen, void *arg)
+static lv_obj_t *list_obj;
+
+void chat_list_refresh(void)
 {
-	(void)arg;
+	if (!list_obj)
+		return;
 
-	app_header_create(screen, "Chat", NULL);
+	lv_obj_clean(list_obj);
+	for (int i = 0; i < chat_peer_count(); i++)
+		add_row(list_obj, chat_peer_get(i), i);
+}
 
-	lv_obj_t *list = lv_obj_create(screen);
+/*
+ * Forget the container when the shell replaces it.
+ *
+ * The tab bar cleans its content area on every switch, so this pointer is
+ * dangling the moment another tab is chosen — and chat_list_refresh() is
+ * reached from the network path, which would then walk a freed object at
+ * whatever moment a message happened to arrive.
+ */
+static void on_deleted(lv_event_t *e)
+{
+	(void)e;
+	list_obj = NULL;
+}
+
+void chat_list_build(lv_obj_t *parent)
+{
+	lv_obj_t *list = lv_obj_create(parent);
+
 	lv_obj_remove_style_all(list);
-	lv_obj_set_size(list, lv_pct(100),
-			SCREEN_H - APP_HEADER_HEIGHT - NAV_BAR_HEIGHT);
-	lv_obj_align(list, LV_ALIGN_TOP_MID, 0, APP_HEADER_HEIGHT);
+	lv_obj_set_size(list, lv_pct(100), lv_pct(100));
 	lv_obj_set_style_pad_hor(list, 12, 0);
 	lv_obj_set_style_pad_ver(list, 8, 0);
 	lv_obj_set_style_pad_row(list, 8, 0);
@@ -121,7 +142,8 @@ void chat_list_create(lv_obj_t *screen, void *arg)
 	lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(list, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
 			      LV_FLEX_ALIGN_START);
+	lv_obj_add_event_cb(list, on_deleted, LV_EVENT_DELETE, NULL);
 
-	for (int i = 0; i < chat_peer_count(); i++)
-		add_row(list, chat_peer_get(i), i);
+	list_obj = list;
+	chat_list_refresh();
 }

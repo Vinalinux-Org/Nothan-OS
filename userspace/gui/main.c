@@ -87,6 +87,7 @@ void main(void)
 		}
 
 		modem_pump();
+		chat_pump();
 		lv_task_handler();
 		yield();
 	}

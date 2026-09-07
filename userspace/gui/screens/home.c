@@ -10,7 +10,7 @@
 #include "../core/log.h"
 #include "../widgets/status_bar.h"
 #include "../widgets/app_tile.h"
-#include "chat_list.h"
+#include "chat_shell.h"
 #include "../widgets/nav_bar.h"
 #include "call_log.h"
 #include "sms_list.h"
@@ -39,7 +39,7 @@ static const struct app_def apps[] = {
 	/* Chat over IP.  Standing on the Notes tile's slot and glyph until a
 	 * suitable icon exists — the label is what identifies it, and the app
 	 * behind it is real; only the picture is borrowed. */
-	{ LV_SYMBOL_EDIT,      "Chat",     0xEAB308, chat_list_create },
+	{ LV_SYMBOL_EDIT,      "Chat",     0xEAB308, chat_shell_create },
 	{ LV_SYMBOL_SETTINGS,  "Settings", 0x64748B },
 	{ LV_SYMBOL_PLUS,      "Calc",     0x14B8A6 },
 	{ LV_SYMBOL_IMAGE,     "Camera",   0xEF4444 },

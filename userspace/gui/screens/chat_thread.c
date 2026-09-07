@@ -20,6 +20,7 @@
  */
 
 #include "chat_thread.h"
+#include "video_call.h"
 #include "../theme/theme.h"
 #include "../core/nav.h"
 #include "../core/log.h"
@@ -113,20 +114,22 @@ static void on_send(lv_event_t *e)
 }
 
 /*
- * The video call action.
+ * Open the in-call screen.
  *
- * Deliberately loud in the log and silent everywhere else: a button that
- * looked like it worked and did nothing would be the worst of the three
- * options, and one that is missing would hide the shape of the app from
- * whoever looks at the screen next.
+ * The screen is real and the call is not: there is no signalling yet, so
+ * nothing tells the far end, and no pixels move.  Pushing it anyway is worth
+ * more than a button that logs — the layout the video will land in exists and
+ * can be looked at, and the two things still missing (an invite on the wire,
+ * an owner for the framebuffer) are named on screen rather than only in a
+ * comment.
  */
 static void on_video_call(lv_event_t *e)
 {
 	(void)e;
 	const struct chat_peer *p = chat_peer_get(thread_idx);
 
-	gui_logf("event: video call %s — not wired yet (framebuffer owner"
-		 " undecided)\n", p ? p->addr : "?");
+	gui_logf("event: video call %s\n", p ? p->addr : "?");
+	nav_push(video_call_create, (void *)(long)thread_idx);
 }
 
 static void on_input_focus(lv_event_t *e)
@@ -201,6 +204,32 @@ static lv_obj_t *build_input_bar(lv_obj_t *parent)
 	return bar;
 }
 
+/*
+ * Re-read the store.  Fired on SCREEN_LOADED, which arrives both when this
+ * screen is opened and when chat.c sends it by hand after a message lands, so
+ * a thread left open updates itself without the transport knowing a screen
+ * exists.
+ */
+static void on_screen_loaded(lv_event_t *e)
+{
+	(void)e;
+	chat_mark_read(thread_idx);
+	rebuild_thread();
+}
+
+/*
+ * Forget the objects before LVGL frees them.  @thread_list outlives this
+ * screen as a pointer but not as an object, and rebuild_thread() would then
+ * clean a dangling one — a use-after-free reached from the network path,
+ * which is the worst place to find it.
+ */
+static void on_screen_unloaded(lv_event_t *e)
+{
+	(void)e;
+	thread_list  = NULL;
+	thread_input = NULL;
+}
+
 void chat_thread_create(lv_obj_t *screen, void *arg)
 {
 	thread_idx = (int)(long)arg;
@@ -236,6 +265,10 @@ void chat_thread_create(lv_obj_t *screen, void *arg)
 	lv_obj_set_flex_flow(thread_list, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(thread_list, LV_FLEX_ALIGN_START,
 			      LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+
+	lv_obj_add_event_cb(screen, on_screen_loaded, LV_EVENT_SCREEN_LOADED, NULL);
+	lv_obj_add_event_cb(screen, on_screen_unloaded,
+			    LV_EVENT_SCREEN_UNLOAD_START, NULL);
 
 	chat_mark_read(thread_idx);
 	rebuild_thread();
