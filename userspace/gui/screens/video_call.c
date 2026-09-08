@@ -27,6 +27,7 @@
 #include "../theme/theme.h"
 #include "../core/nav.h"
 #include "../core/log.h"
+#include "../widgets/nav_bar.h"
 #include "../services/chat.h"
 #include "../services/call.h"
 
@@ -34,6 +35,16 @@
 #define SELF_H      160
 #define SELF_MARGIN 16
 #define BTN_SZ      72
+
+/*
+ * Buttons clear the system nav bar, which draws on the top layer and so is
+ * over everything regardless of what this screen thinks it owns.
+ *
+ * This was a bare -48 and the buttons ran eight pixels under it.  Every other
+ * screen in the app offsets by NAV_BAR_HEIGHT; this one did not, and the
+ * arithmetic is exactly the kind that looks right until the panel shows it.
+ */
+#define BTN_BOTTOM  (NAV_BAR_HEIGHT + 24)
 
 static int         call_idx;
 static lv_obj_t   *dur_label;
@@ -160,7 +171,7 @@ static lv_obj_t *round_btn(lv_obj_t *parent, const char *symbol,
 
 	lv_obj_remove_style_all(btn);
 	lv_obj_set_size(btn, w, w);
-	lv_obj_align(btn, LV_ALIGN_BOTTOM_MID, x, -48);
+	lv_obj_align(btn, LV_ALIGN_BOTTOM_MID, x, -BTN_BOTTOM);
 	lv_obj_set_ext_click_area(btn, 12);
 	lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0);
 	lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
