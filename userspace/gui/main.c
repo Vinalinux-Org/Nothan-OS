@@ -18,6 +18,8 @@
 #include "core/call_ui.h"
 #include "services/messages.h"
 #include "services/chat.h"
+#include "services/call.h"
+#include "screens/video_call.h"
 #include "services/telephony.h"
 #include "services/modem_client.h"
 #include "../lib/syscall.h"
@@ -45,6 +47,8 @@ void main(void)
 	 * reboots. The demo has no address book — Phone/Messages show numbers. */
 	messages_init();
 	chat_init();
+	call_init();
+	call_set_ring_handler(video_call_ring);
 	telephony_init();
 	call_ui_init();
 	modem_client_init();
@@ -88,6 +92,7 @@ void main(void)
 
 		modem_pump();
 		chat_pump();
+		call_tick();
 		lv_task_handler();
 		yield();
 	}

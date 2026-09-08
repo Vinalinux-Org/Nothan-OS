@@ -28,6 +28,7 @@
 #include "../widgets/app_header.h"
 #include "../widgets/nav_bar.h"
 #include "../services/chat.h"
+#include "../services/call.h"
 
 #define INPUT_H     68
 #define BUBBLE_MAXW 240
@@ -128,7 +129,11 @@ static void on_video_call(lv_event_t *e)
 	(void)e;
 	const struct chat_peer *p = chat_peer_get(thread_idx);
 
-	gui_logf("event: video call %s\n", p ? p->addr : "?");
+	(void)p;
+	if (call_dial(thread_idx) != 0) {
+		gui_logf("event: cannot call, already in one\n");
+		return;
+	}
 	nav_push(video_call_create, (void *)(long)thread_idx);
 }
 

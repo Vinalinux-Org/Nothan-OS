@@ -24,6 +24,26 @@
  */
 #define CHAT_PORT	6000
 
+/*
+ * Wire format: one type byte, then whatever that type carries.
+ *
+ * Chat and call control share the socket rather than taking a port each,
+ * because they are the same relationship with the same machine — two ports
+ * would mean two ARP entries, two transport sessions and two things that can
+ * be separately alive, for a distinction the user does not have.
+ *
+ * The cost is that a control message queues behind any text already in flight.
+ * The transport is stop-and-wait with a queue of four, so the worst case is a
+ * few hundred milliseconds before a hangup is sent — slower than a person
+ * expects a button to feel, and far faster than the ring timeout that is the
+ * only thing which can go wrong because of it.
+ */
+#define CHAT_MSG_TEXT	1	/* payload: the message, no NUL */
+#define CHAT_MSG_INVITE	2	/* "I would like a video call" */
+#define CHAT_MSG_ACCEPT	3	/* "go ahead" */
+#define CHAT_MSG_REJECT	4	/* "not now" */
+#define CHAT_MSG_BYE	5	/* "we are done" — either side, any time */
+
 /* Open the socket.  Safe to call when there is none — everything below then
  * becomes a no-op and the app still runs, which is how it behaved all the way
  * through building the screens. */
@@ -41,6 +61,16 @@ void chat_net_init(void);
  */
 int  chat_net_send(const unsigned char *ip, unsigned short port,
 		   const char *text);
+
+/*
+ * Send a control message: a type and nothing else.
+ *
+ * Same reliability as text, and that matters most for BYE — a hangup that is
+ * lost leaves the far end showing a call that ended minutes ago, which is the
+ * one failure in this protocol a person notices immediately.
+ */
+int  chat_net_send_ctl(const unsigned char *ip, unsigned short port,
+		       unsigned char type);
 
 /*
  * Drain whatever has arrived, delivering each message into the store.

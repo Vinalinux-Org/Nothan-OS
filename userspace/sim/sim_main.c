@@ -30,6 +30,8 @@
 #include "services/contacts.h"
 #include "services/messages.h"
 #include "services/chat.h"
+#include "services/call.h"
+#include "screens/video_call.h"
 #include "services/telephony.h"
 #include "services/modem_client.h"
 
@@ -632,6 +634,8 @@ int main(void)
 	contacts_init();
 	messages_init();
 	chat_init();
+	call_init();
+	call_set_ring_handler(video_call_ring);
 	telephony_init();
 	call_ui_init();
 #if !defined(SIM_AUTOTAP) && !defined(SIM_MONKEY)
@@ -706,6 +710,7 @@ int main(void)
 		}
 
 		chat_pump();
+		call_tick();
 		lv_task_handler();
 		SDL_Delay(1);
 	}

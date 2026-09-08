@@ -28,6 +28,14 @@ int chat_net_send(const unsigned char *ip, unsigned short port,
 	return 0;
 }
 
+int chat_net_send_ctl(const unsigned char *ip, unsigned short port,
+		      unsigned char type)
+{
+	gui_logf("chat: [sim] would send control %u to %u.%u.%u.%u:%u\n",
+		 type, ip[0], ip[1], ip[2], ip[3], port);
+	return 0;
+}
+
 void chat_net_pump(void)
 {
 }
