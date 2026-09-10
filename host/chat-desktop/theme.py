@@ -183,6 +183,12 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none
 
 /* --- man hinh cuoc goi --- */
 #CallRoot {{ background: #0f0f10; }}
+#SelfAddr {{
+    font-size: 11px;
+    color: {TEXT_DIM};
+    padding: 4px 2px 0 2px;
+    background: transparent;
+}}
 #CallName {{ font-size: 22px; font-weight: 600; background: transparent; }}
 #CallState {{ font-size: 14px; color: {TEXT_DIM}; background: transparent; }}
 #CallStage {{ background: #000000; border-radius: 12px; }}

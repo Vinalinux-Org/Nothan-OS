@@ -252,7 +252,7 @@ static void build_tab_bar(lv_obj_t *screen)
 
 	lv_obj_remove_style_all(bar);
 	lv_obj_set_size(bar, lv_pct(100), TAB_BAR_H);
-	lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, -NAV_BAR_HEIGHT);
+	lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, 0);
 	lv_obj_set_style_bg_color(bar, theme_color(THEME_SURFACE), 0);
 	lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
 	lv_obj_set_style_border_side(bar, LV_BORDER_SIDE_TOP, 0);
@@ -282,9 +282,29 @@ static void build_tab_bar(lv_obj_t *screen)
 	}
 }
 
+static void on_leave(lv_event_t *e)
+{
+	(void)e;
+	nav_pop();
+}
+
+/*
+ * The system nav bar is hidden for as long as this app is the one on screen.
+ *
+ * Two bars of buttons along the bottom is 120 of 800 pixels spent on chrome
+ * that does nearly the same job twice, and the app in the photograph this is
+ * modelled on has one.  The screens pushed above this — thread, contact,
+ * call — keep it hidden and carry their own back chevron, which is what
+ * app_header_back() exists for.
+ *
+ * Hidden on load rather than once at create, because returning from one of
+ * those screens re-loads this one and the bar has to stay gone.  Shown again
+ * on delete, which is the single moment the app is actually being left.
+ */
 static void on_screen_loaded(lv_event_t *e)
 {
 	(void)e;
+	nav_show_chrome(false);
 	/* Coming back from a thread or a call: the store may have moved on. */
 	show_tab(cur_tab);
 }
@@ -292,6 +312,7 @@ static void on_screen_loaded(lv_event_t *e)
 static void on_deleted(lv_event_t *e)
 {
 	(void)e;
+	nav_show_chrome(true);
 	content      = NULL;
 	header_title = NULL;
 	for (int i = 0; i < TAB_COUNT; i++)
@@ -314,6 +335,27 @@ void chat_shell_create(lv_obj_t *screen, void *arg)
 	lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
 	lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
 
+	/*
+	 * The app's own way out, because the system bar is hidden below.
+	 * Built here rather than through app_header_back() since this header
+	 * keeps its label to rename per tab, which that one owns.
+	 */
+	lv_obj_t *back = lv_button_create(bar);
+	lv_obj_remove_style_all(back);
+	lv_obj_set_size(back, 52, 52);
+	lv_obj_align(back, LV_ALIGN_LEFT_MID, 8, 0);
+	lv_obj_set_ext_click_area(back, 12);
+	lv_obj_set_style_radius(back, RADIUS_SM, 0);
+	lv_obj_set_style_bg_color(back, theme_color(THEME_TEXT), LV_STATE_PRESSED);
+	lv_obj_set_style_bg_opa(back, LV_OPA_20, LV_STATE_PRESSED);
+	lv_obj_add_event_cb(back, on_leave, LV_EVENT_CLICKED, NULL);
+
+	lv_obj_t *back_g = lv_label_create(back);
+	lv_label_set_text(back_g, LV_SYMBOL_LEFT);
+	lv_obj_set_style_text_color(back_g, theme_color(THEME_TEXT), 0);
+	lv_obj_set_style_text_font(back_g, &lv_font_montserrat_24, 0);
+	lv_obj_center(back_g);
+
 	header_title = lv_label_create(bar);
 	lv_obj_set_style_text_color(header_title, theme_color(THEME_TEXT), 0);
 	lv_obj_set_style_text_font(header_title, &lv_font_montserrat_20, 0);
@@ -321,8 +363,10 @@ void chat_shell_create(lv_obj_t *screen, void *arg)
 
 	content = lv_obj_create(screen);
 	lv_obj_remove_style_all(content);
+	/* No NAV_BAR_HEIGHT here: this app hides the system bar, so the tab bar
+	 * sits on the bottom edge and the content gets the 56 pixels back. */
 	lv_obj_set_size(content, lv_pct(100),
-			SCREEN_H - APP_HEADER_HEIGHT - TAB_BAR_H - NAV_BAR_HEIGHT);
+			SCREEN_H - APP_HEADER_HEIGHT - TAB_BAR_H);
 	lv_obj_align(content, LV_ALIGN_TOP_MID, 0, APP_HEADER_HEIGHT);
 	lv_obj_clear_flag(content, LV_OBJ_FLAG_SCROLLABLE);
 

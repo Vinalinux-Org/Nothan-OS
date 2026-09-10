@@ -28,6 +28,7 @@
 #include "../core/nav.h"
 #include "../core/log.h"
 #include "../widgets/nav_bar.h"
+#include "../widgets/avatar.h"
 #include "../services/chat.h"
 #include "../services/call.h"
 
@@ -40,14 +41,16 @@
  * Buttons clear the system nav bar, which draws on the top layer and so is
  * over everything regardless of what this screen thinks it owns.
  *
- * This was a bare -48 and the buttons ran eight pixels under it.  Every other
- * screen in the app offsets by NAV_BAR_HEIGHT; this one did not, and the
- * arithmetic is exactly the kind that looks right until the panel shows it.
+ * This was a bare -48 while the bar was still shown, and the buttons ran eight
+ * pixels under it.  The app hides the bar now — see on_chrome_show() — so the
+ * clearance is back to a plain margin, and the screen owns hiding it rather
+ * than assuming somebody else did.
  */
-#define BTN_BOTTOM  (NAV_BAR_HEIGHT + 24)
+#define BTN_BOTTOM  48
 
 static int         call_idx;
 static lv_obj_t   *dur_label;
+static lv_obj_t   *hint_label;
 static lv_obj_t   *state_label;
 static lv_obj_t   *accept_btn;
 static lv_obj_t   *reject_btn;
@@ -132,6 +135,27 @@ static void on_tick(lv_timer_t *t)
  * write through a freed pointer once a second — the kind of fault that shows
  * up minutes later, somewhere else, as memory that will not make sense.
  */
+
+/*
+ * The Chat app hides the system nav bar and carries its own back chevron, so
+ * every screen in it keeps the bar gone while it is up and puts it back when
+ * it goes.  Each screen owning both halves is what makes the sequence work
+ * from anywhere: a call screen opened from Home restores the bar on the way
+ * out, and one opened from a thread has it hidden again by the thread's own
+ * load event a frame later.
+ */
+static void on_chrome_show(lv_event_t *e)
+{
+	(void)e;
+	nav_show_chrome(false);
+}
+
+static void on_chrome_restore(lv_event_t *e)
+{
+	(void)e;
+	nav_show_chrome(true);
+}
+
 static void on_screen_unloaded(lv_event_t *e)
 {
 	(void)e;
@@ -140,7 +164,7 @@ static void on_screen_unloaded(lv_event_t *e)
 		dur_timer = NULL;
 	}
 	call_set_observer(NULL);
-	dur_label = state_label = NULL;
+	dur_label = state_label = hint_label = NULL;
 	accept_btn = reject_btn = hangup_btn = NULL;
 }
 
@@ -192,7 +216,7 @@ static lv_obj_t *round_btn(lv_obj_t *parent, const char *symbol,
  * puts it — centred and doubled into the panel — and a layout that disagreed
  * with the code underneath would have to be redone the day they meet.
  */
-static void build_stage(lv_obj_t *screen)
+static void build_stage(lv_obj_t *screen, const struct chat_peer *p)
 {
 	lv_obj_t *stage = lv_obj_create(screen);
 
@@ -203,11 +227,54 @@ static void build_stage(lv_obj_t *screen)
 	lv_obj_set_style_bg_opa(stage, LV_OPA_COVER, 0);
 	lv_obj_clear_flag(stage, LV_OBJ_FLAG_SCROLLABLE);
 
-	lv_obj_t *note = lv_label_create(stage);
-	lv_label_set_text(note, LV_SYMBOL_VIDEO "  no video yet");
-	lv_obj_set_style_text_color(note, theme_color(THEME_SUBTEXT), 0);
-	lv_obj_set_style_text_font(note, &lv_font_montserrat_16, 0);
-	lv_obj_center(note);
+	/*
+	 * Who is on the other end, in the middle of the frame the video will
+	 * fill.
+	 *
+	 * It was a grey line of text in an empty rectangle, which is what a
+	 * call screen looks like when it is describing its own implementation
+	 * rather than the call.  A person waiting for someone to pick up is
+	 * looking for that someone; the avatar, the name and the state are the
+	 * three things they are actually reading, so they go where the eye
+	 * already is.  When frames start arriving this block is what gets
+	 * hidden — the layout underneath is already correct.
+	 */
+	lv_obj_t *col = lv_obj_create(stage);
+	lv_obj_remove_style_all(col);
+	lv_obj_set_size(col, lv_pct(100), LV_SIZE_CONTENT);
+	lv_obj_align(col, LV_ALIGN_CENTER, 0, -40);
+	lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+	lv_obj_set_flex_align(col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+			      LV_FLEX_ALIGN_CENTER);
+	lv_obj_set_style_pad_row(col, 10, 0);
+	lv_obj_clear_flag(col, LV_OBJ_FLAG_SCROLLABLE);
+
+	avatar_create(col, p ? p->name[0] : '?', 120, &lv_font_montserrat_42);
+
+	lv_obj_t *name = lv_label_create(col);
+	lv_label_set_text(name, p ? p->name : "Call");
+	lv_obj_set_style_text_color(name, theme_color(THEME_TEXT), 0);
+	lv_obj_set_style_text_font(name, &lv_font_montserrat_28, 0);
+
+	state_label = lv_label_create(col);
+	lv_obj_set_style_text_color(state_label, theme_color(THEME_ACCENT_2), 0);
+	lv_obj_set_style_text_font(state_label, &lv_font_montserrat_20, 0);
+
+	dur_label = lv_label_create(col);
+	lv_label_set_text(dur_label, "00:00");
+	lv_obj_set_style_text_color(dur_label, theme_color(THEME_TEXT), 0);
+	lv_obj_set_style_text_font(dur_label, &lv_font_montserrat_24, 0);
+
+	lv_obj_t *addr = lv_label_create(col);
+	lv_label_set_text(addr, p ? p->addr : "");
+	lv_obj_set_style_text_color(addr, theme_color(THEME_SUBTEXT), 0);
+	lv_obj_set_style_text_font(addr, &lv_font_montserrat_16, 0);
+
+	hint_label = lv_label_create(stage);
+	lv_label_set_text(hint_label, LV_SYMBOL_VIDEO "  chưa có luồng video");
+	lv_obj_set_style_text_color(hint_label, theme_color(THEME_SUBTEXT), 0);
+	lv_obj_set_style_text_font(hint_label, &lv_font_montserrat_16, 0);
+	lv_obj_align(hint_label, LV_ALIGN_BOTTOM_MID, 0, -(BTN_BOTTOM + 96));
 }
 
 /* The self-view, where a corner of the local camera will go. */
@@ -255,33 +322,8 @@ void video_call_create(lv_obj_t *screen, void *arg)
 	call_idx = (int)(long)arg;
 	p = chat_peer_get(call_idx);
 
-	build_stage(screen);
+	build_stage(screen, p);
 	build_self_view(screen);
-
-	/* Who, and where — the address is on screen because with one hard-coded
-	 * peer it is the fact worth checking against the log. */
-	lv_obj_t *name = lv_label_create(screen);
-	lv_label_set_text(name, p ? p->name : "Call");
-	lv_obj_set_style_text_color(name, theme_color(THEME_TEXT), 0);
-	lv_obj_set_style_text_font(name, &lv_font_montserrat_24, 0);
-	lv_obj_align(name, LV_ALIGN_TOP_LEFT, 20, 40);
-
-	lv_obj_t *addr = lv_label_create(screen);
-	lv_label_set_text(addr, p ? p->addr : "");
-	lv_obj_set_style_text_color(addr, theme_color(THEME_SUBTEXT), 0);
-	lv_obj_set_style_text_font(addr, &lv_font_montserrat_16, 0);
-	lv_obj_align(addr, LV_ALIGN_TOP_LEFT, 20, 74);
-
-	state_label = lv_label_create(screen);
-	lv_obj_set_style_text_color(state_label, theme_color(THEME_ACCENT_2), 0);
-	lv_obj_set_style_text_font(state_label, &lv_font_montserrat_20, 0);
-	lv_obj_align(state_label, LV_ALIGN_TOP_LEFT, 20, 102);
-
-	dur_label = lv_label_create(screen);
-	lv_label_set_text(dur_label, "00:00");
-	lv_obj_set_style_text_color(dur_label, theme_color(THEME_TEXT), 0);
-	lv_obj_set_style_text_font(dur_label, &lv_font_montserrat_20, 0);
-	lv_obj_align(dur_label, LV_ALIGN_TOP_RIGHT, -20, 102);
 
 	/*
 	 * The clock reads the call's own age rather than counting its own
@@ -300,6 +342,8 @@ void video_call_create(lv_obj_t *screen, void *arg)
 	accept_btn = round_btn(screen, LV_SYMBOL_VIDEO, THEME_SUCCESS, BTN_SZ, 80);
 	lv_obj_add_event_cb(accept_btn, on_accept, LV_EVENT_CLICKED, NULL);
 
+	lv_obj_add_event_cb(screen, on_chrome_show, LV_EVENT_SCREEN_LOADED, NULL);
+	lv_obj_add_event_cb(screen, on_chrome_restore, LV_EVENT_DELETE, NULL);
 	lv_obj_add_event_cb(screen, on_screen_unloaded,
 			    LV_EVENT_SCREEN_UNLOAD_START, NULL);
 

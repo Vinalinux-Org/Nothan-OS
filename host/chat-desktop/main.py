@@ -13,12 +13,14 @@ import sys
 
 from PySide6.QtCore import Qt, QSize, QTimer
 from PySide6.QtWidgets import (
-    QApplication, QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget,
+    QApplication, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
+    QListWidget, QMessageBox,
     QListWidgetItem, QMainWindow, QPushButton, QScrollArea, QSizePolicy,
     QSplitter, QVBoxLayout, QWidget,
 )
 
 import icons
+import log
 import net
 import theme
 import call as callui
@@ -26,39 +28,22 @@ from call import CallWindow
 from widgets import Avatar, Bubble, ConversationRow
 
 
-# Du lieu gia. Mot hoi thoai gom dia chi de sau nay gui that va mot danh
-# sach tin nhan (nguoi gui la None nghia la cua minh).
+# Danh sach hoi thoai. Mot cai, va no la board.
+#
+# Hai hoi thoai gia truoc day tro 192.168.7.x - khong co ai o do, nen nhan
+# vao chung chi lam transport gui lai muoi lan roi bo cuoc. Mot danh sach
+# ngan va that thi de doc hon mot danh sach dai va nua that, va nut soan
+# tin o goc tren la cach them nguoi moi.
+#
+# Tin nhan bat dau rong: nhung dong hoi thoai cu la do minh go ra, khong
+# phai do ai gui, va mot cua so chat mo len voi nhung cau khong ai noi la
+# thu khien nguoi dung khong tin phan con lai cua man hinh.
 CONVERSATIONS = [
     {
         "name": "BeagleBone Black",
         "addr": "10.42.0.2:6000",
-        "when": "2 phút",
-        "messages": [
-            ("BeagleBone Black", "Board đã khởi động xong"),
-            ("BeagleBone Black", "LCD 480x272, cảm ứng đã nhận"),
-            (None, "Ok, thử gửi một tin từ đây xem"),
-            ("BeagleBone Black", "Nhận được rồi nhé"),
-            (None, "Ngon. Lát nữa thử gọi video"),
-        ],
-    },
-    {
-        "name": "Máy trạm phòng họp",
-        "addr": "192.168.7.10:6000",
-        "when": "1 giờ",
-        "messages": [
-            ("Máy trạm phòng họp", "Chiều nay họp lúc mấy giờ?"),
-            (None, "3 giờ, phòng nhỏ"),
-            ("Máy trạm phòng họp", "Rõ"),
-        ],
-    },
-    {
-        "name": "Bàn thử nghiệm",
-        "addr": "192.168.7.20:6000",
-        "when": "Hôm qua",
-        "messages": [
-            (None, "Board này để dành cho bản build tối nay"),
-            ("Bàn thử nghiệm", "Đang cắm nguồn, chưa nối mạng"),
-        ],
+        "when": "",
+        "messages": [],
     },
 ]
 
@@ -117,8 +102,9 @@ class ChatWindow(QMainWindow):
         title = QLabel("Đoạn chat")
         title.setObjectName("SidebarTitle")
         head.addWidget(title, 1)
-        head.addWidget(self._icon_button("compose", "Soạn tin nhắn",
-                                         theme.TEXT))
+        compose = self._icon_button("compose", "Thêm liên hệ", theme.TEXT)
+        compose.clicked.connect(self._on_add_contact)
+        head.addWidget(compose)
         box.addLayout(head)
 
         search = QLineEdit()
@@ -145,7 +131,23 @@ class ChatWindow(QMainWindow):
             self.conv_list.setItemWidget(item, row)
 
         box.addWidget(self.conv_list, 1)
+
+        # Dia chi cua may nay, de nguoi ben board go vao may ho. Hoi kernel
+        # duong nao se duoc dung chu khong ghi cung: neu day mang chua len
+        # thi con so nay se khac, va no khac dung luc no nen khac.
+        self.self_lbl = QLabel()
+        self.self_lbl.setObjectName("SelfAddr")
+        self.self_lbl.setToolTip("Địa chỉ máy này — người bên board nhập số này")
+        box.addWidget(self.self_lbl)
+        self._refresh_self_addr()
+
         return panel
+
+    def _refresh_self_addr(self) -> None:
+        peer = net.parse_addr(self._convs[0]["addr"]) if self._convs else None
+        ip = net.local_addr_for(peer[0]) if peer else None
+        self.self_lbl.setText(f"Máy này: {ip}:{net.CHAT_PORT}" if ip
+                              else "Máy này: chưa có đường mạng")
 
     @staticmethod
     def _preview(conv: dict) -> str:
@@ -350,11 +352,53 @@ class ChatWindow(QMainWindow):
 
         self.send_message(conv["addr"], text)
 
+    # ------------------------------------------------------------ them nguoi
+
+    def _on_add_contact(self) -> None:
+        """Hoi ten va dia chi, roi them mot hoi thoai.
+
+        Go tay, vi tren mang nay khong co gi tu gioi thieu. Mot may tra loi
+        moi thong bao tren doan day se gom ve bat cu thu gi khac dang cam -
+        tim kiem tu dong la mot thiet ke rieng, va cho den khi no ton tai
+        thi giao dien trung thuc la giao dien biet hoi.
+        """
+        name, ok = QInputDialog.getText(self, "Liên hệ mới", "Tên:")
+        if not ok or not name.strip():
+            return
+
+        addr, ok = QInputDialog.getText(
+            self, "Liên hệ mới", "Địa chỉ (ví dụ 10.42.0.2):",
+            text="10.42.0.")
+        if not ok:
+            return
+
+        if net.parse_addr(addr) is None:
+            QMessageBox.warning(self, "Địa chỉ không hợp lệ",
+                                f"Không đọc được “{addr}”.")
+            return
+
+        # Chuan hoa ve dang co cong, de moi dong trong danh sach doc giong
+        # nhau du nguoi dung co go cong hay khong.
+        ip, port = net.parse_addr(addr)
+        self._convs.append({
+            "name": name.strip(),
+            "addr": f"{ip}:{port}",
+            "when": "",
+            "messages": [],
+        })
+
+        item = QListWidgetItem(self.conv_list)
+        row = ConversationRow(name.strip(), f"{ip}:{port}", "")
+        item.setSizeHint(QSize(0, 66))
+        self.conv_list.addItem(item)
+        self.conv_list.setItemWidget(item, row)
+        self.conv_list.setCurrentRow(self.conv_list.count() - 1)
+
     def send_message(self, addr: str, text: str) -> None:
         """Duong cat giua giao dien va mang. Chi ham nay biet den socket."""
         target = net.parse_addr(addr)
         if target is None:
-            print(f"[app] dia chi khong hop le: {addr}")
+            log.warn("chat", f"dia chi khong hop le: {addr}")
             return
         self._link.send_text(target, text)
 
@@ -377,7 +421,7 @@ class ChatWindow(QMainWindow):
     def _on_net_text(self, addr, text: str) -> None:
         idx = self._conv_by_addr(addr)
         if idx is None:
-            print(f"[app] tin tu {addr[0]} khong thuoc hoi thoai nao, bo")
+            log.warn("chat", f"tin tu {addr[0]} khong thuoc hoi thoai nao, bo")
             return
 
         conv = self._convs[idx]
@@ -424,6 +468,7 @@ class ChatWindow(QMainWindow):
             on_accept=lambda: self._call_accept(addr),
             on_reject=lambda: self._link.send_control(addr, net.MSG_REJECT),
             on_hangup=lambda: self._link.send_control(addr, net.MSG_BYE),
+            board_ip=addr[0],
         )
         self._call.exec()
         self._call = None

@@ -11,12 +11,15 @@ Written by Doan Phu Hai <haidoan2098@gmail.com>
 """
 
 from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
     QDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
 )
 
 import icons
+import log
 import theme
+import video as videolink
 from widgets import Avatar
 
 # Cung bon trang thai ma call.h tren board dung. Giong nhau la co y: mot
@@ -41,7 +44,8 @@ class CallWindow(QDialog):
     """
 
     def __init__(self, peer: str, addr: str, state: int, parent=None,
-                 on_accept=None, on_reject=None, on_hangup=None):
+                 on_accept=None, on_reject=None, on_hangup=None,
+                 board_ip: str | None = None):
         super().__init__(parent)
         self.setWindowTitle(f"Cuộc gọi · {peer}")
         self.setObjectName("CallRoot")
@@ -76,10 +80,22 @@ class CallWindow(QDialog):
         stage = QFrame()
         stage.setObjectName("CallStage")
         stage_l = QVBoxLayout(stage)
+        stage_l.setContentsMargins(0, 0, 0, 0)
+
+        # Khung hinh nam duoi, dong chu nam tren. Ca hai cung o mot cho:
+        # khi co hinh thi dong chu an di, chu khong phai doi bo cuc - mot
+        # bo cuc thay doi luc luong hinh chap chon se nhay giat theo.
+        self.frame_lbl = QLabel()
+        self.frame_lbl.setAlignment(Qt.AlignCenter)
+        self.frame_lbl.setStyleSheet("background: transparent;")
+        self.frame_lbl.hide()
+        stage_l.addWidget(self.frame_lbl)
+
         hint = QLabel("Chưa có luồng video")
         hint.setAlignment(Qt.AlignCenter)
         hint.setStyleSheet(f"color: {theme.TEXT_DIM}; background: transparent;")
         stage_l.addWidget(hint)
+        self._hint = hint
         root.addWidget(stage, 1)
 
         ctl = QHBoxLayout()
@@ -115,12 +131,29 @@ class CallWindow(QDialog):
         self._tick.timeout.connect(self._on_tick)
         self._tick.start(1000)
 
+        # Luong hinh. Chi mo khi ca hai dau da dong y - xin hinh trong luc
+        # con dang do chuong la bat camera cua nguoi chua nhan may.
+        self._video = None
+        if board_ip:
+            self._video = videolink.VideoLink(board_ip)
+            self._video.on_frame = self._on_frame
+            self._vtick = QTimer(self)
+            self._vtick.timeout.connect(self._video.tick)
+            self._vtick.start(10)
+
         self.set_state(state)
 
     # -- ben ngoai goi vao khi mang bao trang thai doi --------------------
 
     def set_state(self, state: int) -> None:
+        was = self._state
         self._state = state
+
+        if self._video:
+            if state == ACTIVE and was != ACTIVE:
+                self._video.start()
+            elif state != ACTIVE and was == ACTIVE:
+                self._video.stop()
 
         if state == ACTIVE:
             m, s = divmod(self._seconds, 60)
@@ -137,10 +170,47 @@ class CallWindow(QDialog):
         if state == IDLE:
             self._close_quietly()
 
+    def _on_frame(self, data: bytes, w: int, h: int) -> None:
+        """Mot khung du, RGB565 -> anh.
+
+        Qt co san Format_RGB16, dung la RGB565, nen khong phai doi mau gi:
+        byte roi khoi cam bien la byte Qt ve len. @data phai duoc giu song
+        toi khi QPixmap cam xong, nen chuyen ngay chu khong tra ve QImage.
+        """
+        img = QImage(data, w, h, w * 2, QImage.Format_RGB16)
+        pix = QPixmap.fromImage(img).scaled(
+            self.frame_lbl.size(), Qt.KeepAspectRatio, Qt.FastTransformation)
+        self.frame_lbl.setPixmap(pix)
+
+        if self._hint.isVisible():
+            self._hint.hide()
+            self.frame_lbl.show()
+            log.info("video", f"khung dau tien {w}x{h}")
+
+    def _cleanup(self) -> None:
+        """Dung nhung gi con chay ben trong, an toan goi lai nhieu lan.
+
+        QDialog.accept()/reject() chi goi hide(), khong goi close() - nen
+        closeEvent() khong chay tren duong do. Neu chi dua vao closeEvent
+        de dong socket thi moi cuoc goi ket thuc binh thuong (bam cup, bi
+        tu choi, hoac BYE tu xa - deu di qua accept()) se de lai mot cua
+        so an voi timer 10 ms con quay va mot socket UDP khong bao gio
+        dong. Goi truc tiep tu ca hai duong la cach chac chan, khong phai
+        dua vao mot su kien co the khong toi.
+        """
+        self._stop_video()
+        if self._tick.isActive():
+            self._tick.stop()
+
     def _close_quietly(self) -> None:
         """Dong ma khong bao hangup nguoc lai - cuoc goi da ket thuc roi."""
         self._closing = True
+        self._cleanup()
         self.accept()
+        # accept() chi an cua so, khong huy no - khong co dong nay, moi
+        # cuoc goi de lai mot QDialog song trong bo nho, chi mai lam viec
+        # ma khong ai con nhin thay.
+        self.deleteLater()
 
     # -- nut -------------------------------------------------------------
 
@@ -154,7 +224,13 @@ class CallWindow(QDialog):
             cb()
         self._close_quietly()
 
+    def _stop_video(self) -> None:
+        if self._video:
+            self._video.close()
+            self._video = None
+
     def closeEvent(self, ev):
+        self._cleanup()
         # Bam dau X cua cua so cung la cup may. Khong bao thi dau kia con
         # ngoi trong mot cuoc goi da khong con ai.
         if not self._closing and self._on_hangup:

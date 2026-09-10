@@ -23,6 +23,8 @@ import socket
 import struct
 import time
 
+import log
+
 # --- rel.h ---------------------------------------------------------------
 REL_MAGIC = 0x4E54          # 'N','T'
 REL_HDR = struct.Struct(">HBBII")   # magic, type, reserved, session, seq
@@ -71,19 +73,18 @@ class ChatLink:
     dung nhip board dung, nen hai ben het gio gan nhu cung luc.
     """
 
-    def __init__(self, port=CHAT_PORT, log=print):
+    def __init__(self, port=CHAT_PORT):
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._sock.bind(("0.0.0.0", port))
         self._sock.setblocking(False)
         self._peers = {}
-        self._log = log
 
         # Nguoi goi gan vao. De trong thi tin den bi bo, khong phai loi.
         self.on_text = None       # (addr, str)
         self.on_control = None    # (addr, int)
 
-        self._log(f"[net] nghe cong {port}, transport tin cay")
+        log.info("net", f"nghe cong {port}, transport tin cay")
 
     # -- gui -------------------------------------------------------------
 
@@ -98,7 +99,7 @@ class ChatLink:
         # Hang doi bon, giong board. Day la mot nguoi go phim, khong phai
         # mot luong du lieu - hang day nghia la dau kia da im mot luc.
         if len(p.queue) >= 4:
-            self._log(f"[net] hang doi day, bo mot tin toi {addr}")
+            log.warn("net", f"hang doi day, bo mot tin toi {addr}")
             return
         p.queue.append(payload)
 
@@ -129,7 +130,7 @@ class ChatLink:
         if p.retries > REL_RETRIES:
             # Bo cuoc. Giu lai thi moi tin phia sau tac theo, va mot may
             # dang tat se lam im hoi thoai vinh vien thay vi tam thoi.
-            self._log(f"[net] bo cuoc voi {addr} sau {REL_RETRIES} lan gui lai")
+            log.warn("net", f"bo cuoc voi {addr} sau {REL_RETRIES} lan gui lai")
             p.in_flight = None
             return
 
@@ -155,7 +156,7 @@ class ChatLink:
             except BlockingIOError:
                 return
             except OSError as e:
-                self._log(f"[net] loi doc socket: {e}")
+                log.error("net", f"loi doc socket: {e}")
                 return
             self._on_datagram(data, addr)
 
@@ -213,12 +214,33 @@ class ChatLink:
             if self.on_text:
                 self.on_text(addr, payload[1:].decode("utf-8", "replace"))
         else:
-            self._log(f"[net] {MSG_NAME.get(kind, kind)} tu {addr[0]}")
+            log.info("call", f"{MSG_NAME.get(kind, kind)} tu {addr[0]}")
             if self.on_control:
                 self.on_control(addr, kind)
 
     def close(self) -> None:
         self._sock.close()
+
+
+def local_addr_for(peer_ip: str):
+    """Dia chi cua may nay, nhin tu phia @peer_ip.
+
+    May host co nhieu interface - WiFi, vmnet, dây - va cai nao duoc dung
+    la do bang dinh tuyen quyet dinh, khong phai do ta chon. Mo mot socket
+    UDP va "connect" toi dau kia khong gui goi nao ra day, nhung buoc kernel
+    chon duong, va getsockname() tra ve dung dia chi no se dat vao goi tin.
+
+    Hoi kernel thay vi doan la khac biet giua mot con so dung va mot con so
+    trong co ve dung: nguoi ben board se doc con so nay de go vao may ho.
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect((peer_ip, 9))
+        return s.getsockname()[0]
+    except OSError:
+        return None
+    finally:
+        s.close()
 
 
 def parse_addr(text: str, default_port=CHAT_PORT):

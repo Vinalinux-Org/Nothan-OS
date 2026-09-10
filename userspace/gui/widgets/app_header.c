@@ -34,8 +34,14 @@ static lv_obj_t *icon_button(lv_obj_t *parent, const char *symbol)
 	return btn;
 }
 
-lv_obj_t *app_header_create(lv_obj_t *parent, const char *title,
-			    const char *right_symbol)
+static void on_back(lv_event_t *e)
+{
+	(void)e;
+	nav_pop();
+}
+
+static lv_obj_t *header_build(lv_obj_t *parent, const char *title,
+			      const char *right_symbol, int with_back)
 {
 	lv_obj_t *bar = lv_obj_create(parent);
 	lv_obj_remove_style_all(bar);
@@ -54,10 +60,29 @@ lv_obj_t *app_header_create(lv_obj_t *parent, const char *title,
 		lv_obj_center(lbl);
 	}
 
+	if (with_back) {
+		lv_obj_t *back = icon_button(bar, LV_SYMBOL_LEFT);
+
+		lv_obj_align(back, LV_ALIGN_LEFT_MID, 0, 0);
+		lv_obj_add_event_cb(back, on_back, LV_EVENT_CLICKED, NULL);
+	}
+
 	lv_obj_t *action = NULL;
 	if (right_symbol) {
 		action = icon_button(bar, right_symbol);
 		lv_obj_align(action, LV_ALIGN_RIGHT_MID, 0, 0);
 	}
 	return action;
+}
+
+lv_obj_t *app_header_create(lv_obj_t *parent, const char *title,
+			    const char *right_symbol)
+{
+	return header_build(parent, title, right_symbol, 0);
+}
+
+lv_obj_t *app_header_back(lv_obj_t *parent, const char *title,
+			  const char *right_symbol)
+{
+	return header_build(parent, title, right_symbol, 1);
 }

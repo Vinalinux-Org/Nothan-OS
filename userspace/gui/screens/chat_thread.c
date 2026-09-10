@@ -37,6 +37,27 @@ static int       thread_idx;
 static lv_obj_t *thread_input;
 static lv_obj_t *thread_list;
 
+
+/*
+ * The Chat app hides the system nav bar and carries its own back chevron, so
+ * every screen in it keeps the bar gone while it is up and puts it back when
+ * it goes.  Each screen owning both halves is what makes the sequence work
+ * from anywhere: a call screen opened from Home restores the bar on the way
+ * out, and one opened from a thread has it hidden again by the thread's own
+ * load event a frame later.
+ */
+static void on_chrome_show(lv_event_t *e)
+{
+	(void)e;
+	nav_show_chrome(false);
+}
+
+static void on_chrome_restore(lv_event_t *e)
+{
+	(void)e;
+	nav_show_chrome(true);
+}
+
 static void add_bubble(lv_obj_t *list, const struct chat_message *m)
 {
 	lv_obj_t *row = lv_obj_create(list);
@@ -153,7 +174,7 @@ static void on_input_blur(lv_event_t *e)
 {
 	(void)e;
 	lv_obj_set_height(thread_list,
-			  SCREEN_H - APP_HEADER_HEIGHT - NAV_BAR_HEIGHT - INPUT_H);
+			  SCREEN_H - APP_HEADER_HEIGHT - INPUT_H);
 }
 
 static lv_obj_t *build_input_bar(lv_obj_t *parent)
@@ -161,7 +182,7 @@ static lv_obj_t *build_input_bar(lv_obj_t *parent)
 	lv_obj_t *bar = lv_obj_create(parent);
 	lv_obj_remove_style_all(bar);
 	lv_obj_set_size(bar, lv_pct(100), INPUT_H);
-	lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, -NAV_BAR_HEIGHT);
+	lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, 0);
 	lv_obj_set_style_bg_color(bar, theme_color(THEME_SURFACE), 0);
 	lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
 	lv_obj_set_style_pad_hor(bar, 10, 0);
@@ -240,16 +261,33 @@ void chat_thread_create(lv_obj_t *screen, void *arg)
 	thread_idx = (int)(long)arg;
 
 	const struct chat_peer *p = chat_peer_get(thread_idx);
-	lv_obj_t *call = app_header_create(screen, p ? p->name : "Chat",
+	lv_obj_t *call = app_header_back(screen, p ? p->name : "Chat",
 					   LV_SYMBOL_VIDEO);
-	if (call)
+	if (call) {
 		lv_obj_add_event_cb(call, on_video_call, LV_EVENT_CLICKED, NULL);
 
+		/*
+		 * Filled, round, accent — a call is the one thing on this
+		 * screen that reaches another machine, and it read as
+		 * decoration next to the title while it was a bare glyph.
+		 * Restyled here rather than in app_header.c because that
+		 * button is shared with Phone and Messages, whose right-hand
+		 * actions are ordinary and should stay quiet.
+		 */
+		lv_obj_set_size(call, 44, 44);
+		lv_obj_align(call, LV_ALIGN_RIGHT_MID, -8, 0);
+		lv_obj_set_style_radius(call, LV_RADIUS_CIRCLE, 0);
+		lv_obj_set_style_bg_opa(call, LV_OPA_COVER, 0);
+		lv_obj_set_style_bg_color(call, theme_color(THEME_ACCENT), 0);
+		lv_obj_set_style_bg_grad_color(call, theme_color(THEME_ACCENT_2), 0);
+		lv_obj_set_style_bg_grad_dir(call, LV_GRAD_DIR_VER, 0);
+	}
+
 	lv_obj_t *input_bar = build_input_bar(screen);
-	gui_keyboard_set_lift(input_bar, -(int32_t)NAV_BAR_HEIGHT);
+	gui_keyboard_set_lift(input_bar, 0);
 
 	int list_top    = APP_HEADER_HEIGHT;
-	int list_bottom = NAV_BAR_HEIGHT + INPUT_H;
+	int list_bottom = INPUT_H;
 
 	thread_list = lv_obj_create(screen);
 	lv_obj_remove_style_all(thread_list);
@@ -271,6 +309,8 @@ void chat_thread_create(lv_obj_t *screen, void *arg)
 	lv_obj_set_flex_align(thread_list, LV_FLEX_ALIGN_START,
 			      LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 
+	lv_obj_add_event_cb(screen, on_chrome_show, LV_EVENT_SCREEN_LOADED, NULL);
+	lv_obj_add_event_cb(screen, on_chrome_restore, LV_EVENT_DELETE, NULL);
 	lv_obj_add_event_cb(screen, on_screen_loaded, LV_EVENT_SCREEN_LOADED, NULL);
 	lv_obj_add_event_cb(screen, on_screen_unloaded,
 			    LV_EVENT_SCREEN_UNLOAD_START, NULL);

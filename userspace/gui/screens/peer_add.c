@@ -23,6 +23,27 @@ static lv_obj_t *name_field;
 static lv_obj_t *addr_field;
 static lv_obj_t *hint;
 
+
+/*
+ * The Chat app hides the system nav bar and carries its own back chevron, so
+ * every screen in it keeps the bar gone while it is up and puts it back when
+ * it goes.  Each screen owning both halves is what makes the sequence work
+ * from anywhere: a call screen opened from Home restores the bar on the way
+ * out, and one opened from a thread has it hidden again by the thread's own
+ * load event a frame later.
+ */
+static void on_chrome_show(lv_event_t *e)
+{
+	(void)e;
+	nav_show_chrome(false);
+}
+
+static void on_chrome_restore(lv_event_t *e)
+{
+	(void)e;
+	nav_show_chrome(true);
+}
+
 static void on_deleted(lv_event_t *e)
 {
 	(void)e;
@@ -82,7 +103,7 @@ void peer_add_create(lv_obj_t *screen, void *arg)
 {
 	(void)arg;
 
-	app_header_create(screen, "New contact", NULL);
+	app_header_back(screen, "New contact", NULL);
 
 	name_field = field(screen, "Name", APP_HEADER_HEIGHT + 24);
 	addr_field = field(screen, "10.42.0.1", APP_HEADER_HEIGHT + 96);
@@ -122,5 +143,7 @@ void peer_add_create(lv_obj_t *screen, void *arg)
 	lv_obj_set_style_text_font(lbl, &lv_font_montserrat_20, 0);
 	lv_obj_center(lbl);
 
+	lv_obj_add_event_cb(screen, on_chrome_show, LV_EVENT_SCREEN_LOADED, NULL);
+	lv_obj_add_event_cb(screen, on_chrome_restore, LV_EVENT_DELETE, NULL);
 	lv_obj_add_event_cb(screen, on_deleted, LV_EVENT_DELETE, NULL);
 }

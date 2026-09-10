@@ -16,4 +16,19 @@
 lv_obj_t *app_header_create(lv_obj_t *parent, const char *title,
 			    const char *right_symbol);
 
+/*
+ * app_header_back() - the same bar with a back chevron on the left.
+ *
+ * A separate function rather than a parameter on the one above, because the
+ * screens that use that one — Phone, Messages, Contacts — navigate with the
+ * system nav bar and have never had a back control of their own.  Adding one
+ * to them would be a visible change to three apps in order to serve a fourth.
+ *
+ * The Chat app needs it because it hides the system nav bar: an app with its
+ * own tab bar along the bottom does not need a second row of buttons under it,
+ * and the moment that bar is gone, every screen has to carry its own way out.
+ */
+lv_obj_t *app_header_back(lv_obj_t *parent, const char *title,
+			  const char *right_symbol);
+
 #endif
