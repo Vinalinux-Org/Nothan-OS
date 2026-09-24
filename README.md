@@ -176,7 +176,7 @@ Nothan-OS/
 │
 ├── CLAUDE.md           Hard rules: toolchain, driver model, debug workflow
 ├── Makefile            Top-level orchestration
-├── LICENSE             MIT
+├── LICENSE             Prosperity Public License 3.0.0
 └── README.md
 ```
 
@@ -236,4 +236,4 @@ Tiêu đề nên ngắn và đủ thông tin để đọc mà không cần mở 
 
 ## License
 
-MIT — xem [LICENSE](LICENSE). Phát triển bởi **Vinalinux**.
+Prosperity Public License 3.0.0 — miễn phí cho phi thương mại, xem [LICENSE](LICENSE). Dùng thương mại cần [Commercial License](COMMERCIAL-LICENSE.md). Phát triển bởi **Vinalinux**.
