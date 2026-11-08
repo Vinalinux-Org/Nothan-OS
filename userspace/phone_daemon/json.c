@@ -30,8 +30,11 @@
 static void jbuf_append(json_builder_t *b, const char *src, size_t n)
 {
     size_t avail;
-
-    if (b == NULL || src == NULL || b->pos >= b->size - 1)
+    
+    // jbuf: reject size==0 before computing size-1 to avoid wrap-around overflow
+    if (b == NULL || src == NULL || b->pos >= b->size - 1 || b->size == 0)
+        return;
+    if (b->pos >= b->size - 1)
         return;
 
     avail = b->size - 1 - b->pos;
